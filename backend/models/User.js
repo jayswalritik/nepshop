@@ -1,0 +1,137 @@
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema(
+  {
+    // ── Core fields (all roles) ──────────────────────────
+    firstName: {
+      type: String,
+      required: [true, 'First name is required'],
+      trim: true,
+    },
+    lastName: {
+      type: String,
+      required: [true, 'Last name is required'],
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      unique: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email'],
+    },
+    phone: {
+      type: String,
+      required: [true, 'Phone number is required'],
+      trim: true,
+    },
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: [8, 'Password must be at least 8 characters'],
+      select: false, // Never return password in queries by default
+    },
+
+    // ── Role ─────────────────────────────────────────────
+    role: {
+      type: String,
+      enum: ['customer', 'seller', 'delivery', 'admin'],
+      required: true,
+      default: 'customer',
+    },
+
+    // ── Account status ───────────────────────────────────
+    // customer  → always 'active' on signup
+    // seller    → 'pending' until admin approves
+    // delivery  → 'pending' until admin approves
+    // admin     → seeded directly as 'active'
+    status: {
+      type: String,
+      enum: ['active', 'pending', 'suspended', 'rejected'],
+      default: 'pending',
+    },
+
+    // ── Seller-specific fields ───────────────────────────
+    shopName: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    panNumber: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    // ── Delivery agent-specific fields ───────────────────
+    vehicleType: {
+      type: String,
+      enum: ['Motorcycle', 'Scooter', 'Bicycle', 'Van / Car', null],
+      default: null,
+    },
+    citizenshipNumber: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    // ── Profile ──────────────────────────────────────────
+    profileImage: {
+      type: String,
+      default: null,
+    },
+
+    // ── Admin metadata ───────────────────────────────────
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // ── Password reset ───────────────────────────────────
+    resetPasswordToken: { type: String, default: null },
+    resetPasswordExpire: { type: Date, default: null },
+  },
+  {
+    timestamps: true, // adds createdAt and updatedAt
+  }
+);
+
+// ── Hash password before saving ──────────────────────────
+userSchema.pre('save', async function (next) {
+  // Only hash if password was modified
+  if (!this.isModified('password')) return next();
+  const salt = await bcrypt.genSalt(12);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// ── Instance method: compare password ────────────────────
+userSchema.methods.matchPassword = async function (enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+// ── Instance method: get public profile (no sensitive data) ──
+userSchema.methods.toPublicJSON = function () {
+  return {
+    _id: this._id,
+    firstName: this.firstName,
+    lastName: this.lastName,
+    email: this.email,
+    phone: this.phone,
+    role: this.role,
+    status: this.status,
+    shopName: this.shopName,
+    vehicleType: this.vehicleType,
+    profileImage: this.profileImage,
+    createdAt: this.createdAt,
+  };
+};
+
+module.exports = mongoose.model('User', userSchema);
