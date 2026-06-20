@@ -1,6 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { registerUser, loginUser, getMe } = require('../controllers/authController');
+const { reapplyUser } = require('../controllers/adminController');
 const { protect } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -65,5 +66,8 @@ router.post('/login', loginValidation, loginUser);
 
 // GET /api/auth/me  (protected)
 router.get('/me', protect, getMe);
+
+// PUT /api/auth/reapply
+router.put('/reapply', reapplyUser);
 
 module.exports = router;

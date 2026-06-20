@@ -9,6 +9,7 @@ const AdminDashboard = () => {
   const [allUsers, setAllUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
+  const [rejectedUsers, setRejectedUsers] = useState([]);
   const [stats, setStats] = useState({
     totalCustomers: 0,
     totalSellers: 0,
@@ -27,6 +28,7 @@ const AdminDashboard = () => {
       const users = data.users;
       setAllUsers(users);
       setPendingUsers(users.filter(u => u.status === 'pending'));
+      setRejectedUsers(users.filter(u => u.status === 'rejected'));
       setStats({
         totalCustomers:   users.filter(u => u.role === 'customer').length,
         totalSellers:     users.filter(u => u.role === 'seller').length,
@@ -63,6 +65,18 @@ const AdminDashboard = () => {
       setActionLoading(null);
     }
   };
+
+  const handleUndoReject = async (userId) => {
+  setActionLoading(userId + '_undo');
+  try {
+    await API.put(`/admin/users/${userId}/undoreject`);
+    fetchData();
+  } catch (err) {
+    console.error('Undo reject failed:', err);
+  } finally {
+    setActionLoading(null);
+  }
+};
 
   const getRoleBadge = (role) => {
     const styles = {
@@ -143,9 +157,10 @@ const AdminDashboard = () => {
         {/* Tabs */}
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-6 w-fit">
           {[
-            { key: 'pending', label: `Pending Approvals (${stats.pendingApprovals})` },
-            { key: 'all',     label: 'All Users' },
-          ].map((tab) => (
+                { key: 'pending',  label: `Pending (${stats.pendingApprovals})` },
+                { key: 'rejected', label: `Rejected (${rejectedUsers.length})` },
+                { key: 'all',      label: 'All Users' },
+            ].map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
@@ -239,6 +254,68 @@ const AdminDashboard = () => {
                   )}
                 </>
               )}
+
+              {/* Rejected tab */}
+{activeTab === 'rejected' && (
+  <>
+    {rejectedUsers.length === 0 ? (
+      <div className="text-center py-16 text-gray-400">
+        <div className="text-4xl mb-3">✅</div>
+        <p className="font-medium">No rejected accounts</p>
+      </div>
+    ) : (
+      <table className="w-full">
+        <thead className="bg-gray-50 border-b border-gray-200">
+          <tr>
+            {['Name', 'Email', 'Role', 'Details', 'Applied', 'Action'].map(h => (
+              <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {rejectedUsers.map((u) => (
+            <tr key={u._id} className="hover:bg-gray-50">
+              <td className="px-4 py-4">
+                <div className="font-medium text-gray-900 text-sm">{u.firstName} {u.lastName}</div>
+                <div className="text-gray-400 text-xs">{u.phone}</div>
+              </td>
+              <td className="px-4 py-4 text-sm text-gray-600">{u.email}</td>
+              <td className="px-4 py-4">{getRoleBadge(u.role)}</td>
+              <td className="px-4 py-4 text-sm text-gray-500">
+                {u.role === 'seller' && (
+                  <div>
+                    <div className="text-xs font-medium text-gray-700">{u.shopName}</div>
+                    <div className="text-xs text-gray-400">PAN: {u.panNumber}</div>
+                  </div>
+                )}
+                {u.role === 'delivery' && (
+                  <div>
+                    <div className="text-xs font-medium text-gray-700">{u.vehicleType}</div>
+                    <div className="text-xs text-gray-400">ID: {u.citizenshipNumber}</div>
+                  </div>
+                )}
+              </td>
+              <td className="px-4 py-4 text-xs text-gray-400">
+                {new Date(u.createdAt).toLocaleDateString('en-NP', {
+                  day: 'numeric', month: 'short', year: 'numeric'
+                })}
+              </td>
+              <td className="px-4 py-4">
+                <button
+                  onClick={() => handleUndoReject(u._id)}
+                  disabled={actionLoading === u._id + '_undo'}
+                  className="bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 text-indigo-600 text-xs font-medium px-3 py-1.5 rounded-lg transition-all"
+                >
+                  {actionLoading === u._id + '_undo' ? '...' : '↩ Move to Pending'}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )}
+  </>
+)}
 
               {/* All users tab */}
               {activeTab === 'all' && (

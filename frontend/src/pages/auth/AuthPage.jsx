@@ -277,33 +277,79 @@ const AuthPage = () => {
           </div>
 
           {/* Success screen */}
-{success && (
-  <div className="text-center py-6">
-    <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4">
+          {success && (
+  <div className="text-center py-4">
+
+    {/* Icon */}
+    <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
+      style={{ background: currentRole === 'customer' ? '#f0fdf4' : '#fff7ed' }}>
       <span className="text-3xl">
         {currentRole === 'customer' ? '✅' : '⏳'}
       </span>
     </div>
+
+    {/* Title */}
     <h3 className="text-xl font-bold text-gray-900 mb-2">
       {currentRole === 'customer' ? 'Account Created!' : 'Application Submitted!'}
     </h3>
-    <p className="text-gray-500 text-sm mb-4">{success}</p>
 
-    {/* Pending badge for seller/delivery */}
-    {(currentRole === 'seller' || currentRole === 'delivery') && (
-      <div className="inline-flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-full px-4 py-2 text-sm text-orange-700 mb-4">
-        <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
-        Pending admin approval
-      </div>
-    )}
-
-    {/* Customer — go to login */}
+    {/* Customer flow */}
     {currentRole === 'customer' && (
-      <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-indigo-700 mb-5">
-        Please sign in with your email and password to continue.
-      </div>
+      <>
+        <p className="text-gray-500 text-sm mb-4">{success}</p>
+        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-indigo-700 mb-5 text-left">
+          ✔ Your account is ready. Please sign in with your email and password to start shopping.
+        </div>
+      </>
     )}
 
+    {/* Seller / Delivery flow */}
+    {(currentRole === 'seller' || currentRole === 'delivery') && (
+      <>
+        {/* Pending badge */}
+        <div className="inline-flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-full px-4 py-2 text-sm text-orange-700 mb-4">
+          <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+          Pending admin approval
+        </div>
+
+        {/* Office visit instruction */}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-4 text-left mb-4">
+          <p className="text-amber-800 font-semibold text-sm mb-2">
+            📋 Next step — Visit NepShop Office
+          </p>
+          <p className="text-amber-700 text-sm mb-3">
+            To complete your verification, please visit our office with the following documents:
+          </p>
+          {currentRole === 'seller' && (
+            <ul className="text-amber-700 text-sm space-y-1">
+              <li>• Citizenship card (original + photocopy)</li>
+              <li>• PAN registration certificate</li>
+              <li>• Business registration document</li>
+              <li>• Recent passport-size photo</li>
+            </ul>
+          )}
+          {currentRole === 'delivery' && (
+            <ul className="text-amber-700 text-sm space-y-1">
+              <li>• Citizenship card (original + photocopy)</li>
+              <li>• Driving license</li>
+              <li>• Vehicle registration document (bluebook)</li>
+              <li>• Recent passport-size photo</li>
+            </ul>
+          )}
+          <div className="mt-3 pt-3 border-t border-amber-200">
+            <p className="text-amber-800 text-xs font-medium">📍 NepShop Office</p>
+            <p className="text-amber-700 text-xs">Kathmandu, Bagmati Province, Nepal</p>
+            <p className="text-amber-700 text-xs">Office hours: Sun – Fri, 10:00 AM – 5:00 PM</p>
+          </div>
+        </div>
+
+        <p className="text-gray-400 text-xs mb-4">
+          You will receive an email notification once your account is approved.
+        </p>
+      </>
+    )}
+
+    {/* CTA button */}
     <button
       onClick={() => {
         setSuccess(null);
@@ -311,7 +357,7 @@ const AuthPage = () => {
       }}
       className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition-all text-sm"
     >
-      Go to Sign in
+      {currentRole === 'customer' ? 'Go to Sign in' : 'Back to Sign in'}
     </button>
   </div>
 )}
