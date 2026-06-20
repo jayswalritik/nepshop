@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { CartProvider } from './context/CartContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
 import AuthPage from './pages/auth/AuthPage';
@@ -13,7 +14,8 @@ import AdminLoginPage from './pages/auth/AdminLoginPage';
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <CartProvider>
+        <BrowserRouter>
         <Routes>
           {/* Public */}
           <Route path="/login" element={<AuthPage />} />
@@ -53,6 +55,7 @@ function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
+      </CartProvider>
     </AuthProvider>
   );
 }

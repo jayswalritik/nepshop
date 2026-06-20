@@ -14,18 +14,33 @@ const { upload } = require('../config/cloudinary');
 const router = express.Router();
 
 // ── Public routes ─────────────────────────────────────────
-router.get('/',    getAllProducts);   // Browse all products
-router.get('/:id', getProductById);  // Single product
+router.get('/',     getAllProducts);
+router.get('/:id',  getProductById);
 
 // ── Seller only routes ────────────────────────────────────
-router.use(protect);
-router.use(authorizeRoles('seller'));
-router.use(requireActive);
+router.get('/seller/myproducts',
+  protect, authorizeRoles('seller'), requireActive,
+  getSellerProducts
+);
 
-router.get('/seller/myproducts', getSellerProducts);           // Own products
-router.post('/', upload.array('images', 5), createProduct);    // Add product (max 5 images)
-router.put('/:id', upload.array('images', 5), updateProduct);  // Edit product
-router.delete('/:id', deleteProduct);                          // Delete product
-router.put('/:id/toggle', toggleProductStatus);                // Toggle active
+router.post('/',
+  protect, authorizeRoles('seller'), requireActive,
+  upload.array('images', 5), createProduct
+);
+
+router.put('/:id/toggle',
+  protect, authorizeRoles('seller'), requireActive,
+  toggleProductStatus
+);
+
+router.put('/:id',
+  protect, authorizeRoles('seller'), requireActive,
+  upload.array('images', 5), updateProduct
+);
+
+router.delete('/:id',
+  protect, authorizeRoles('seller'), requireActive,
+  deleteProduct
+);
 
 module.exports = router;

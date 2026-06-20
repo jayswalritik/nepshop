@@ -25,6 +25,10 @@ const AuthPage = () => {
     confirmPassword: '',
     shopName: '',
     panNumber: '',
+    shopStreet: '',
+    shopCity: '',
+    shopDistrict: '',
+    shopPhone: '',
     vehicleType: '',
     citizenshipNumber: '',
   });
@@ -44,8 +48,12 @@ const AuthPage = () => {
       if (!formData.lastName.trim())  newErrors.lastName  = 'Last name is required';
       if (!formData.phone.trim())     newErrors.phone     = 'Phone number is required';
       if (currentRole === 'seller') {
-        if (!formData.shopName.trim())  newErrors.shopName  = 'Shop name is required';
-        if (!formData.panNumber.trim()) newErrors.panNumber = 'PAN number is required';
+        if (!formData.shopName.trim())    newErrors.shopName    = 'Shop name is required';
+        if (!formData.panNumber.trim())   newErrors.panNumber   = 'PAN number is required';
+        if (!formData.shopStreet.trim())  newErrors.shopStreet  = 'Shop street address is required';
+        if (!formData.shopCity.trim())    newErrors.shopCity    = 'City is required';
+        if (!formData.shopDistrict)       newErrors.shopDistrict = 'District is required';
+        if (!formData.shopPhone.trim())   newErrors.shopPhone   = 'Shop contact number is required';
       }
       if (currentRole === 'delivery') {
         if (!formData.vehicleType)           newErrors.vehicleType        = 'Vehicle type is required';
@@ -113,6 +121,12 @@ const AuthPage = () => {
         ...(currentRole === 'seller' && {
           shopName:  formData.shopName,
           panNumber: formData.panNumber,
+          shopAddress: {
+            street:   formData.shopStreet,
+            city:     formData.shopCity,
+            district: formData.shopDistrict,
+            phone:    formData.shopPhone,
+          },
         }),
         ...(currentRole === 'delivery' && {
           vehicleType:       formData.vehicleType,
@@ -147,6 +161,10 @@ const AuthPage = () => {
       confirmPassword: '',
       shopName: '',
       panNumber: '',
+      shopStreet: '',
+      shopCity: '',
+      shopDistrict: '',
+      shopPhone: '',
       vehicleType: '',
       citizenshipNumber: '',
     });
@@ -166,6 +184,10 @@ const AuthPage = () => {
       confirmPassword: '',
       shopName: '',
       panNumber: '',
+      shopStreet: '',
+      shopCity: '',
+      shopDistrict: '',
+      shopPhone: '',
       vehicleType: '',
       citizenshipNumber: '',
     });
@@ -437,34 +459,89 @@ const AuthPage = () => {
                   </div>
 
                   {/* Seller fields */}
-                  {currentRole === 'seller' && (
-                    <>
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Shop / business name</label>
-                        <input
-                          name="shopName"
-                          value={formData.shopName}
-                          onChange={handleChange}
-                          placeholder="My Nepal Store"
-                          className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                            ${errors.shopName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-                        />
-                        {errors.shopName && <p className="text-red-500 text-xs mt-1">{errors.shopName}</p>}
-                      </div>
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">PAN / registration number</label>
-                        <input
-                          name="panNumber"
-                          value={formData.panNumber}
-                          onChange={handleChange}
-                          placeholder="PAN or Reg. no."
-                          className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                            ${errors.panNumber ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-                        />
-                        {errors.panNumber && <p className="text-red-500 text-xs mt-1">{errors.panNumber}</p>}
-                      </div>
-                    </>
-                  )}
+{currentRole === 'seller' && (
+  <>
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">Shop / business name</label>
+      <input
+        name="shopName"
+        value={formData.shopName}
+        onChange={handleChange}
+        placeholder="My Nepal Store"
+        className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+          ${errors.shopName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+      />
+      {errors.shopName && <p className="text-red-500 text-xs mt-1">{errors.shopName}</p>}
+    </div>
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">PAN / registration number</label>
+      <input
+        name="panNumber"
+        value={formData.panNumber}
+        onChange={handleChange}
+        placeholder="PAN or Reg. no."
+        className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+          ${errors.panNumber ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+      />
+      {errors.panNumber && <p className="text-red-500 text-xs mt-1">{errors.panNumber}</p>}
+    </div>
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">Shop street address</label>
+      <input
+        name="shopStreet"
+        value={formData.shopStreet}
+        onChange={handleChange}
+        placeholder="e.g. New Road, Shop no. 5"
+        className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+          ${errors.shopStreet ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+      />
+      {errors.shopStreet && <p className="text-red-500 text-xs mt-1">{errors.shopStreet}</p>}
+    </div>
+    <div className="grid grid-cols-2 gap-3 mb-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+        <input
+          name="shopCity"
+          value={formData.shopCity}
+          onChange={handleChange}
+          placeholder="e.g. Kathmandu"
+          className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+            ${errors.shopCity ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+        />
+        {errors.shopCity && <p className="text-red-500 text-xs mt-1">{errors.shopCity}</p>}
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
+        <select
+          name="shopDistrict"
+          value={formData.shopDistrict}
+          onChange={handleChange}
+          className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all bg-white
+            ${errors.shopDistrict ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500'}`}
+        >
+          <option value="">Select</option>
+          {['Kathmandu','Lalitpur','Bhaktapur','Pokhara','Chitwan',
+            'Butwal','Birgunj','Biratnagar','Dharan','Hetauda','Other'].map(d => (
+            <option key={d}>{d}</option>
+          ))}
+        </select>
+        {errors.shopDistrict && <p className="text-red-500 text-xs mt-1">{errors.shopDistrict}</p>}
+      </div>
+    </div>
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1">Shop contact number</label>
+      <input
+        name="shopPhone"
+        value={formData.shopPhone}
+        onChange={handleChange}
+        placeholder="Shop phone for delivery agent"
+        className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+          ${errors.shopPhone ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+      />
+      {errors.shopPhone && <p className="text-red-500 text-xs mt-1">{errors.shopPhone}</p>}
+    </div>
+  </>
+)}
 
                   {/* Delivery fields */}
                   {currentRole === 'delivery' && (

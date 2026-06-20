@@ -39,6 +39,9 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
+app.use('/api/cart', require('./routes/cartRoutes'));
+app.use('/api/orders', require('./routes/orderRoutes'));
+app.use('/api/delivery', require('./routes/deliveryRoutes'));
 
 // Future routes (we'll add these in later steps):
 // app.use('/api/products',  require('./routes/productRoutes'));

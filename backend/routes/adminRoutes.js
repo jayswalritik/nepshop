@@ -1,3 +1,5 @@
+const asyncHandler = require('express-async-handler');
+const User = require('../models/User');
 const express = require('express');
 const {
   getAllUsers,
@@ -9,7 +11,21 @@ const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-// All admin routes are protected and admin-only
+// ── Shared route — sellers and admins ─────────────────────
+// Must be defined BEFORE the admin-only middleware below
+router.get(
+  '/delivery-agents',
+  protect,
+  authorizeRoles('seller', 'admin'),
+  asyncHandler(async (req, res) => {
+    const agents = await User.find({ role: 'delivery', status: 'active' })
+      .select('firstName lastName phone vehicleType');
+    res.status(200).json({ success: true, agents });
+  })
+);
+
+// ── Admin only routes ─────────────────────────────────────
+// Everything below this line requires admin role
 router.use(protect);
 router.use(authorizeRoles('admin'));
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import ProductList from './ProductList';
 import AddProduct from './AddProduct';
+import SellerOrdersPage from './OrdersPage';
 
 const SellerDashboard = () => {
   const { user, logout } = useAuth();
@@ -118,9 +119,7 @@ const SellerDashboard = () => {
         {activeTab === 'products' && showAddProduct && (
           <AddProduct onSuccess={() => setShowAddProduct(false)} />
         )}
-        {activeTab === 'orders' && (
-          <ComingSoon title="Orders" desc="Customer orders will appear here. Coming in the next step." />
-        )}
+        {activeTab === 'orders' && <SellerOrdersPage />}
         {activeTab === 'earnings' && (
           <ComingSoon title="Earnings" desc="Your sales reports and earnings will appear here." />
         )}

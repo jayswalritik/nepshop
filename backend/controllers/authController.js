@@ -26,6 +26,7 @@ const registerUser = asyncHandler(async (req, res) => {
     // Seller
     shopName,
     panNumber,
+    shopAddress,
     // Delivery
     vehicleType,
     citizenshipNumber,
@@ -73,8 +74,9 @@ const registerUser = asyncHandler(async (req, res) => {
     role,
     status,
     // Seller fields
-    shopName: role === 'seller' ? shopName : null,
-    panNumber: role === 'seller' ? panNumber : null,
+    shopName:    role === 'seller' ? shopName    : null,
+    panNumber:   role === 'seller' ? panNumber   : null,
+    shopAddress: role === 'seller' ? shopAddress : null,
     // Delivery fields
     vehicleType: role === 'delivery' ? vehicleType : null,
     citizenshipNumber: role === 'delivery' ? citizenshipNumber : null,

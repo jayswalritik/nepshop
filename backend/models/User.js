@@ -65,6 +65,14 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
+    // ── Seller shop address ───────────────────────────────────
+shopAddress: {
+  street:   { type: String, default: null },
+  city:     { type: String, default: null },
+  district: { type: String, default: null },
+  phone:    { type: String, default: null },
+},
+
     // ── Delivery agent-specific fields ───────────────────
     vehicleType: {
       type: String,
