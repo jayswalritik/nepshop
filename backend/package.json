@@ -20,6 +20,7 @@
     "mongodb": "^7.3.0",
     "mongoose": "^7.3.1",
     "multer": "^2.2.0",
+    "nodemailer": "^9.0.1",
     "streamifier": "^0.1.1"
   },
   "devDependencies": {

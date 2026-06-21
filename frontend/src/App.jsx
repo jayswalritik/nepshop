@@ -10,6 +10,8 @@ import SellerDashboard from './pages/seller/Dashboard';
 import DeliveryDashboard from './pages/delivery/Dashboard';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminLoginPage from './pages/auth/AdminLoginPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 
 function App() {
   return (
@@ -21,6 +23,8 @@ function App() {
           <Route path="/login" element={<AuthPage />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
           <Route path="/admin/login" element={<AdminLoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password/:token" element={<ResetPasswordPage />} />   
 
           {/* Protected — Customer */}
           <Route path="/customer/dashboard" element={

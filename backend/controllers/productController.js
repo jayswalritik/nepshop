@@ -1,6 +1,9 @@
+
 const asyncHandler = require('express-async-handler');
 const Product = require('../models/Product');
 const { cloudinary, uploadToCloudinary } = require('../config/cloudinary');
+const { sendLowStockEmail } = require('../utils/emailService');
+const User = require('../models/User');
 // ─────────────────────────────────────────────────────────
 // @desc    Create a new product
 // @route   POST /api/products
@@ -196,6 +199,12 @@ if (req.files && req.files.length > 0) {
   product.images       = images;
 
   const updated = await product.save();
+
+  // Low stock alert — send email if stock drops to 5 or below
+  if (updated.stock <= 5 && updated.stock > 0) {
+    const seller = await User.findById(req.user._id);
+    if (seller) sendLowStockEmail(seller, updated);
+  }
 
   res.status(200).json({
     success: true,

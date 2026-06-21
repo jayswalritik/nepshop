@@ -83,9 +83,19 @@ const registerUser = asyncHandler(async (req, res) => {
   });
 
   // 7. Build response
+  const {
+    sendWelcomeEmail,
+    sendSellerApplicationEmail,
+    sendDeliveryApplicationEmail,
+    sendNewApplicationToAdmin,
+  } = require('../utils/emailService');
+
   if (role === 'customer') {
-    // Customer: issue token immediately — they can shop right away
     const token = generateToken(user._id, user.role);
+
+    // Send welcome email
+    sendWelcomeEmail(user);
+
     return res.status(201).json({
       success: true,
       message: 'Account created successfully. Welcome to NepShop!',
@@ -93,7 +103,17 @@ const registerUser = asyncHandler(async (req, res) => {
       user: user.toPublicJSON(),
     });
   } else {
-    // Seller / Delivery: no token yet — pending approval
+    // Send application confirmation email
+    if (role === 'seller') {
+      sendSellerApplicationEmail(user);
+    } else if (role === 'delivery') {
+      sendDeliveryApplicationEmail(user);
+    }
+
+    // Notify admin
+    const admin = await User.findOne({ role: 'admin' });
+    if (admin) sendNewApplicationToAdmin(admin.email, user);
+
     return res.status(201).json({
       success: true,
       message: `Your ${role} account has been submitted for review. You will be notified by email once an admin approves your account.`,
@@ -257,10 +277,95 @@ const updateCustomerProfile = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Forgot password — send reset email
+// @route   POST /api/auth/forgot-password
+// @access  Public
+// ─────────────────────────────────────────────────────────
+const forgotPassword = asyncHandler(async (req, res) => {
+  const { email, role } = req.body;
+
+  if (!email) {
+    res.status(400);
+    throw new Error('Email is required');
+  }
+
+  // Find user by email and role
+  const query = role ? { email, role } : { email };
+  const user  = await User.findOne(query);
+
+  if (!user) {
+    // Don't reveal if email exists or not — security best practice
+    return res.status(200).json({
+      success: true,
+      message: 'If an account with that email exists, a reset link has been sent.',
+    });
+  }
+
+  // Generate reset token
+  const resetToken = user.generateResetToken();
+  await user.save({ validateBeforeSave: false });
+
+  // Build reset URL
+  const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
+
+  // Send email
+  const { sendPasswordResetEmail } = require('../utils/emailService');
+  await sendPasswordResetEmail(user, resetUrl);
+
+  res.status(200).json({
+    success: true,
+    message: 'If an account with that email exists, a reset link has been sent.',
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Reset password using token
+// @route   PUT /api/auth/reset-password/:token
+// @access  Public
+// ─────────────────────────────────────────────────────────
+const resetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  const { token }    = req.params;
+
+  if (!password || password.length < 8) {
+    res.status(400);
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  // Hash token to compare with stored
+  const crypto = require('crypto');
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+  // Find user with valid token
+  const user = await User.findOne({
+    resetPasswordToken:  hashedToken,
+    resetPasswordExpire: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    res.status(400);
+    throw new Error('Reset link is invalid or has expired. Please request a new one.');
+  }
+
+  // Set new password
+  user.password           = password;
+  user.resetPasswordToken  = null;
+  user.resetPasswordExpire = null;
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Password reset successfully. You can now sign in with your new password.',
+  });
+});
+
 module.exports = {
   registerUser,
   loginUser,
   getMe,
   updateSellerSettings,
   updateCustomerProfile,
+  forgotPassword,
+  resetPassword,
 };

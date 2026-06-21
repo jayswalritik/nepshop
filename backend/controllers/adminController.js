@@ -1,6 +1,11 @@
 const asyncHandler = require('express-async-handler');
 const User = require('../models/User');
 
+const {
+  sendAccountApprovedEmail,
+  sendAccountRejectedEmail,
+} = require('../utils/emailService');
+
 // @desc  Get all users
 // @route GET /api/admin/users
 // @access Admin only
@@ -22,6 +27,8 @@ const approveUser = asyncHandler(async (req, res) => {
   user.approvedBy = req.user._id;
   user.approvedAt = new Date();
   await user.save();
+  // Send approval email
+  sendAccountApprovedEmail(user);
   res.status(200).json({
     success: true,
     message: `${user.firstName}'s account has been approved`,
@@ -40,6 +47,8 @@ const rejectUser = asyncHandler(async (req, res) => {
   }
   user.status = 'rejected';
   await user.save();
+  // Send rejection email
+  sendAccountRejectedEmail(user);
   res.status(200).json({
     success: true,
     message: `${user.firstName}'s account has been rejected`,

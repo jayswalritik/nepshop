@@ -630,7 +630,10 @@ const AuthPage = () => {
               {/* Forgot password */}
               {currentMode === 'login' && (
                 <div className="text-right mb-4 -mt-2">
-                  <button className="text-indigo-600 text-xs font-medium hover:underline">
+                  <button
+                    onClick={() => navigate('/forgot-password')}
+                    className="text-indigo-600 text-xs font-medium hover:underline"
+                  >
                     Forgot password?
                   </button>
                 </div>

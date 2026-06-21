@@ -1,5 +1,10 @@
 const asyncHandler = require('express-async-handler');
 const Order = require('../models/Order');
+const User  = require('../models/User');
+const {
+  sendOrderStatusEmail,
+  sendOrderDeliveredToSeller,
+} = require('../utils/emailService');
 
 // @desc  Get all orders assigned to delivery agent
 // @route GET /api/delivery/orders
@@ -7,7 +12,7 @@ const Order = require('../models/Order');
 const getDeliveryOrders = asyncHandler(async (req, res) => {
   const orders = await Order.find({ deliveryAgent: req.user._id })
     .sort({ createdAt: -1 })
-    .populate('customer', 'firstName lastName phone');
+    .populate('customer', 'firstName lastName phone email');
 
   res.status(200).json({ success: true, orders });
 });
@@ -36,6 +41,17 @@ const markDelivered = asyncHandler(async (req, res) => {
   order.status      = 'delivered';
   order.deliveredAt = new Date();
   await order.save();
+
+  // Send delivered email to customer
+  const customer = await User.findById(order.customer);
+  if (customer) sendOrderStatusEmail(customer, order, 'delivered');
+
+  // Send delivered email to seller
+  const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+  for (const sellerId of sellerIds) {
+    const seller = await User.findById(sellerId);
+    if (seller) sendOrderDeliveredToSeller(seller, order);
+  }
 
   res.status(200).json({
     success: true,

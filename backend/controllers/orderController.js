@@ -3,6 +3,16 @@ const Order = require('../models/Order');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 
+const {
+  sendOrderPlacedEmail,
+  sendOrderStatusEmail,
+  sendNewOrderToSeller,
+  sendOrderCancelledToSeller,
+  sendDeliveryAssignedEmail,
+  sendLowStockEmail,
+} = require('../utils/emailService');
+const User = require('../models/User');
+
 // ─────────────────────────────────────────────────────────
 // @desc    Place a new order from cart
 // @route   POST /api/orders
@@ -71,15 +81,34 @@ const placeOrder = asyncHandler(async (req, res) => {
   });
 
   // Deduct stock for each product
-  for (const item of cart.items) {
-    await Product.findByIdAndUpdate(item.product._id, {
-      $inc: { stock: -item.quantity },
-    });
+  // Deduct stock and check for low stock
+for (const item of cart.items) {
+  const updatedProduct = await Product.findByIdAndUpdate(
+    item.product._id,
+    { $inc: { stock: -item.quantity } },
+    { new: true }
+  );
+  // Send low stock alert if stock drops to 5 or below
+  if (updatedProduct && updatedProduct.stock <= 5 && updatedProduct.stock >= 0) {
+    const seller = await User.findById(updatedProduct.seller);
+    if (seller) sendLowStockEmail(seller, updatedProduct);
   }
+}
 
   // Clear the cart
   cart.items = [];
   await cart.save();
+
+  // Send emails
+  const customer = await User.findById(req.user._id);
+  sendOrderPlacedEmail(customer, order);
+
+  // Notify each unique seller
+  const sellerIds = [...new Set(orderItems.map(i => i.seller.toString()))];
+  for (const sellerId of sellerIds) {
+    const seller = await User.findById(sellerId);
+    if (seller) sendNewOrderToSeller(seller, order);
+  }
 
   res.status(201).json({
     success: true,
@@ -176,6 +205,17 @@ const cancelOrder = asyncHandler(async (req, res) => {
   order.status      = 'cancelled';
   order.cancelledAt = new Date();
   await order.save();
+
+  // Send emails
+  const customer = await User.findById(req.user._id);
+  sendOrderStatusEmail(customer, order, 'cancelled');
+
+  // Notify seller
+  const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+  for (const sellerId of sellerIds) {
+    const seller = await User.findById(sellerId);
+    if (seller) sendOrderCancelledToSeller(seller, order);
+  }
 
   res.status(200).json({
     success: true,
@@ -284,6 +324,16 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
 
   await order.save();
 
+  // Send status email to customer
+  const customer = await User.findById(order.customer);
+  if (customer) sendOrderStatusEmail(customer, order, status);
+
+  // Send delivery assignment email
+  if (status === 'dispatched' && deliveryAgentId) {
+    const agent = await User.findById(deliveryAgentId);
+    if (agent) sendDeliveryAssignedEmail(agent, order);
+  }
+
   res.status(200).json({
     success: true,
     message: `Order status updated to "${status}"`,
@@ -299,3 +349,4 @@ module.exports = {
   getSellerOrders,
   updateOrderStatus,
 };
+

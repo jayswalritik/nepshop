@@ -6,6 +6,8 @@ const {
   getMe,
   updateSellerSettings,
   updateCustomerProfile,
+  forgotPassword,
+  resetPassword,
 } = require('../controllers/authController');
 const { reapplyUser } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
@@ -28,9 +30,9 @@ const registerValidation = [
 
   body('email')
     .trim()
+    .toLowerCase()
     .notEmpty().withMessage('Email is required')
-    .isEmail().withMessage('Please enter a valid email address')
-    .normalizeEmail(),
+    .isEmail().withMessage('Please enter a valid email address'),
 
   body('phone')
     .trim()
@@ -51,9 +53,9 @@ const registerValidation = [
 const loginValidation = [
   body('email')
     .trim()
+    .toLowerCase()
     .notEmpty().withMessage('Email is required')
-    .isEmail().withMessage('Please enter a valid email address')
-    .normalizeEmail(),
+    .isEmail().withMessage('Please enter a valid email address'),
 
   body('password')
     .notEmpty().withMessage('Password is required'),
@@ -82,5 +84,11 @@ router.put('/seller/settings', protect, authorizeRoles('seller'), updateSellerSe
 
 // PUT /api/auth/customer/profile
 router.put('/customer/profile', protect, authorizeRoles('customer'), updateCustomerProfile);
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', forgotPassword);
+
+// PUT /api/auth/reset-password/:token
+router.put('/reset-password/:token', resetPassword);
 
 module.exports = router;

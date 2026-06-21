@@ -125,6 +125,18 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
+// ── Generate password reset token ─────────────────────────
+userSchema.methods.generateResetToken = function () {
+  const crypto = require('crypto');
+  const resetToken = crypto.randomBytes(32).toString('hex');
+
+  // Hash and store
+  this.resetPasswordToken  = crypto.createHash('sha256').update(resetToken).digest('hex');
+  this.resetPasswordExpire = Date.now() + 15 * 60 * 1000; // 15 minutes
+
+  return resetToken; // Return unhashed token for email
+};
+
 // ── Instance method: get public profile (no sensitive data) ──
 userSchema.methods.toPublicJSON = function () {
   return {
