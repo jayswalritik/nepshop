@@ -4,6 +4,7 @@ import { useCart } from '../../context/CartContext';
 import ProductsPage from './ProductsPage';
 import CartPage from './CartPage';
 import OrdersPage from './OrdersPage';
+import ProfilePage from './ProfilePage';
 
 const CustomerDashboard = () => {
   const { user, logout } = useAuth();
@@ -96,7 +97,7 @@ const CustomerDashboard = () => {
         {activeTab === 'cart'    && <CartPage onCheckoutSuccess={() => setActiveTab('orders')} />}
         {activeTab === 'orders'  && <OrdersPage />}
         {activeTab === 'wishlist' && <ComingSoon title="Wishlist" desc="Save products for later — coming soon." />}
-        {activeTab === 'profile'  && <ComingSoon title="Profile" desc="Edit your profile and addresses — coming soon." />}
+        {activeTab === 'profile' && <ProfilePage />}
       </div>
     </div>
   );

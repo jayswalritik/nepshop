@@ -178,4 +178,89 @@ const getMe = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { registerUser, loginUser, getMe };
+// ─────────────────────────────────────────────────────────
+// @desc    Update seller shop settings
+// @route   PUT /api/auth/seller/settings
+// @access  Seller only
+// ─────────────────────────────────────────────────────────
+const updateSellerSettings = asyncHandler(async (req, res) => {
+  const {
+    shopName,
+    shopAddress,
+    phone,
+    firstName,
+    lastName,
+  } = req.body;
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.role !== 'seller') {
+    res.status(403);
+    throw new Error('Only sellers can update shop settings');
+  }
+
+  // Update fields if provided
+  if (firstName)   user.firstName = firstName;
+  if (lastName)    user.lastName  = lastName;
+  if (phone)       user.phone     = phone;
+  if (shopName)    user.shopName  = shopName;
+  if (shopAddress) user.shopAddress = {
+    street:   shopAddress.street   || user.shopAddress?.street,
+    city:     shopAddress.city     || user.shopAddress?.city,
+    district: shopAddress.district || user.shopAddress?.district,
+    phone:    shopAddress.phone    || user.shopAddress?.phone,
+  };
+
+  const updated = await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Settings updated successfully',
+    user: updated.toPublicJSON(),
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Update customer profile
+// @route   PUT /api/auth/customer/profile
+// @access  Customer only
+// ─────────────────────────────────────────────────────────
+const updateCustomerProfile = asyncHandler(async (req, res) => {
+  const { firstName, lastName, phone } = req.body;
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.role !== 'customer') {
+    res.status(403);
+    throw new Error('Only customers can update their profile here');
+  }
+
+  if (firstName) user.firstName = firstName;
+  if (lastName)  user.lastName  = lastName;
+  if (phone)     user.phone     = phone;
+
+  const updated = await user.save();
+
+  // Update localStorage data on frontend by returning new user
+  res.status(200).json({
+    success: true,
+    message: 'Profile updated successfully',
+    user: updated.toPublicJSON(),
+  });
+});
+
+module.exports = {
+  registerUser,
+  loginUser,
+  getMe,
+  updateSellerSettings,
+  updateCustomerProfile,
+};

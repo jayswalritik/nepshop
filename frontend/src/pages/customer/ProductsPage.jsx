@@ -391,6 +391,9 @@ const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart }) => {
                 </div>
               )}
 
+              {/* Reviews section */}
+                <ReviewsSection productId={product._id} />
+
               {/* Actions */}
               <div className="flex gap-3">
                 <button
@@ -410,6 +413,67 @@ const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart }) => {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Reviews Section ───────────────────────────────────────
+const ReviewsSection = ({ productId }) => {
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchReviews = async () => {
+      try {
+        const { data } = await API.get(`/reviews/${productId}`);
+        setReviews(data.reviews);
+      } catch (err) {
+        console.error('Failed to fetch reviews:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReviews();
+  }, [productId]);
+
+  if (loading) return (
+    <div className="py-4 text-center">
+      <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+    </div>
+  );
+
+  if (reviews.length === 0) return (
+    <div className="py-3 border-t border-gray-100 mt-3">
+      <p className="text-xs text-gray-400 text-center">No reviews yet — be the first to review!</p>
+    </div>
+  );
+
+  const avgRating = (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1);
+
+  return (
+    <div className="border-t border-gray-100 mt-4 pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-yellow-400 text-lg">★</span>
+        <span className="font-bold text-gray-900">{avgRating}</span>
+        <span className="text-sm text-gray-400">({reviews.length} reviews)</span>
+      </div>
+      <div className="space-y-3 max-h-40 overflow-y-auto">
+        {reviews.map((review) => (
+          <div key={review._id} className="bg-gray-50 rounded-lg p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-gray-700">
+                {review.customer?.firstName} {review.customer?.lastName}
+              </span>
+              <div className="flex">
+                {[1,2,3,4,5].map(s => (
+                  <span key={s} className={`text-xs ${s <= review.rating ? 'text-yellow-400' : 'text-gray-200'}`}>★</span>
+                ))}
+              </div>
+            </div>
+            <p className="text-xs text-gray-600">{review.comment}</p>
+          </div>
+        ))}
       </div>
     </div>
   );

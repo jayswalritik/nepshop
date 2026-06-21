@@ -19,6 +19,10 @@ const OrdersPage = () => {
   const [filter, setFilter]   = useState('');
   const [selected, setSelected] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [reviewItem, setReviewItem]   = useState(null);
+  const [reviewOrderId, setReviewOrderId] = useState(null);
+  const [reviewSuccess, setReviewSuccess] = useState(null);
+  
 
   useEffect(() => {
     fetchOrders();
@@ -168,24 +172,35 @@ const OrdersPage = () => {
                     <span className="text-xs text-gray-400">Total: </span>
                     <span className="text-base font-bold text-gray-900">Rs {order.total.toLocaleString()}</span>
                     <span className="text-xs text-gray-400 ml-2">({order.paymentMethod.replace('_', ' ')})</span>
-                  </div>
-                  <div className="flex gap-2">
+                </div>
+                <div className="flex gap-2 flex-wrap">
                     <button
-                      onClick={() => setSelected(order)}
-                      className="text-xs text-indigo-600 hover:text-indigo-700 font-medium px-3 py-1.5 border border-indigo-200 rounded-lg hover:border-indigo-300 transition-all"
+                        onClick={() => setSelected(order)}
+                        className="text-xs text-indigo-600 hover:text-indigo-700 font-medium px-3 py-1.5 border border-indigo-200 rounded-lg hover:border-indigo-300 transition-all"
                     >
-                      View Details
+                        View Details
                     </button>
                     {['pending', 'confirmed'].includes(order.status) && (
-                      <button
-                        onClick={() => handleCancel(order._id)}
-                        disabled={cancelling === order._id}
-                        className="text-xs text-red-500 hover:text-red-700 font-medium px-3 py-1.5 border border-red-200 rounded-lg hover:border-red-300 transition-all disabled:opacity-50"
-                      >
-                        {cancelling === order._id ? 'Cancelling...' : 'Cancel'}
-                      </button>
+                        <button
+                            onClick={() => handleCancel(order._id)}
+                            disabled={cancelling === order._id}
+                            className="text-xs text-red-500 hover:text-red-700 font-medium px-3 py-1.5 border border-red-200 rounded-lg hover:border-red-300 transition-all disabled:opacity-50"
+                        >
+                            {cancelling === order._id ? 'Cancelling...' : 'Cancel'}
+                        </button>
                     )}
-                  </div>
+                    {order.status === 'delivered' && (
+                        <button
+                            onClick={() => {
+                                setReviewItem(order.items[0]);
+                                setReviewOrderId(order._id);
+                            }}
+                            className="text-xs text-yellow-600 hover:text-yellow-700 font-medium px-3 py-1.5 border border-yellow-200 rounded-lg hover:border-yellow-300 transition-all"
+                        >
+                            ⭐ Review
+                        </button>
+                    )}
+                </div>
                 </div>
               </div>
             </div>
@@ -251,6 +266,156 @@ const OrdersPage = () => {
           </div>
         </div>
       )}
+      {/* Review modal */}
+      {reviewItem && (
+        <ReviewModal
+          item={reviewItem}
+          orderId={reviewOrderId}
+          onClose={() => {
+            setReviewItem(null);
+            setReviewOrderId(null);
+          }}
+          onSuccess={() => {
+            setReviewItem(null);
+            setReviewOrderId(null);
+
+            setReviewSuccess('Review submitted successfully! Thank you.');
+
+            setTimeout(() => {
+              setReviewSuccess(null);
+            }, 4000);
+          }}
+        />
+      )}
+
+      {/* Review success toast */}
+      {reviewSuccess && (
+        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2">
+          <span>⭐</span>
+          {reviewSuccess}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Review Modal ──────────────────────────────────────────
+const ReviewModal = ({ item, orderId, onClose, onSuccess }) => {
+  const [rating,  setRating]  = useState(0);
+  const [hover,   setHover]   = useState(0);
+  const [comment, setComment] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState('');
+
+  const handleSubmit = async () => {
+    if (!rating) { setError('Please select a rating'); return; }
+    if (!comment.trim()) { setError('Please write a comment'); return; }
+
+    setLoading(true);
+    setError('');
+    try {
+      await API.post('/reviews', {
+        productId: item.product,
+        orderId,
+        rating,
+        comment,
+      });
+      onSuccess();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to submit review');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl">
+
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-bold text-gray-900">Write a Review</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        {/* Product info */}
+        <div className="flex gap-3 mb-5 bg-gray-50 rounded-xl p-3">
+          <img
+            src={item.image}
+            alt={item.name}
+            className="w-14 h-14 object-cover rounded-lg border border-gray-100"
+          />
+          <div>
+            <p className="text-sm font-medium text-gray-900">{item.name}</p>
+            <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 mb-4">
+            {error}
+          </div>
+        )}
+
+        {/* Star rating */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Your Rating <span className="text-red-500">*</span>
+          </label>
+          <div className="flex gap-1">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                key={star}
+                onMouseEnter={() => setHover(star)}
+                onMouseLeave={() => setHover(0)}
+                onClick={() => setRating(star)}
+                className="text-3xl transition-all"
+              >
+                <span className={star <= (hover || rating) ? 'text-yellow-400' : 'text-gray-200'}>
+                  ★
+                </span>
+              </button>
+            ))}
+          </div>
+          {rating > 0 && (
+            <p className="text-xs text-gray-400 mt-1">
+              {['', 'Poor', 'Fair', 'Good', 'Very Good', 'Excellent'][rating]}
+            </p>
+          )}
+        </div>
+
+        {/* Comment */}
+        <div className="mb-5">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Your Review <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Share your experience with this product..."
+            rows={4}
+            maxLength={500}
+            className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-none"
+          />
+          <p className="text-xs text-gray-400 text-right mt-1">{comment.length}/500</p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:border-gray-300 transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium py-2.5 transition-all"
+          >
+            {loading ? 'Submitting...' : '⭐ Submit Review'}
+          </button>
+        </div>
+      </div>
+      
     </div>
   );
 };

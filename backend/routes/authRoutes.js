@@ -1,8 +1,15 @@
 const express = require('express');
 const { body } = require('express-validator');
-const { registerUser, loginUser, getMe } = require('../controllers/authController');
+const {
+  registerUser,
+  loginUser,
+  getMe,
+  updateSellerSettings,
+  updateCustomerProfile,
+} = require('../controllers/authController');
 const { reapplyUser } = require('../controllers/adminController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, authorizeRoles } = require('../middleware/authMiddleware');
+
 
 const router = express.Router();
 
@@ -69,5 +76,11 @@ router.get('/me', protect, getMe);
 
 // PUT /api/auth/reapply
 router.put('/reapply', reapplyUser);
+
+// PUT /api/auth/seller/settings
+router.put('/seller/settings', protect, authorizeRoles('seller'), updateSellerSettings);
+
+// PUT /api/auth/customer/profile
+router.put('/customer/profile', protect, authorizeRoles('customer'), updateCustomerProfile);
 
 module.exports = router;

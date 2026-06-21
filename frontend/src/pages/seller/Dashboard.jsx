@@ -3,6 +3,9 @@ import { useAuth } from '../../context/AuthContext';
 import ProductList from './ProductList';
 import AddProduct from './AddProduct';
 import SellerOrdersPage from './OrdersPage';
+import SettingsPage from './SettingsPage';
+import EarningsPage from './EarningsPage';
+import ReviewsPage from './ReviewsPage';
 
 const SellerDashboard = () => {
   const { user, logout } = useAuth();
@@ -120,15 +123,9 @@ const SellerDashboard = () => {
           <AddProduct onSuccess={() => setShowAddProduct(false)} />
         )}
         {activeTab === 'orders' && <SellerOrdersPage />}
-        {activeTab === 'earnings' && (
-          <ComingSoon title="Earnings" desc="Your sales reports and earnings will appear here." />
-        )}
-        {activeTab === 'reviews' && (
-          <ComingSoon title="Reviews" desc="Customer reviews for your products will appear here." />
-        )}
-        {activeTab === 'settings' && (
-          <ComingSoon title="Settings" desc="Shop settings and profile management coming soon." />
-        )}
+        {activeTab === 'earnings' && <EarningsPage />}
+        {activeTab === 'reviews' && <ReviewsPage />}
+        {activeTab === 'settings' && <SettingsPage />}
       </div>
     </div>
   );
