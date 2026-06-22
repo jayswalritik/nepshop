@@ -114,4 +114,315 @@ const reapplyUser = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { getAllUsers, approveUser, rejectUser, undoRejectUser, reapplyUser };
+// @desc  Suspend a user
+// @route PUT /api/admin/users/:id/suspend
+// @access Admin only
+const suspendUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.role === 'admin') {
+    res.status(400);
+    throw new Error('Cannot suspend an admin account');
+  }
+
+  if (user.status === 'suspended') {
+    res.status(400);
+    throw new Error('User is already suspended');
+  }
+
+  user.status = 'suspended';
+  await user.save();
+
+  // Send suspension email
+  const { sendEmail } = require('../utils/emailService');
+
+  res.status(200).json({
+    success: true,
+    message: `${user.firstName}'s account has been suspended`,
+    user: user.toPublicJSON(),
+  });
+});
+
+// @desc  Reactivate a suspended user
+// @route PUT /api/admin/users/:id/reactivate
+// @access Admin only
+const reactivateUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.status !== 'suspended') {
+    res.status(400);
+    throw new Error('User is not suspended');
+  }
+
+  user.status = 'active';
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: `${user.firstName}'s account has been reactivated`,
+    user: user.toPublicJSON(),
+  });
+});
+
+// @desc  Get single user details
+// @route GET /api/admin/users/:id
+// @access Admin only
+const getUserById = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id).select('-password');
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  res.status(200).json({ success: true, user });
+});
+
+// @desc  Delete a user
+// @route DELETE /api/admin/users/:id
+// @access Admin only
+const deleteUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.role === 'admin') {
+    res.status(400);
+    throw new Error('Cannot delete an admin account');
+  }
+
+  await user.deleteOne();
+
+  res.status(200).json({
+    success: true,
+    message: `${user.firstName}'s account has been deleted`,
+  });
+});
+
+// @desc  Get platform stats for admin dashboard
+// @route GET /api/admin/stats
+// @access Admin only
+const getPlatformStats = asyncHandler(async (req, res) => {
+  const Order   = require('../models/Order');
+  const Product = require('../models/Product');
+
+  const [
+    totalUsers,
+    totalCustomers,
+    totalSellers,
+    totalDelivery,
+    pendingApprovals,
+    totalProducts,
+    totalOrders,
+    deliveredOrders,
+    totalRevenue,
+  ] = await Promise.all([
+    User.countDocuments({ role: { $ne: 'admin' } }),
+    User.countDocuments({ role: 'customer' }),
+    User.countDocuments({ role: 'seller' }),
+    User.countDocuments({ role: 'delivery' }),
+    User.countDocuments({ status: 'pending' }),
+    Product.countDocuments({ isActive: true }),
+    Order.countDocuments(),
+    Order.countDocuments({ status: 'delivered' }),
+    Order.aggregate([
+      { $match: { status: { $ne: 'cancelled' } } },
+      { $group: { _id: null, total: { $sum: '$total' }, commission: { $sum: '$commissionAmount' } } },
+    ]),
+  ]);
+
+  const revenue    = totalRevenue[0]?.total      || 0;
+  const commission = totalRevenue[0]?.commission || 0;
+
+  res.status(200).json({
+    success: true,
+    stats: {
+      totalUsers,
+      totalCustomers,
+      totalSellers,
+      totalDelivery,
+      pendingApprovals,
+      totalProducts,
+      totalOrders,
+      deliveredOrders,
+      totalRevenue:    revenue,
+      totalCommission: commission,
+    },
+  });
+});
+
+// @desc  Get all orders platform-wide
+// @route GET /api/admin/orders
+// @access Admin only
+const getAllOrders = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+  const { page = 1, limit = 15, status, search } = req.query;
+
+  const query = {};
+  if (status) query.status = status;
+
+  const total  = await Order.countDocuments(query);
+  const orders = await Order.find(query)
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit))
+    .populate('customer',      'firstName lastName email phone')
+    .populate('deliveryAgent', 'firstName lastName phone')
+    .populate('items.seller',  'firstName lastName shopName');
+
+  res.status(200).json({
+    success: true,
+    total,
+    page:       Number(page),
+    totalPages: Math.ceil(total / limit),
+    orders,
+  });
+});
+
+// @desc  Admin override order status
+// @route PUT /api/admin/orders/:id/status
+// @access Admin only
+const adminUpdateOrderStatus = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+  const { status } = req.body;
+
+  const validStatuses = ['pending', 'confirmed', 'packed', 'dispatched', 'delivered', 'cancelled'];
+  if (!validStatuses.includes(status)) {
+    res.status(400);
+    throw new Error('Invalid status');
+  }
+
+  const order = await Order.findById(req.params.id);
+  if (!order) {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+
+  const previousStatus = order.status;
+  order.status = status;
+
+  if (status === 'confirmed')  order.confirmedAt  = new Date();
+  if (status === 'packed')     order.packedAt     = new Date();
+  if (status === 'dispatched') order.dispatchedAt = new Date();
+  if (status === 'delivered')  order.deliveredAt  = new Date();
+  if (status === 'cancelled')  order.cancelledAt  = new Date();
+
+  await order.save();
+
+  // Notify customer
+  const customer = await User.findById(order.customer);
+  if (customer) {
+    const { sendOrderStatusEmail } = require('../utils/emailService');
+    sendOrderStatusEmail(customer, order, status);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Order status updated from "${previousStatus}" to "${status}"`,
+    order,
+  });
+});
+
+// @desc  Get commission settings and report
+// @route GET /api/admin/commission
+// @access Admin only
+const getCommissionReport = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+
+  // Get commission stats per seller
+  const sellerStats = await Order.aggregate([
+    { $match: { status: { $ne: 'cancelled' } } },
+    { $unwind: '$items' },
+    {
+      $group: {
+        _id:              '$items.seller',
+        totalOrders:      { $sum: 1 },
+        totalRevenue:     { $sum: '$total' },
+        totalCommission:  { $sum: '$commissionAmount' },
+      },
+    },
+    { $sort: { totalRevenue: -1 } },
+  ]);
+
+  // Populate seller info
+  const populated = await User.populate(sellerStats, {
+    path:   '_id',
+    select: 'firstName lastName shopName email',
+  });
+
+  // Overall stats
+  const overall = await Order.aggregate([
+    { $match: { status: { $ne: 'cancelled' } } },
+    {
+      $group: {
+        _id:             null,
+        totalRevenue:    { $sum: '$total' },
+        totalCommission: { $sum: '$commissionAmount' },
+        totalOrders:     { $sum: 1 },
+      },
+    },
+  ]);
+
+  res.status(200).json({
+    success: true,
+    overall: overall[0] || { totalRevenue: 0, totalCommission: 0, totalOrders: 0 },
+    sellers: populated,
+  });
+});
+
+// @desc  Update commission rate for a seller
+// @route PUT /api/admin/commission/:sellerId
+// @access Admin only
+const updateSellerCommission = asyncHandler(async (req, res) => {
+  const { commissionRate } = req.body;
+
+  if (commissionRate < 0 || commissionRate > 50) {
+    res.status(400);
+    throw new Error('Commission rate must be between 0 and 50 percent');
+  }
+
+  const seller = await User.findById(req.params.sellerId);
+  if (!seller || seller.role !== 'seller') {
+    res.status(404);
+    throw new Error('Seller not found');
+  }
+
+  seller.commissionRate = commissionRate;
+  await seller.save();
+
+  res.status(200).json({
+    success: true,
+    message: `Commission rate updated to ${commissionRate}% for ${seller.shopName}`,
+    seller: seller.toPublicJSON(),
+  });
+});
+
+module.exports = {
+  getAllUsers,
+  approveUser,
+  rejectUser,
+  undoRejectUser,
+  reapplyUser,
+  suspendUser,
+  reactivateUser,
+  getUserById,
+  deleteUser,
+  getPlatformStats,
+  getAllOrders,
+  adminUpdateOrderStatus,
+  getCommissionReport,
+  updateSellerCommission,
+};

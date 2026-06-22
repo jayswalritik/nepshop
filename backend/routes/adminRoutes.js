@@ -6,13 +6,21 @@ const {
   approveUser,
   rejectUser,
   undoRejectUser,
+  suspendUser,
+  reactivateUser,
+  getUserById,
+  deleteUser,
+  getPlatformStats,
+  getAllOrders,
+  adminUpdateOrderStatus,
+  getCommissionReport,
+  updateSellerCommission,
 } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
 // ── Shared route — sellers and admins ─────────────────────
-// Must be defined BEFORE the admin-only middleware below
 router.get(
   '/delivery-agents',
   protect,
@@ -25,13 +33,28 @@ router.get(
 );
 
 // ── Admin only routes ─────────────────────────────────────
-// Everything below this line requires admin role
 router.use(protect);
 router.use(authorizeRoles('admin'));
 
-router.get('/users', getAllUsers);
-router.put('/users/:id/approve', approveUser);
-router.put('/users/:id/reject', rejectUser);
-router.put('/users/:id/undoreject', undoRejectUser);
+// Stats
+router.get('/stats', getPlatformStats);
+
+// User management
+router.get('/users',                  getAllUsers);
+router.get('/users/:id',              getUserById);
+router.put('/users/:id/approve',      approveUser);
+router.put('/users/:id/reject',       rejectUser);
+router.put('/users/:id/undoreject',   undoRejectUser);
+router.put('/users/:id/suspend',      suspendUser);
+router.put('/users/:id/reactivate',   reactivateUser);
+router.delete('/users/:id',           deleteUser);
+
+// Order monitoring
+router.get('/orders',                 getAllOrders);
+router.put('/orders/:id/status',      adminUpdateOrderStatus);
+
+// Commission
+router.get('/commission',             getCommissionReport);
+router.put('/commission/:sellerId',   updateSellerCommission);
 
 module.exports = router;

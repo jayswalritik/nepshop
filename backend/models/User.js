@@ -91,6 +91,14 @@ shopAddress: {
       default: null,
     },
 
+    // ── Commission rate (seller specific) ────────────────────
+    commissionRate: {
+      type:    Number,
+      default: 5, // Default 5%
+      min:     0,
+      max:     50,
+    },
+
     // ── Admin metadata ───────────────────────────────────
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
