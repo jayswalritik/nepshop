@@ -20,7 +20,7 @@ const EarningsPage = () => {
       // Filter by period
       const now   = new Date();
       const filtered = all.filter(o => {
-        if (o.status === 'cancelled') return false;
+        if (o.status !== 'delivered') return false;
         if (period === 'today') {
           return new Date(o.createdAt).toDateString() === now.toDateString();
         }
@@ -40,9 +40,9 @@ const EarningsPage = () => {
       const totalCommission = filtered.reduce((sum, o) => sum + o.commissionAmount, 0);
       const totalEarnings   = totalRevenue - totalCommission;
       const totalOrders     = filtered.length;
-      const delivered       = filtered.filter(o => o.status === 'delivered').length;
-      const pending         = filtered.filter(o => o.status === 'pending').length;
-
+      const delivered       = filtered.length; // all filtered are delivered
+      const pending         = all.filter(o => ['pending', 'confirmed', 'packed', 'dispatched'].includes(o.status)).length;
+      
       // Top products
       const productMap = {};
       filtered.forEach(o => {
@@ -108,36 +108,33 @@ const EarningsPage = () => {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Total Revenue</p>
-          <p className="text-2xl font-bold text-gray-900">
-            Rs {stats?.totalRevenue.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">Before commission</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Your Earnings</p>
-          <p className="text-2xl font-bold text-green-600">
-            Rs {stats?.totalEarnings.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">After commission</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Commission Paid</p>
-          <p className="text-2xl font-bold text-orange-500">
-            Rs {stats?.totalCommission.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">5% platform fee</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Total Orders</p>
-          <p className="text-2xl font-bold text-indigo-600">{stats?.totalOrders}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            {stats?.delivered} delivered · {stats?.pending} pending
-          </p>
-        </div>
-      </div>
-
+  <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <p className="text-xs text-gray-400 mb-1">Confirmed Revenue</p>
+    <p className="text-2xl font-bold text-gray-900">
+      Rs {stats?.totalRevenue.toLocaleString()}
+    </p>
+    <p className="text-xs text-green-500 mt-1">✅ From delivered orders only</p>
+  </div>
+  <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <p className="text-xs text-gray-400 mb-1">Your Earnings</p>
+    <p className="text-2xl font-bold text-green-600">
+      Rs {stats?.totalEarnings.toLocaleString()}
+    </p>
+    <p className="text-xs text-gray-400 mt-1">After {stats?.totalOrders > 0 ? '5' : '0'}% commission</p>
+  </div>
+  <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <p className="text-xs text-gray-400 mb-1">Commission Paid</p>
+    <p className="text-2xl font-bold text-orange-500">
+      Rs {stats?.totalCommission.toLocaleString()}
+    </p>
+    <p className="text-xs text-gray-400 mt-1">Platform fee</p>
+  </div>
+  <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <p className="text-xs text-gray-400 mb-1">Pending Orders</p>
+    <p className="text-2xl font-bold text-yellow-500">{stats?.pending}</p>
+    <p className="text-xs text-gray-400 mt-1">Revenue not yet confirmed</p>
+  </div>
+</div>
       <div className="grid lg:grid-cols-2 gap-6">
 
         {/* Top products */}
@@ -176,6 +173,7 @@ const EarningsPage = () => {
         {/* Recent orders */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <h3 className="font-semibold text-gray-900 mb-4">Recent Orders</h3>
+          <p className="text-xs text-gray-400 mb-3">Showing delivered orders only</p>
           {orders.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <div className="text-3xl mb-2">🧾</div>

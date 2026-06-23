@@ -235,6 +235,17 @@ const updateSellerSettings = asyncHandler(async (req, res) => {
     phone:    shopAddress.phone    || user.shopAddress?.phone,
   };
 
+  if (req.body.payoutDetails) {
+    user.payoutDetails = {
+      preferredMethod:   req.body.payoutDetails.preferredMethod   || user.payoutDetails?.preferredMethod,
+      bankName:          req.body.payoutDetails.bankName          || user.payoutDetails?.bankName,
+      accountNumber:     req.body.payoutDetails.accountNumber     || user.payoutDetails?.accountNumber,
+      accountHolderName: req.body.payoutDetails.accountHolderName || user.payoutDetails?.accountHolderName,
+      khaltiNumber:      req.body.payoutDetails.khaltiNumber      || user.payoutDetails?.khaltiNumber,
+      esewaNumber:       req.body.payoutDetails.esewaNumber       || user.payoutDetails?.esewaNumber,
+    };
+  }
+
   const updated = await user.save();
 
   res.status(200).json({
@@ -276,6 +287,48 @@ const updateCustomerProfile = asyncHandler(async (req, res) => {
     user: updated.toPublicJSON(),
   });
 });
+
+// ─────────────────────────────────────────────────────────
+// @desc    Update delivery agent profile
+// @route   PUT /api/auth/delivery/profile
+// @access  Delivery agent only
+// ─────────────────────────────────────────────────────────
+const updateDeliveryProfile = asyncHandler(async (req, res) => {
+  const { firstName, lastName, phone, payoutDetails } = req.body;
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.role !== 'delivery') {
+    res.status(403);
+    throw new Error('Only delivery agents can update their profile here');
+  }
+
+  if (firstName)     user.firstName = firstName;
+  if (lastName)      user.lastName  = lastName;
+  if (phone)         user.phone     = phone;
+  if (payoutDetails) {
+    user.payoutDetails = {
+      preferredMethod:   payoutDetails.preferredMethod   || user.payoutDetails?.preferredMethod,
+      bankName:          payoutDetails.bankName          || user.payoutDetails?.bankName,
+      accountNumber:     payoutDetails.accountNumber     || user.payoutDetails?.accountNumber,
+      accountHolderName: payoutDetails.accountHolderName || user.payoutDetails?.accountHolderName,
+      khaltiNumber:      payoutDetails.khaltiNumber      || user.payoutDetails?.khaltiNumber,
+      esewaNumber:       payoutDetails.esewaNumber       || user.payoutDetails?.esewaNumber,
+    };
+  }
+
+  const updated = await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Profile updated successfully',
+    user: updated.toPublicJSON(),
+  });
+}); 
 
 // ─────────────────────────────────────────────────────────
 // @desc    Forgot password — send reset email
@@ -366,6 +419,7 @@ module.exports = {
   getMe,
   updateSellerSettings,
   updateCustomerProfile,
+  updateDeliveryProfile,
   forgotPassword,
   resetPassword,
 };

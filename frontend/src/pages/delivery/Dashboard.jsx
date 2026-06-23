@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
+import DeliveryProfilePage from './ProfilePage';
 
 const statusColors = {
   pending:    'bg-yellow-100 text-yellow-700',
@@ -26,6 +27,7 @@ const DeliveryDashboard = () => {
     { key: 'active',    label: 'Active Deliveries', icon: '🚚' },
     { key: 'delivered', label: 'Completed',          icon: '✅' },
     { key: 'earnings',  label: 'Earnings',           icon: '💰' },
+    { key: 'profile',   label: 'Profile & Payout',   icon: '👤' },
   ];
 
   useEffect(() => {
@@ -161,7 +163,9 @@ const DeliveryDashboard = () => {
         </div>
 
         {/* Orders */}
-        {activeTab === 'earnings' ? (
+        {activeTab === 'profile' ? (
+          <DeliveryProfilePage />
+        ) : activeTab === 'earnings' ? (
           <EarningsTab orders={orders} stats={stats} />
         ) : (
           <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">

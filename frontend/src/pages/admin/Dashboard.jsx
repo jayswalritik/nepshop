@@ -151,22 +151,20 @@ const OverviewTab = ({ stats, loading, onRefresh }) => {
       </div>
 
       {/* Revenue cards */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <p className="text-sm text-gray-400 mb-1">Total Platform Revenue</p>
-          <p className="text-3xl font-bold text-gray-900">
-            Rs {stats?.totalRevenue?.toLocaleString() || 0}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">From all non-cancelled orders</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <p className="text-sm text-gray-400 mb-1">Total Commission Earned</p>
-          <p className="text-3xl font-bold text-green-600">
-            Rs {stats?.totalCommission?.toLocaleString() || 0}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">5% of all order totals</p>
-        </div>
-      </div>
+      <div className="bg-white border border-gray-200 rounded-xl p-6">
+  <p className="text-sm text-gray-400 mb-1">Confirmed Revenue</p>
+  <p className="text-3xl font-bold text-gray-900">
+    Rs {stats?.totalRevenue?.toLocaleString() || 0}
+  </p>
+  <p className="text-xs text-green-500 mt-1">✅ From delivered orders only</p>
+</div>
+<div className="bg-white border border-gray-200 rounded-xl p-6">
+  <p className="text-sm text-gray-400 mb-1">Commission Earned</p>
+  <p className="text-3xl font-bold text-green-600">
+    Rs {stats?.totalCommission?.toLocaleString() || 0}
+  </p>
+  <p className="text-xs text-green-500 mt-1">✅ From delivered orders only</p>
+</div>
 
       {/* Refresh button */}
       <button

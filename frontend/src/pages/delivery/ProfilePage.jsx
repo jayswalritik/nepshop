@@ -2,18 +2,13 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 
-const SettingsPage = () => {
+const DeliveryProfilePage = () => {
   const { user, login } = useAuth();
 
   const [formData, setFormData] = useState({
-    firstName:         user?.firstName             || '',
-    lastName:          user?.lastName              || '',
-    phone:             user?.phone                 || '',
-    shopName:          user?.shopName              || '',
-    shopStreet:        user?.shopAddress?.street   || '',
-    shopCity:          user?.shopAddress?.city     || '',
-    shopDistrict:      user?.shopAddress?.district || '',
-    shopPhone:         user?.shopAddress?.phone    || '',
+    firstName:         user?.firstName                        || '',
+    lastName:          user?.lastName                         || '',
+    phone:             user?.phone                            || '',
     preferredMethod:   user?.payoutDetails?.preferredMethod   || '',
     bankName:          user?.payoutDetails?.bankName          || '',
     accountNumber:     user?.payoutDetails?.accountNumber     || '',
@@ -22,73 +17,39 @@ const SettingsPage = () => {
     esewaNumber:       user?.payoutDetails?.esewaNumber       || '',
   });
 
-  const [loading, setLoading]   = useState(false);
-  const [success, setSuccess]   = useState('');
-  const [error, setError]       = useState('');
-  const [errors, setErrors]     = useState({});
-
-  const districts = [
-    'Kathmandu', 'Lalitpur', 'Bhaktapur', 'Pokhara', 'Chitwan',
-    'Butwal', 'Birgunj', 'Biratnagar', 'Dharan', 'Hetauda', 'Other',
-  ];
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [error, setError]     = useState('');
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
-    setErrors({ ...errors, [e.target.name]: '' });
     setError('');
     setSuccess('');
-  };
-
-  const validate = () => {
-    const errs = {};
-    if (!formData.firstName.trim())    errs.firstName    = 'First name is required';
-    if (!formData.lastName.trim())     errs.lastName     = 'Last name is required';
-    if (!formData.phone.trim())        errs.phone        = 'Phone is required';
-    if (!formData.shopName.trim())     errs.shopName     = 'Shop name is required';
-    if (!formData.shopStreet.trim())   errs.shopStreet   = 'Street address is required';
-    if (!formData.shopCity.trim())     errs.shopCity     = 'City is required';
-    if (!formData.shopDistrict)        errs.shopDistrict = 'District is required';
-    if (!formData.shopPhone.trim())    errs.shopPhone    = 'Shop contact is required';
-    return errs;
   };
 
   const handleSave = async () => {
-    const errs = validate();
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-
     setLoading(true);
     setError('');
     setSuccess('');
-
     try {
-      const { data } = await API.put('/auth/seller/settings', {
+      const { data } = await API.put('/auth/delivery/profile', {
         firstName: formData.firstName,
         lastName:  formData.lastName,
         phone:     formData.phone,
-        shopName:  formData.shopName,
-        shopAddress: {
-          street:   formData.shopStreet,
-          city:     formData.shopCity,
-          district: formData.shopDistrict,
-          phone:    formData.shopPhone,
-        },
         payoutDetails: {
-        preferredMethod:   formData.preferredMethod,
-        bankName:          formData.bankName,
-        accountNumber:     formData.accountNumber,
-        accountHolderName: formData.accountHolderName,
-        khaltiNumber:      formData.khaltiNumber,
-        esewaNumber:       formData.esewaNumber,
-      },
+          preferredMethod:   formData.preferredMethod,
+          bankName:          formData.bankName,
+          accountNumber:     formData.accountNumber,
+          accountHolderName: formData.accountHolderName,
+          khaltiNumber:      formData.khaltiNumber,
+          esewaNumber:       formData.esewaNumber,
+        },
       });
-
-      // Update auth context with new user data
       const token = localStorage.getItem('nepshop_token');
       login(data.user, token);
-
-      setSuccess('Settings saved successfully!');
+      setSuccess('Profile updated successfully!');
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to save settings');
+      setError(err.response?.data?.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -121,10 +82,8 @@ const SettingsPage = () => {
                 name="firstName"
                 value={formData.firstName}
                 onChange={handleChange}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                  ${errors.firstName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
               />
-              {errors.firstName && <p className="text-red-500 text-xs mt-1">{errors.firstName}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
@@ -132,25 +91,19 @@ const SettingsPage = () => {
                 name="lastName"
                 value={formData.lastName}
                 onChange={handleChange}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                  ${errors.lastName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
               />
-              {errors.lastName && <p className="text-red-500 text-xs mt-1">{errors.lastName}</p>}
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Phone number</label>
             <input
               name="phone"
               value={formData.phone}
               onChange={handleChange}
-              className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                ${errors.phone ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
-            {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
             <input
@@ -163,93 +116,11 @@ const SettingsPage = () => {
         </div>
       </div>
 
-      {/* Shop info */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
-        <h3 className="font-semibold text-gray-900 mb-1">Shop Information</h3>
-        <p className="text-sm text-gray-400 mb-5">
-          This address is shown to delivery agents for order pickup
-        </p>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Shop / business name</label>
-            <input
-              name="shopName"
-              value={formData.shopName}
-              onChange={handleChange}
-              className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                ${errors.shopName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-            />
-            {errors.shopName && <p className="text-red-500 text-xs mt-1">{errors.shopName}</p>}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Street address</label>
-            <input
-              name="shopStreet"
-              value={formData.shopStreet}
-              onChange={handleChange}
-              placeholder="e.g. New Road, Shop no. 5"
-              className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                ${errors.shopStreet ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-            />
-            {errors.shopStreet && <p className="text-red-500 text-xs mt-1">{errors.shopStreet}</p>}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-              <input
-                name="shopCity"
-                value={formData.shopCity}
-                onChange={handleChange}
-                placeholder="e.g. Kathmandu"
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                  ${errors.shopCity ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-              />
-              {errors.shopCity && <p className="text-red-500 text-xs mt-1">{errors.shopCity}</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">District</label>
-              <select
-                name="shopDistrict"
-                value={formData.shopDistrict}
-                onChange={handleChange}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all bg-white
-                  ${errors.shopDistrict ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500'}`}
-              >
-                <option value="">Select district</option>
-                {districts.map(d => <option key={d}>{d}</option>)}
-              </select>
-              {errors.shopDistrict && <p className="text-red-500 text-xs mt-1">{errors.shopDistrict}</p>}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Shop contact number
-              <span className="text-gray-400 font-normal text-xs ml-1">
-                (shown to delivery agent for pickup)
-              </span>
-            </label>
-            <input
-              name="shopPhone"
-              value={formData.shopPhone}
-              onChange={handleChange}
-              placeholder="Shop phone number"
-              className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                ${errors.shopPhone ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-            />
-            {errors.shopPhone && <p className="text-red-500 text-xs mt-1">{errors.shopPhone}</p>}
-          </div>
-        </div>
-      </div>
-
       {/* Payout details */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
         <h3 className="font-semibold text-gray-900 mb-1">Payout Details</h3>
         <p className="text-sm text-gray-400 mb-5">
-          How you want to receive payments from NepShop
+          How you want to receive your delivery earnings from NepShop
         </p>
 
         <div className="space-y-4">
@@ -347,24 +218,22 @@ const SettingsPage = () => {
             </div>
           )}
 
-          {/* Info box */}
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
             <p className="text-xs text-blue-700">
-              💡 NepShop will use these details to send your earnings after deducting the platform commission.
-              Payouts are processed manually by the admin after you request them.
+              💡 NepShop pays Rs 50 per successful delivery.
+              Payouts are processed by the admin after you request them from the Earnings tab.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Account info — read only */}
+      {/* Account info */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
-        <h3 className="font-semibold text-gray-900 mb-1">Account Information</h3>
-        <p className="text-sm text-gray-400 mb-4">Read-only information about your account</p>
+        <h3 className="font-semibold text-gray-900 mb-4">Account Information</h3>
         <div className="space-y-3">
           <div className="flex justify-between py-2 border-b border-gray-50">
-            <span className="text-sm text-gray-500">PAN Number</span>
-            <span className="text-sm font-medium text-gray-700">{user?.panNumber || 'Not set'}</span>
+            <span className="text-sm text-gray-500">Vehicle Type</span>
+            <span className="text-sm font-medium text-gray-700">{user?.vehicleType || 'Not set'}</span>
           </div>
           <div className="flex justify-between py-2 border-b border-gray-50">
             <span className="text-sm text-gray-500">Account Status</span>
@@ -383,7 +252,6 @@ const SettingsPage = () => {
         </div>
       </div>
 
-      {/* Save button */}
       <button
         onClick={handleSave}
         disabled={loading}
@@ -397,10 +265,10 @@ const SettingsPage = () => {
             </svg>
             Saving...
           </>
-        ) : '💾 Save Settings'}
+        ) : '💾 Save Profile'}
       </button>
     </div>
   );
 };
 
-export default SettingsPage;
+export default DeliveryProfilePage;

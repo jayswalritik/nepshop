@@ -91,6 +91,20 @@ shopAddress: {
       default: null,
     },
 
+    // ── Payout details (seller + delivery) ───────────────────
+    payoutDetails: {
+      preferredMethod: {
+        type:    String,
+        enum:    ['bank', 'khalti', 'esewa', null],
+        default: null,
+      },
+      bankName:          { type: String, default: null },
+      accountNumber:     { type: String, default: null },
+      accountHolderName: { type: String, default: null },
+      khaltiNumber:      { type: String, default: null },
+      esewaNumber:       { type: String, default: null },
+    },
+
     // ── Commission rate (seller specific) ────────────────────
     commissionRate: {
       type:    Number,
@@ -148,17 +162,20 @@ userSchema.methods.generateResetToken = function () {
 // ── Instance method: get public profile (no sensitive data) ──
 userSchema.methods.toPublicJSON = function () {
   return {
-    _id: this._id,
-    firstName: this.firstName,
-    lastName: this.lastName,
-    email: this.email,
-    phone: this.phone,
-    role: this.role,
-    status: this.status,
-    shopName: this.shopName,
-    vehicleType: this.vehicleType,
-    profileImage: this.profileImage,
-    createdAt: this.createdAt,
+    _id:           this._id,
+    firstName:     this.firstName,
+    lastName:      this.lastName,
+    email:         this.email,
+    phone:         this.phone,
+    role:          this.role,
+    status:        this.status,
+    shopName:      this.shopName,
+    shopAddress:   this.shopAddress,
+    vehicleType:   this.vehicleType,
+    profileImage:  this.profileImage,
+    payoutDetails: this.payoutDetails,
+    commissionRate:this.commissionRate,
+    createdAt:     this.createdAt,
   };
 };
 

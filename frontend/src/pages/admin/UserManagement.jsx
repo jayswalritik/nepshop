@@ -331,16 +331,60 @@ const UserManagement = () => {
               )}
               {selected.role === 'delivery' && (
                 <>
-                  <div className="flex justify-between text-sm">
+                    <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Vehicle</span>
                     <span className="font-medium text-gray-700">{selected.vehicleType}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
+                    </div>
+                    <div className="flex justify-between text-sm">
                     <span className="text-gray-400">Citizenship</span>
                     <span className="font-medium text-gray-700">{selected.citizenshipNumber}</span>
-                  </div>
+                    </div>
                 </>
-              )}
+                )}
+
+                {/* Payout details */}
+                {(selected.role === 'seller' || selected.role === 'delivery') &&
+                selected.payoutDetails?.preferredMethod && (
+                <>
+                    <div className="pt-2 border-t border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Payout Details</p>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                    <span className="text-gray-400">Method</span>
+                    <span className="font-medium text-gray-700 capitalize">
+                        {selected.payoutDetails.preferredMethod}
+                    </span>
+                    </div>
+                    {selected.payoutDetails.preferredMethod === 'bank' && (
+                    <>
+                        <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">Bank</span>
+                        <span className="font-medium text-gray-700">{selected.payoutDetails.bankName}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">Account No.</span>
+                        <span className="font-medium text-gray-700">{selected.payoutDetails.accountNumber}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">Holder</span>
+                        <span className="font-medium text-gray-700">{selected.payoutDetails.accountHolderName}</span>
+                        </div>
+                    </>
+                    )}
+                    {selected.payoutDetails.preferredMethod === 'khalti' && (
+                    <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">Khalti No.</span>
+                        <span className="font-medium text-gray-700">{selected.payoutDetails.khaltiNumber}</span>
+                    </div>
+                    )}
+                    {selected.payoutDetails.preferredMethod === 'esewa' && (
+                    <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">eSewa No.</span>
+                        <span className="font-medium text-gray-700">{selected.payoutDetails.esewaNumber}</span>
+                    </div>
+                    )}
+                </>
+                )}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-400">Joined</span>
                 <span className="font-medium text-gray-700">

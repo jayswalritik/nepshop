@@ -6,6 +6,7 @@ const {
   getMe,
   updateSellerSettings,
   updateCustomerProfile,
+  updateDeliveryProfile,
   forgotPassword,
   resetPassword,
 } = require('../controllers/authController');
@@ -84,6 +85,9 @@ router.put('/seller/settings', protect, authorizeRoles('seller'), updateSellerSe
 
 // PUT /api/auth/customer/profile
 router.put('/customer/profile', protect, authorizeRoles('customer'), updateCustomerProfile);
+
+// PUT /api/auth/delivery/profile
+router.put('/delivery/profile', protect, authorizeRoles('delivery'), updateDeliveryProfile);
 
 // POST /api/auth/forgot-password
 router.post('/forgot-password', forgotPassword);

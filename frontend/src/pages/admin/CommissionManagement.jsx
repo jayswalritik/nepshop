@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import API from '../../utils/api';
 
 const CommissionManagement = () => {
-  const [report, setReport]     = useState(null);
-  const [loading, setLoading]   = useState(true);
+  const [report, setReport]         = useState(null);
+  const [loading, setLoading]       = useState(true);
   const [editSeller, setEditSeller] = useState(null);
-  const [newRate, setNewRate]   = useState('');
-  const [saving, setSaving]     = useState(false);
-  const [success, setSuccess]   = useState('');
+  const [newRate, setNewRate]       = useState('');
+  const [saving, setSaving]         = useState(false);
+  const [success, setSuccess]       = useState('');
 
   useEffect(() => {
     fetchReport();
@@ -59,23 +59,35 @@ const CommissionManagement = () => {
       )}
 
       {/* Overall stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Total Platform Revenue</p>
+          <p className="text-xs text-gray-400 mb-1">Confirmed Revenue</p>
           <p className="text-2xl font-bold text-gray-900">
             Rs {report?.overall?.totalRevenue?.toLocaleString() || 0}
           </p>
+          <p className="text-xs text-green-500 mt-1">✅ Delivered orders only</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Total Commission Earned</p>
+          <p className="text-xs text-gray-400 mb-1">Commission Earned</p>
           <p className="text-2xl font-bold text-green-600">
             Rs {report?.overall?.totalCommission?.toLocaleString() || 0}
           </p>
+          <p className="text-xs text-green-500 mt-1">✅ Delivered orders only</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Total Orders</p>
+          <p className="text-xs text-gray-400 mb-1">Pending Revenue</p>
+          <p className="text-2xl font-bold text-yellow-500">
+            Rs {report?.overall?.pendingRevenue?.toLocaleString() || 0}
+          </p>
+          <p className="text-xs text-yellow-500 mt-1">⏳ In-progress orders</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs text-gray-400 mb-1">Delivered Orders</p>
           <p className="text-2xl font-bold text-indigo-600">
             {report?.overall?.totalOrders || 0}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            {report?.overall?.pendingOrders || 0} still in progress
           </p>
         </div>
       </div>
@@ -87,8 +99,9 @@ const CommissionManagement = () => {
           <p className="text-sm font-semibold text-indigo-900 mb-1">How commission works</p>
           <p className="text-sm text-indigo-700">
             Default commission is <strong>5%</strong> of each order total.
-            You can set a custom rate per seller below.
-            Commission is automatically deducted when an order is placed.
+            <strong> Confirmed Revenue</strong> = delivered orders only.
+            <strong> Pending Revenue</strong> = orders still being processed (not yet earned).
+            Cancelled orders are excluded entirely.
           </p>
         </div>
       </div>
@@ -97,20 +110,30 @@ const CommissionManagement = () => {
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">Commission by Seller</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Click "Edit Rate" to set a custom commission for any seller</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Confirmed = delivered orders · Pending = in-progress · Cancelled orders excluded
+          </p>
         </div>
 
-        {report?.sellers?.length === 0 ? (
+        {!report?.sellers?.length ? (
           <div className="text-center py-16 text-gray-400">
             <div className="text-4xl mb-3">💰</div>
             <p className="font-medium">No commission data yet</p>
-            <p className="text-sm mt-1">Commission data will appear once orders are placed</p>
+            <p className="text-sm mt-1">Data appears once orders are placed</p>
           </div>
         ) : (
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Seller', 'Orders', 'Revenue', 'Commission Earned', 'Rate', 'Actions'].map(h => (
+                {[
+                  'Seller',
+                  'Confirmed Orders',
+                  'Confirmed Revenue',
+                  'Commission Earned',
+                  'Pending Revenue',
+                  'Rate',
+                  'Actions'
+                ].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     {h}
                   </th>
@@ -118,18 +141,42 @@ const CommissionManagement = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {report?.sellers?.map((s) => (
-                <tr key={s._id?._id} className="hover:bg-gray-50 transition-colors">
+              {report?.sellers?.map((s, i) => (
+                <tr key={i} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-4">
-                    <p className="text-sm font-medium text-gray-900">{s._id?.shopName || 'Unknown'}</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {s._id?.shopName || 'Unknown'}
+                    </p>
                     <p className="text-xs text-gray-400">{s._id?.email}</p>
                   </td>
-                  <td className="px-4 py-4 text-sm text-gray-700">{s.totalOrders}</td>
-                  <td className="px-4 py-4 text-sm font-medium text-gray-900">
-                    Rs {s.totalRevenue?.toLocaleString()}
+                  <td className="px-4 py-4">
+                    <p className="text-sm text-gray-700">{s.confirmedOrders}</p>
+                    {s.pendingOrders > 0 && (
+                      <p className="text-xs text-yellow-500">+{s.pendingOrders} pending</p>
+                    )}
                   </td>
-                  <td className="px-4 py-4 text-sm font-medium text-green-600">
-                    Rs {s.totalCommission?.toLocaleString()}
+                  <td className="px-4 py-4">
+                    <p className="text-sm font-medium text-gray-900">
+                      Rs {s.confirmedRevenue?.toLocaleString() || 0}
+                    </p>
+                    <p className="text-xs text-green-500">✅ Confirmed</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <p className="text-sm font-medium text-green-600">
+                      Rs {s.confirmedCommission?.toLocaleString() || 0}
+                    </p>
+                  </td>
+                  <td className="px-4 py-4">
+                    {s.pendingRevenue > 0 ? (
+                      <>
+                        <p className="text-sm font-medium text-yellow-600">
+                          Rs {s.pendingRevenue?.toLocaleString() || 0}
+                        </p>
+                        <p className="text-xs text-yellow-500">⏳ In progress</p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-400">—</p>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     <span className="text-sm font-bold text-indigo-600">
@@ -160,17 +207,23 @@ const CommissionManagement = () => {
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-bold text-gray-900">Edit Commission Rate</h3>
-              <button onClick={() => setEditSeller(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+              <button
+                onClick={() => setEditSeller(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >✕</button>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4 mb-5">
               <p className="text-sm font-medium text-gray-900">{editSeller.shopName}</p>
               <p className="text-xs text-gray-400">{editSeller.email}</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Current rate: <strong>{editSeller.commissionRate || 5}%</strong>
+              </p>
             </div>
 
-            <div className="mb-5">
+            <div className="mb-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Commission Rate (%)
+                New Commission Rate (%)
               </label>
               <input
                 type="number"
@@ -180,8 +233,20 @@ const CommissionManagement = () => {
                 max="50"
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
               />
-              <p className="text-xs text-gray-400 mt-1">Enter a value between 0 and 50</p>
+              <p className="text-xs text-gray-400 mt-1">Enter a value between 0% and 50%</p>
             </div>
+
+            {/* Preview */}
+            {newRate !== '' && (
+              <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 mb-4 mt-3">
+                <p className="text-xs text-indigo-700">
+                  On a Rs 1,000 order — NepShop earns{' '}
+                  <strong>Rs {(1000 * newRate / 100).toFixed(0)}</strong>,
+                  seller receives{' '}
+                  <strong>Rs {(1000 - 1000 * newRate / 100).toFixed(0)}</strong>
+                </p>
+              </div>
+            )}
 
             <div className="flex gap-3">
               <button

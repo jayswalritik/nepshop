@@ -239,7 +239,7 @@ const getPlatformStats = asyncHandler(async (req, res) => {
     Order.countDocuments(),
     Order.countDocuments({ status: 'delivered' }),
     Order.aggregate([
-      { $match: { status: { $ne: 'cancelled' } } },
+      { $match: { status: 'delivered' } },
       { $group: { _id: null, total: { $sum: '$total' }, commission: { $sum: '$commissionAmount' } } },
     ]),
   ]);
@@ -342,30 +342,101 @@ const adminUpdateOrderStatus = asyncHandler(async (req, res) => {
 const getCommissionReport = asyncHandler(async (req, res) => {
   const Order = require('../models/Order');
 
-  // Get commission stats per seller
-  const sellerStats = await Order.aggregate([
-    { $match: { status: { $ne: 'cancelled' } } },
-    { $unwind: '$items' },
-    {
-      $group: {
-        _id:              '$items.seller',
-        totalOrders:      { $sum: 1 },
-        totalRevenue:     { $sum: '$total' },
-        totalCommission:  { $sum: '$commissionAmount' },
-      },
+  // Confirmed stats — delivered orders only
+const confirmedStats = await Order.aggregate([
+  { $match: { status: 'delivered' } },
+  { $unwind: '$items' },
+  {
+    $group: {
+      _id:                 '$items.seller',
+      confirmedOrders:     { $addToSet: '$_id' },
     },
-    { $sort: { totalRevenue: -1 } },
-  ]);
+  },
+  {
+    $lookup: {
+      from:         'orders',
+      localField:   'confirmedOrders',
+      foreignField: '_id',
+      as:           'orderDocs',
+    },
+  },
+  {
+    $project: {
+      confirmedOrders:     { $size: '$confirmedOrders' },
+      confirmedRevenue:    { $sum: '$orderDocs.total' },
+      confirmedCommission: { $sum: '$orderDocs.commissionAmount' },
+    },
+  },
+]);
+  
+// Pending stats — in-progress orders
+const pendingStats = await Order.aggregate([
+  { $match: { status: { $in: ['pending', 'confirmed', 'packed', 'dispatched'] } } },
+  { $unwind: '$items' },
+  {
+    $group: {
+      _id:           '$items.seller',
+      pendingOrders: { $addToSet: '$_id' },
+    },
+  },
+  {
+    $lookup: {
+      from:         'orders',
+      localField:   'pendingOrders',
+      foreignField: '_id',
+      as:           'orderDocs',
+    },
+  },
+  {
+    $project: {
+      pendingOrders:  { $size: '$pendingOrders' },
+      pendingRevenue: { $sum: '$orderDocs.total' },
+    },
+  },
+]);
+  // Merge both into one map
+  const sellerMap = {};
+
+  confirmedStats.forEach(s => {
+  sellerMap[s._id] = {
+    _id:                 s._id,
+    confirmedOrders:     s.confirmedOrders,
+    confirmedRevenue:    s.confirmedRevenue,
+    confirmedCommission: s.confirmedCommission,
+    pendingOrders:       0,
+    pendingRevenue:      0,
+  };
+});
+
+pendingStats.forEach(s => {
+  if (sellerMap[s._id]) {
+    sellerMap[s._id].pendingOrders  = s.pendingOrders;
+    sellerMap[s._id].pendingRevenue = s.pendingRevenue;
+  } else {
+    sellerMap[s._id] = {
+      _id:                 s._id,
+      confirmedOrders:     0,
+      confirmedRevenue:    0,
+      confirmedCommission: 0,
+      pendingOrders:       s.pendingOrders,
+      pendingRevenue:      s.pendingRevenue,
+    };
+  }
+});
+
+  const sellers = Object.values(sellerMap).sort(
+    (a, b) => b.confirmedRevenue - a.confirmedRevenue
+  );
 
   // Populate seller info
-  const populated = await User.populate(sellerStats, {
+  const populated = await User.populate(sellers, {
     path:   '_id',
-    select: 'firstName lastName shopName email',
+    select: 'firstName lastName shopName email commissionRate',
   });
 
-  // Overall stats
+  // Overall confirmed stats
   const overall = await Order.aggregate([
-    { $match: { status: { $ne: 'cancelled' } } },
+    { $match: { status: 'delivered' } },
     {
       $group: {
         _id:             null,
@@ -376,9 +447,25 @@ const getCommissionReport = asyncHandler(async (req, res) => {
     },
   ]);
 
+  // Overall pending stats
+  const overallPending = await Order.aggregate([
+    { $match: { status: { $in: ['pending', 'confirmed', 'packed', 'dispatched'] } } },
+    {
+      $group: {
+        _id:            null,
+        pendingRevenue: { $sum: '$total' },
+        pendingOrders:  { $sum: 1 },
+      },
+    },
+  ]);
+
   res.status(200).json({
     success: true,
-    overall: overall[0] || { totalRevenue: 0, totalCommission: 0, totalOrders: 0 },
+    overall: {
+      ...(overall[0] || { totalRevenue: 0, totalCommission: 0, totalOrders: 0 }),
+      pendingRevenue: overallPending[0]?.pendingRevenue || 0,
+      pendingOrders:  overallPending[0]?.pendingOrders  || 0,
+    },
     sellers: populated,
   });
 });
