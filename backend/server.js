@@ -16,7 +16,7 @@ const app = express();
 
 // CORS — allow requests from the frontend
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: process.env.CLIENT_URL,
   credentials: true,
 }));
 // Parse JSON request bodies
