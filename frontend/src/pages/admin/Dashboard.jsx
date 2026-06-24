@@ -4,6 +4,7 @@ import API from '../../utils/api';
 import UserManagement from './UserManagement';
 import OrderMonitoring from './OrderMonitoring';
 import CommissionManagement from './CommissionManagement';
+import ReturnsManagement from './ReturnsManagement';
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -16,6 +17,7 @@ const AdminDashboard = () => {
     { key: 'users',     label: 'User Management', icon: '👥' },
     { key: 'orders',    label: 'Order Monitoring', icon: '🧾' },
     { key: 'commission',label: 'Commission',       icon: '💰' },
+    { key: 'returns',   label: 'Returns',          icon: '🔄' },
   ];
 
   useEffect(() => {
@@ -105,6 +107,7 @@ const AdminDashboard = () => {
             {activeTab === 'users'      && 'Manage all users, sellers and delivery agents'}
             {activeTab === 'orders'     && 'Monitor all orders across the platform'}
             {activeTab === 'commission' && 'Track and manage platform commission'}
+            {activeTab === 'returns'    && 'Review and process customer return requests'}
           </p>
         </div>
 
@@ -113,6 +116,7 @@ const AdminDashboard = () => {
         {activeTab === 'users'      && <UserManagement />}
         {activeTab === 'orders'     && <OrderMonitoring />}
         {activeTab === 'commission' && <CommissionManagement />}
+        {activeTab === 'returns' && <ReturnsManagement />}
       </div>
     </div>
   );

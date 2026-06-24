@@ -12,6 +12,9 @@ import AdminDashboard from './pages/admin/Dashboard';
 import AdminLoginPage from './pages/auth/AdminLoginPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
+import KhaltiVerify  from './pages/payment/KhaltiVerify';
+import EsewaVerify   from './pages/payment/EsewaVerify';
+import PaymentFailed from './pages/payment/PaymentFailed';
 
 function App() {
   return (
@@ -24,7 +27,10 @@ function App() {
           <Route path="/unauthorized" element={<Unauthorized />} />
           <Route path="/admin/login" element={<AdminLoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password/:token" element={<ResetPasswordPage />} />   
+          <Route path="/reset-password/:token" element={<ResetPasswordPage />} /> 
+          <Route path="/payment/khalti/verify"  element={<KhaltiVerify />} />
+          <Route path="/payment/esewa/verify"   element={<EsewaVerify />} />
+          <Route path="/payment/failed"         element={<PaymentFailed />} />  
 
           {/* Protected — Customer */}
           <Route path="/customer/dashboard" element={

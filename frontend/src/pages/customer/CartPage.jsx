@@ -171,12 +171,53 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
     setLoading(true);
     setError('');
     try {
-      await API.post('/orders', {
+      // Step 1 — Place the order
+      const { data } = await API.post('/orders', {
         deliveryAddress: address,
         paymentMethod,
         customerNote,
       });
-      onSuccess();
+
+      const orderId = data.order._id;
+
+      // Step 2 — Handle payment method
+      if (paymentMethod === 'cash_on_delivery') {
+        // COD — go straight to orders
+        onSuccess();
+        return;
+      }
+
+      if (paymentMethod === 'khalti') {
+        // Initiate Khalti payment
+        const khaltiRes = await API.post('/payment/khalti/initiate', { orderId });
+        // Redirect to Khalti payment page
+        window.location.href = khaltiRes.data.paymentUrl;
+        return;
+      }
+
+      if (paymentMethod === 'esewa') {
+        // Initiate eSewa payment
+        const esewaRes = await API.post('/payment/esewa/initiate', { orderId });
+        const { gatewayUrl, formData: esewaFormData } = esewaRes.data;
+
+        // eSewa uses form POST — create and submit a hidden form
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = gatewayUrl;
+
+        Object.entries(esewaFormData).forEach(([key, value]) => {
+          const input = document.createElement('input');
+          input.type  = 'hidden';
+          input.name  = key;
+          input.value = value;
+          form.appendChild(input);
+        });
+
+        document.body.appendChild(form);
+        form.submit();
+        return;
+      }
+
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to place order. Please try again.');
     } finally {
@@ -263,25 +304,23 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
             <div className="space-y-2">
               {[
                 { value: 'cash_on_delivery', label: 'Cash on Delivery', icon: '💵', desc: 'Pay when your order arrives' },
-                { value: 'khalti',           label: 'Khalti',           icon: '💜', desc: 'Coming soon' },
-                { value: 'esewa',            label: 'eSewa',            icon: '💚', desc: 'Coming soon' },
+                { value: 'khalti',           label: 'Khalti',           icon: '💜', desc: 'Pay with Khalti wallet' },
+                { value: 'esewa',            label: 'eSewa',            icon: '💚', desc: 'Pay with eSewa wallet' },
               ].map((method) => (
                 <label
                   key={method.value}
                   className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-all
                     ${paymentMethod === method.value
                       ? 'border-indigo-500 bg-indigo-50'
-                      : 'border-gray-200 hover:border-gray-300'}
-                    ${method.value !== 'cash_on_delivery' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      : 'border-gray-200 hover:border-gray-300'}`}
                 >
                   <input
                     type="radio"
                     name="payment"
                     value={method.value}
                     checked={paymentMethod === method.value}
-                    onChange={() => method.value === 'cash_on_delivery' && setPaymentMethod(method.value)}
+                    onChange={() => setPaymentMethod(method.value)}
                     className="text-indigo-600"
-                    disabled={method.value !== 'cash_on_delivery'}
                   />
                   <span className="text-xl">{method.icon}</span>
                   <div>
@@ -359,9 +398,15 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
                   </svg>
-                  Placing order...
+                  {paymentMethod === 'khalti' ? 'Redirecting to Khalti...'
+                    : paymentMethod === 'esewa' ? 'Redirecting to eSewa...'
+                    : 'Placing order...'}
                 </>
-              ) : '✅ Place Order'}
+              ) : (
+                paymentMethod === 'khalti' ? '💜 Pay with Khalti'
+                  : paymentMethod === 'esewa' ? '💚 Pay with eSewa'
+                  : '✅ Place Order'
+              )}
             </button>
 
             <p className="text-xs text-gray-400 text-center mt-3">

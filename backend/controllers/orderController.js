@@ -95,9 +95,6 @@ for (const item of cart.items) {
   }
 }
 
-  // Clear the cart
-  cart.items = [];
-  await cart.save();
 
   // Send emails
   const customer = await User.findById(req.user._id);
@@ -108,6 +105,13 @@ for (const item of cart.items) {
   for (const sellerId of sellerIds) {
     const seller = await User.findById(sellerId);
     if (seller) sendNewOrderToSeller(seller, order);
+  }
+
+  // For COD — clear cart immediately
+  // For online payments — cart cleared after payment verification
+  if (req.body.paymentMethod === 'cash_on_delivery') {
+    cart.items = [];
+    await cart.save();
   }
 
   res.status(201).json({
@@ -190,9 +194,13 @@ const cancelOrder = asyncHandler(async (req, res) => {
     throw new Error('Not authorized');
   }
 
-  if (['dispatched', 'delivered', 'cancelled'].includes(order.status)) {
+  if (['dispatched', 'delivered', 'cancelled', 'returned'].includes(order.status)) {
     res.status(400);
-    throw new Error(`Cannot cancel order that is already ${order.status}`);
+    throw new Error(
+      order.status === 'dispatched'
+        ? 'Cannot cancel order that is already out for delivery'
+        : `Cannot cancel order that is already ${order.status}`
+    );
   }
 
   // Restore stock

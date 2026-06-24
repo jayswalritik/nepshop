@@ -22,6 +22,8 @@ const OrdersPage = () => {
   const [reviewItem, setReviewItem]   = useState(null);
   const [reviewOrderId, setReviewOrderId] = useState(null);
   const [reviewSuccess, setReviewSuccess] = useState(null);
+  const [returnOrder, setReturnOrder] = useState(null);
+  const [returnSuccess, setReturnSuccess] = useState('');
   
 
   useEffect(() => {
@@ -180,7 +182,7 @@ const OrdersPage = () => {
                     >
                         View Details
                     </button>
-                    {['pending', 'confirmed'].includes(order.status) && (
+                    {['pending', 'confirmed', 'packed'].includes(order.status) && (
                         <button
                             onClick={() => handleCancel(order._id)}
                             disabled={cancelling === order._id}
@@ -200,6 +202,14 @@ const OrdersPage = () => {
                             ⭐ Review
                         </button>
                     )}
+                    {order.status === 'delivered' && (
+                        <button
+                          onClick={() => setReturnOrder(order)}
+                          className="text-xs text-orange-500 hover:text-orange-700 font-medium px-3 py-1.5 border border-orange-200 rounded-lg hover:border-orange-300 transition-all"
+                        >
+                          🔄 Return
+                        </button>
+                      )}
                 </div>
                 </div>
               </div>
@@ -266,6 +276,30 @@ const OrdersPage = () => {
           </div>
         </div>
       )}
+      
+      {/* Return modal */}
+      {returnOrder && (
+        <ReturnModal
+          order={returnOrder}
+          onClose={() => setReturnOrder(null)}
+          onSuccess={(msg) => {
+            setReturnOrder(null);
+            setReturnSuccess(msg);
+            fetchOrders();
+            setTimeout(() => setReturnSuccess(''), 6000);
+          }}
+        />
+      )}
+
+      {/* Return success toast */}
+      {returnSuccess && (
+        <div className="fixed top-4 right-4 z-50 bg-orange-500 text-white px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 max-w-sm">
+          <span>🔄</span>
+          <span>{returnSuccess}</span>
+          <button onClick={() => setReturnSuccess('')} className="ml-2 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
+      
       {/* Review modal */}
       {reviewItem && (
         <ReviewModal
@@ -420,4 +454,129 @@ const ReviewModal = ({ item, orderId, onClose, onSuccess }) => {
   );
 };
 
+// ── Return Modal ──────────────────────────────────────────
+const ReturnModal = ({ order, onClose, onSuccess }) => {
+  const [reason, setReason]           = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState('');
+
+  const reasons = [
+    'Damaged product',
+    'Wrong product delivered',
+    'Product not as described',
+    'Changed my mind',
+    'Better price available',
+    'Other',
+  ];
+
+  const handleSubmit = async () => {
+    if (!reason) { setError('Please select a reason'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      await API.post('/returns', {
+        orderId: order._id,
+        reason,
+        description,
+      });
+      onSuccess('Return request submitted successfully! Admin will review and process your refund within 3-5 business days.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to submit return request');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-xl">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-bold text-gray-900">Request Return</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        </div>
+
+        {/* Order info */}
+        <div className="bg-gray-50 rounded-xl p-3 mb-4">
+          <p className="text-xs text-gray-500">Order</p>
+          <p className="text-sm font-medium text-gray-900">
+            #{order._id.slice(-8).toUpperCase()}
+          </p>
+          <p className="text-sm font-bold text-indigo-600">
+            Rs {order.total.toLocaleString()}
+          </p>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 mb-4">
+            {error}
+          </div>
+        )}
+
+        {/* Reason */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Reason for return <span className="text-red-500">*</span>
+          </label>
+          <div className="space-y-2">
+            {reasons.map((r) => (
+              <label key={r} className={`flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition-all
+                ${reason === r ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                <input
+                  type="radio"
+                  name="reason"
+                  value={r}
+                  checked={reason === r}
+                  onChange={() => setReason(r)}
+                  className="text-indigo-600"
+                />
+                <span className="text-sm text-gray-700">{r}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="mb-5">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Additional details (optional)
+          </label>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the issue in more detail..."
+            rows={3}
+            className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-none"
+          />
+        </div>
+
+        {/* Info */}
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-5">
+          <p className="text-xs text-orange-700">
+            ⏰ Returns are accepted within <strong>7 days</strong> of delivery.
+            Refund will be processed within 3-5 business days after approval.
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:border-gray-300 transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white rounded-xl text-sm font-medium py-2.5 transition-all"
+          >
+            {loading ? 'Submitting...' : '🔄 Submit Return'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default OrdersPage;
+
