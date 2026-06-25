@@ -9,6 +9,9 @@ const {
   updateDeliveryProfile,
   forgotPassword,
   resetPassword,
+  applyForRole,
+  approveRoleRequest,
+  rejectRoleRequest
 } = require('../controllers/authController');
 const { reapplyUser } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
@@ -94,5 +97,12 @@ router.post('/forgot-password', forgotPassword);
 
 // PUT /api/auth/reset-password/:token
 router.put('/reset-password/:token', resetPassword);
+
+// Multi-role — apply for a new role (any authenticated user)
+router.post('/apply-role', protect, applyForRole);
+
+// Multi-role — admin approve/reject role requests
+router.put('/role-request/:userId/approve', protect, authorizeRoles('admin'), approveRoleRequest);
+router.put('/role-request/:userId/reject',  protect, authorizeRoles('admin'), rejectRoleRequest);
 
 module.exports = router;

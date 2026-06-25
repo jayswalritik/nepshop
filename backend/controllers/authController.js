@@ -413,6 +413,207 @@ const resetPassword = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Apply to add a new role (seller or delivery)
+// @route   POST /api/auth/apply-role
+// @access  Authenticated users
+// ─────────────────────────────────────────────────────────
+const applyForRole = asyncHandler(async (req, res) => {
+  const { role, shopName, panNumber, shopAddress, vehicleType, citizenshipNumber, payoutDetails } = req.body;
+
+  // Only seller or delivery can be applied for
+  if (!['seller', 'delivery'].includes(role)) {
+    res.status(400);
+    throw new Error('You can only apply to become a seller or delivery agent');
+  }
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  // Normalize current roles (fallback to legacy role)
+  const currentRoles = user.roles && user.roles.length ? user.roles : [user.role];
+
+  // Admin cannot apply for other roles
+  if (currentRoles.includes('admin')) {
+    res.status(403);
+    throw new Error('Admin accounts cannot apply for other roles');
+  }
+
+  // Already has this role
+  if (currentRoles.includes(role)) {
+    res.status(409);
+    throw new Error(`You are already a ${role}`);
+  }
+
+  // Block seller + delivery combination (conflict of interest)
+  if (role === 'seller' && currentRoles.includes('delivery')) {
+    res.status(409);
+    throw new Error('Delivery agents cannot also become sellers');
+  }
+  if (role === 'delivery' && currentRoles.includes('seller')) {
+    res.status(409);
+    throw new Error('Sellers cannot also become delivery agents');
+  }
+
+  // Already has a pending request
+  if (user.pendingRoleRequest?.status === 'pending') {
+    res.status(409);
+    throw new Error(`You already have a pending ${user.pendingRoleRequest.role} application`);
+  }
+
+  // Validate and save role-specific info
+  if (role === 'seller') {
+    if (!shopName || !panNumber) {
+      res.status(400);
+      throw new Error('Shop name and PAN number are required to become a seller');
+    }
+    user.shopName    = shopName;
+    user.panNumber   = panNumber;
+    if (shopAddress) {
+      user.shopAddress = {
+        street:   shopAddress.street   || null,
+        city:     shopAddress.city     || null,
+        district: shopAddress.district || null,
+        phone:    shopAddress.phone    || null,
+      };
+    }
+  }
+
+  if (role === 'delivery') {
+    if (!vehicleType || !citizenshipNumber) {
+      res.status(400);
+      throw new Error('Vehicle type and citizenship number are required to become a delivery agent');
+    }
+    user.vehicleType       = vehicleType;
+    user.citizenshipNumber = citizenshipNumber;
+  }
+
+  if (payoutDetails) {
+    user.payoutDetails = {
+      preferredMethod:   payoutDetails.preferredMethod   || user.payoutDetails?.preferredMethod,
+      bankName:          payoutDetails.bankName          || user.payoutDetails?.bankName,
+      accountNumber:     payoutDetails.accountNumber     || user.payoutDetails?.accountNumber,
+      accountHolderName: payoutDetails.accountHolderName || user.payoutDetails?.accountHolderName,
+      khaltiNumber:      payoutDetails.khaltiNumber      || user.payoutDetails?.khaltiNumber,
+      esewaNumber:       payoutDetails.esewaNumber       || user.payoutDetails?.esewaNumber,
+    };
+  }
+
+  user.pendingRoleRequest = {
+    role,
+    requestedAt: new Date(),
+    status:      'pending',
+  };
+
+  await user.save();
+
+  // Email the applicant
+  const {
+    sendSellerApplicationEmail,
+    sendDeliveryApplicationEmail,
+    sendNewApplicationToAdmin,
+  } = require('../utils/emailService');
+
+  if (role === 'seller')   sendSellerApplicationEmail(user);
+  if (role === 'delivery') sendDeliveryApplicationEmail(user);
+
+  // Notify admin
+  const admin = await User.findOne({ role: 'admin' });
+  if (admin) {
+    // Pass a temp object so the email shows the right role being applied for
+    sendNewApplicationToAdmin(admin.email, { ...user.toObject(), role });
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Your application to become a ${role} has been submitted and is pending admin review.`,
+    user:    user.toPublicJSON(),
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Approve a pending role request (admin)
+// @route   PUT /api/auth/role-request/:userId/approve
+// @access  Admin only
+// ─────────────────────────────────────────────────────────
+const approveRoleRequest = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.userId);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.pendingRoleRequest?.status !== 'pending') {
+    res.status(400);
+    throw new Error('This user has no pending role request');
+  }
+
+  const newRole = user.pendingRoleRequest.role;
+
+  // Add the new role
+  const currentRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  if (!currentRoles.includes(newRole)) {
+    currentRoles.push(newRole);
+  }
+  user.roles  = currentRoles;
+  user.status = 'active';
+
+  // Clear the pending request
+  user.pendingRoleRequest = { role: null, requestedAt: null, status: null };
+
+  user.approvedBy = req.user._id;
+  user.approvedAt = new Date();
+
+  await user.save();
+
+  // Email the user
+  const { sendAccountApprovedEmail } = require('../utils/emailService');
+  sendAccountApprovedEmail({ ...user.toObject(), role: newRole });
+
+  res.status(200).json({
+    success: true,
+    message: `Role "${newRole}" approved for ${user.firstName} ${user.lastName}`,
+    user:    user.toPublicJSON(),
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Reject a pending role request (admin)
+// @route   PUT /api/auth/role-request/:userId/reject
+// @access  Admin only
+// ─────────────────────────────────────────────────────────
+const rejectRoleRequest = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.userId);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  if (user.pendingRoleRequest?.status !== 'pending') {
+    res.status(400);
+    throw new Error('This user has no pending role request');
+  }
+
+  const rejectedRole = user.pendingRoleRequest.role;
+
+  // Clear the pending request — existing roles untouched
+  user.pendingRoleRequest = { role: null, requestedAt: null, status: null };
+  await user.save();
+
+  // Email the user
+  const { sendAccountRejectedEmail } = require('../utils/emailService');
+  sendAccountRejectedEmail({ ...user.toObject(), role: rejectedRole });
+
+  res.status(200).json({
+    success: true,
+    message: `Role request rejected for ${user.firstName} ${user.lastName}`,
+    user:    user.toPublicJSON(),
+  });
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -422,4 +623,7 @@ module.exports = {
   updateDeliveryProfile,
   forgotPassword,
   resetPassword,
+  applyForRole,
+  approveRoleRequest,
+  rejectRoleRequest,
 };
