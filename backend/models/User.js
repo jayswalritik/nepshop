@@ -34,12 +34,37 @@ const userSchema = new mongoose.Schema(
       select: false, // Never return password in queries by default
     },
 
-    // ── Role ─────────────────────────────────────────────
+    // ── Role (legacy single role — kept for compatibility) ─
     role: {
       type: String,
       enum: ['customer', 'seller', 'delivery', 'admin'],
       required: true,
       default: 'customer',
+    },
+
+    // ── Multi-role capabilities ──────────────────────────
+    // What this user is allowed to do. A user can hold multiple
+    // roles (e.g. ['customer','seller']) but admin is never mixed.
+    roles: {
+      type: [String],
+      enum: ['customer', 'seller', 'delivery', 'admin'],
+      default: undefined, // set during migration/registration
+    },
+
+    // ── Active role (which dashboard they're currently using) ─
+    activeRole: {
+      type: String,
+      enum: ['customer', 'seller', 'delivery', 'admin'],
+      default: undefined,
+    },
+
+    // ── Pending role request ─────────────────────────────
+    // When a user applies to add a new role, it sits here until
+    // an admin approves it. They keep using existing roles meanwhile.
+    pendingRoleRequest: {
+      role:        { type: String, enum: ['seller', 'delivery', null], default: null },
+      requestedAt: { type: Date, default: null },
+      status:      { type: String, enum: ['pending', 'rejected', null], default: null },
     },
 
     // ── Account status ───────────────────────────────────
@@ -162,20 +187,25 @@ userSchema.methods.generateResetToken = function () {
 // ── Instance method: get public profile (no sensitive data) ──
 userSchema.methods.toPublicJSON = function () {
   return {
-    _id:           this._id,
-    firstName:     this.firstName,
-    lastName:      this.lastName,
-    email:         this.email,
-    phone:         this.phone,
-    role:          this.role,
-    status:        this.status,
-    shopName:      this.shopName,
-    shopAddress:   this.shopAddress,
-    vehicleType:   this.vehicleType,
-    profileImage:  this.profileImage,
-    payoutDetails: this.payoutDetails,
-    commissionRate:this.commissionRate,
-    createdAt:     this.createdAt,
+    _id:                this._id,
+    firstName:          this.firstName,
+    lastName:           this.lastName,
+    email:              this.email,
+    phone:              this.phone,
+    role:               this.role,
+    roles:              this.roles && this.roles.length ? this.roles : [this.role],
+    activeRole:         this.activeRole || this.role,
+    pendingRoleRequest: this.pendingRoleRequest,
+    status:             this.status,
+    shopName:           this.shopName,
+    shopAddress:        this.shopAddress,
+    panNumber:          this.panNumber,
+    vehicleType:        this.vehicleType,
+    citizenshipNumber:  this.citizenshipNumber,
+    profileImage:       this.profileImage,
+    payoutDetails:      this.payoutDetails,
+    commissionRate:     this.commissionRate,
+    createdAt:          this.createdAt,
   };
 };
 
