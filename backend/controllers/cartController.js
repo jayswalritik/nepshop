@@ -185,6 +185,7 @@ const removeFromCart = asyncHandler(async (req, res) => {
   );
 
   await cart.save();
+  await cart.populate('items.product', 'name images price stock isActive');
 
   const total = cart.items.reduce(
     (sum, i) => sum + i.price * i.quantity, 0
@@ -199,7 +200,6 @@ const removeFromCart = asyncHandler(async (req, res) => {
     cart: { items: cart.items, total, itemCount },
   });
 });
-
 // ─────────────────────────────────────────────────────────
 // @desc    Clear entire cart
 // @route   DELETE /api/cart

@@ -1,14 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useCart } from '../../context/CartContext';
 import API from '../../utils/api';
 
 const KhaltiVerify = () => {
   const [searchParams] = useSearchParams();
   const navigate       = useNavigate();
-  const [status, setStatus] = useState('verifying');
+  const { fetchCart }  = useCart();
+  const [status, setStatus]   = useState('verifying');
   const [message, setMessage] = useState('');
+  const hasVerified = useRef(false);
 
   useEffect(() => {
+    if (hasVerified.current) return;
+    hasVerified.current = true;
     verifyPayment();
   }, []);
 
@@ -23,10 +28,10 @@ const KhaltiVerify = () => {
           ? 'Payment was cancelled. Your cart is still saved.'
           : 'Payment failed — this could be due to insufficient balance or a network issue. Your cart is still saved.'
       );
+      sessionStorage.removeItem('khalti_order_data');
       return;
     }
 
-    // Get orderData from sessionStorage
     const orderDataStr = sessionStorage.getItem('khalti_order_data');
     if (!orderDataStr) {
       setStatus('failed');
@@ -44,6 +49,7 @@ const KhaltiVerify = () => {
 
       if (data.success) {
         sessionStorage.removeItem('khalti_order_data');
+        await fetchCart(); // refresh cart so cleared state shows
         setStatus('success');
         setMessage('Payment successful! Your order has been placed.');
         setTimeout(() => navigate('/customer/dashboard'), 3000);

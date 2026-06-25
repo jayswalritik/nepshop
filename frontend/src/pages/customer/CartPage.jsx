@@ -45,10 +45,10 @@ const CartPage = ({ onCheckoutSuccess }) => {
 
       {/* Cart items */}
       <div className="space-y-3 mb-5">
-        {cart.items.map((item) => (
+        {cart.items.filter((item) => item.product).map((item) => (
           <div key={item._id} className="bg-white border border-gray-200 rounded-xl p-4 flex gap-4">
             <img
-              src={item.product?.images[0]?.url}
+              src={item.product?.images?.[0]?.url || ''}
               alt={item.product?.name}
               className="w-20 h-20 object-cover rounded-lg border border-gray-100 flex-shrink-0"
             />
@@ -347,13 +347,13 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
 
             {/* Items */}
             <div className="space-y-3 mb-4 max-h-64 overflow-y-auto">
-              {cart.items.map((item) => (
+              {cart.items.filter((item) => item.product).map((item) => (
                 <div key={item._id} className="flex gap-3">
                   <img
-                    src={item.product?.images[0]?.url}
+                    src={item.product?.images?.[0]?.url || ''}
                     alt=""
                     className="w-12 h-12 object-cover rounded-lg border border-gray-100 flex-shrink-0"
-                  />
+                  /> 
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-900 truncate">{item.product?.name}</p>
                     <p className="text-xs text-gray-400">Qty: {item.quantity}</p>

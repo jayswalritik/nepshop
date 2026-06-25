@@ -295,7 +295,7 @@ const sendPasswordResetEmail = (user, resetUrl) => sendEmail({
 // 3. Order placed confirmation
 const sendOrderPlacedEmail = (user, order) => sendEmail({
   to:        user.email,
-  subject:   `Order Confirmed — #${order._id.toString().slice(-8).toUpperCase()} | NepShop`,
+  subject:   `Order Placed — #${order._id.toString().slice(-8).toUpperCase()} | NepShop`,
   preheader: `Your order of ${formatCurrency(order.total)} has been placed successfully.`,
   html: `
     ${hero('✅', 'Order Placed Successfully!', `Thank you for your order, ${user.firstName}. We've received your order and it's being reviewed by the seller.`, `Order #${order._id.toString().slice(-8).toUpperCase()}`, '#16a34a')}
