@@ -385,7 +385,13 @@ const SellerOrdersPage = () => {
             <div className="flex gap-3">
               {nextStatus[selected.status] && (
                 <button
-                  onClick={() => handleUpdateStatus(selected._id, nextStatus[selected.status].value)}
+                  onClick={() => {
+                    if (nextStatus[selected.status].value === 'dispatched' && !selectedAgent) {
+                      alert('Please select a delivery agent before dispatching');
+                      return;
+                    }
+                    handleUpdateStatus(selected._id, nextStatus[selected.status].value);
+                  }}
                   disabled={actionLoading === selected._id}
                   className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-medium py-2.5 rounded-xl text-sm transition-all"
                 >

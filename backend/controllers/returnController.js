@@ -63,6 +63,22 @@ const requestReturn = asyncHandler(async (req, res) => {
   order.status = 'returned';
   await order.save();
 
+  // Send emails
+  const {
+    sendReturnRequestEmail,
+    sendReturnRequestToSeller,
+  } = require('../utils/emailService');
+
+  const customer = await User.findById(req.user._id);
+  if (customer) sendReturnRequestEmail(customer, returnRequest, order);
+
+  // Notify seller
+  const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+  for (const sellerId of sellerIds) {
+    const seller = await User.findById(sellerId);
+    if (seller) sendReturnRequestToSeller(seller, returnRequest, order);
+  }
+
   res.status(201).json({
     success: true,
     message: 'Return request submitted. Admin will review and process your refund.',
@@ -153,11 +169,21 @@ const processReturn = asyncHandler(async (req, res) => {
 
   await returnRequest.save();
 
-  // Send email notification
-  try {
-    const { sendEmail } = require('../utils/emailService');
-  } catch (e) {}
+  const {
+    sendReturnApprovedEmail,
+    sendReturnRejectedEmail,
+  } = require('../utils/emailService');
 
+  const customer = await User.findById(returnRequest.customer._id);
+  if (customer) {
+    if (status === 'approved') {
+      sendReturnApprovedEmail(customer, returnRequest, returnRequest.order);
+    } else {
+      sendReturnRejectedEmail(customer, returnRequest, returnRequest.order);
+    }
+  }
+
+  
   res.status(200).json({
     success: true,
     message: `Return request ${status}`,

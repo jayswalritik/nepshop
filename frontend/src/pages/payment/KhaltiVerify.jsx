@@ -13,30 +13,44 @@ const KhaltiVerify = () => {
   }, []);
 
   const verifyPayment = async () => {
-    const pidx    = searchParams.get('pidx');
-    const orderId = searchParams.get('purchase_order_id');
+    const pidx      = searchParams.get('pidx');
     const txnStatus = searchParams.get('status');
 
-    if (txnStatus === 'Canceled' || txnStatus === 'Failed') {
+    if (txnStatus === 'User canceled' || txnStatus === 'Failed') {
       setStatus('failed');
-      setMessage('Payment was cancelled or failed. Your order is still saved — you can retry payment.');
+      setMessage(
+        txnStatus === 'User canceled'
+          ? 'Payment was cancelled. Your cart is still saved.'
+          : 'Payment failed — this could be due to insufficient balance or a network issue. Your cart is still saved.'
+      );
       return;
     }
+
+    // Get orderData from sessionStorage
+    const orderDataStr = sessionStorage.getItem('khalti_order_data');
+    if (!orderDataStr) {
+      setStatus('failed');
+      setMessage('Session expired. Please try again.');
+      return;
+    }
+
+    const orderData = JSON.parse(orderDataStr);
 
     try {
       const { data } = await API.post('/payment/khalti/verify', {
         pidx,
-        orderId,
+        orderData,
       });
 
       if (data.success) {
+        sessionStorage.removeItem('khalti_order_data');
         setStatus('success');
-        setMessage('Payment successful! Your order has been confirmed.');
+        setMessage('Payment successful! Your order has been placed.');
         setTimeout(() => navigate('/customer/dashboard'), 3000);
       }
     } catch (err) {
       setStatus('failed');
-      setMessage(err.response?.data?.message || 'Payment verification failed.');
+      setMessage(err.response?.data?.message || 'Payment verification failed. Your cart is still saved.');
     }
   };
 

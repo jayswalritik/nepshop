@@ -171,40 +171,36 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
     setLoading(true);
     setError('');
     try {
-      // Step 1 — Place the order
-      const { data } = await API.post('/orders', {
-        deliveryAddress: address,
-        paymentMethod,
-        customerNote,
-      });
-
-      const orderId = data.order._id;
-
-      // Step 2 — Handle payment method
       if (paymentMethod === 'cash_on_delivery') {
-        // COD — go straight to orders
+        // COD — create order directly
+        await API.post('/orders', {
+          deliveryAddress: address,
+          paymentMethod,
+          customerNote,
+        });
         onSuccess();
         return;
       }
 
       if (paymentMethod === 'khalti') {
-        // Initiate Khalti payment
-        const khaltiRes = await API.post('/payment/khalti/initiate', { orderId });
-        // Redirect to Khalti payment page
+        const khaltiRes = await API.post('/payment/khalti/initiate', {
+          deliveryAddress: address,
+          customerNote,
+        });
+        sessionStorage.setItem('khalti_order_data', JSON.stringify(khaltiRes.data.orderData));
         window.location.href = khaltiRes.data.paymentUrl;
         return;
       }
 
       if (paymentMethod === 'esewa') {
-        // Initiate eSewa payment
-        const esewaRes = await API.post('/payment/esewa/initiate', { orderId });
+        const esewaRes = await API.post('/payment/esewa/initiate', {
+          deliveryAddress: address,
+          customerNote,
+        });
         const { gatewayUrl, formData: esewaFormData } = esewaRes.data;
-
-        // eSewa uses form POST — create and submit a hidden form
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = gatewayUrl;
-
         Object.entries(esewaFormData).forEach(([key, value]) => {
           const input = document.createElement('input');
           input.type  = 'hidden';
@@ -212,14 +208,13 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
           input.value = value;
           form.appendChild(input);
         });
-
         document.body.appendChild(form);
         form.submit();
         return;
       }
 
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to place order. Please try again.');
+      setError(err.response?.data?.message || 'Failed to process. Please try again.');
     } finally {
       setLoading(false);
     }

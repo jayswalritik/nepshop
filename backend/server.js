@@ -3,6 +3,8 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/errorMiddleware');
+const cron = require('node-cron');
+
 
 // ── Load environment variables ────────────────────────────
 dotenv.config();
@@ -10,13 +12,29 @@ dotenv.config();
 // ── Connect to MongoDB ────────────────────────────────────
 connectDB();
 
+
+// Daily admin summary — runs every day at 8:00 PM Nepal time
+cron.schedule('0 14 * * *', async () => {
+  try {
+    const User = require('./models/User');
+    const { sendDailyAdminSummary } = require('./utils/emailService');
+    const admin = await User.findOne({ role: 'admin' });
+    if (admin) {
+      console.log('📊 Sending daily admin summary...');
+      await sendDailyAdminSummary(admin.email);
+    }
+  } catch (err) {
+    console.error('Daily summary failed:', err.message);
+  }
+}, { timezone: 'Asia/Kathmandu' });
+
 const app = express();
 
 // ── Core Middleware ───────────────────────────────────────
 
 // CORS — allow requests from the frontend
 app.use(cors({
-  origin: process.env.CLIENT_URL,
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
 }));
 // Parse JSON request bodies
@@ -44,7 +62,6 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/delivery', require('./routes/deliveryRoutes'));
 app.use('/api/reviews', require('./routes/reviewRoutes'));
 app.use('/api/payment', require('./routes/paymentRoutes'));
-app.use('/api/returns', require('./routes/returnRoutes'));
 
 // Future routes (we'll add these in later steps):
 // app.use('/api/products',  require('./routes/productRoutes'));

@@ -13,6 +13,8 @@ const {
 } = require('../utils/emailService');
 const User = require('../models/User');
 
+
+
 // ─────────────────────────────────────────────────────────
 // @desc    Place a new order from cart
 // @route   POST /api/orders
@@ -216,7 +218,7 @@ const cancelOrder = asyncHandler(async (req, res) => {
 
   // Send emails
   const customer = await User.findById(req.user._id);
-  sendOrderStatusEmail(customer, order, 'cancelled');
+  if (customer) sendOrderStatusEmail(customer, order, 'cancelled');
 
   // Notify seller
   const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
@@ -303,8 +305,12 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   if (status === 'confirmed')  order.confirmedAt  = new Date();
   if (status === 'packed')     order.packedAt     = new Date();
   if (status === 'dispatched') {
-    order.dispatchedAt = new Date();
-    if (deliveryAgentId) order.deliveryAgent = deliveryAgentId;
+    if (!deliveryAgentId) {
+      res.status(400);
+      throw new Error('Please assign a delivery agent before dispatching the order');
+    }
+    order.dispatchedAt  = new Date();
+    order.deliveryAgent = deliveryAgentId;
 
     // Save seller's shop address as pickup address
     const seller = await require('../models/User').findById(req.user._id)

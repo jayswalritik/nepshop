@@ -7,45 +7,134 @@ const {
   sendOrderStatusEmail,
 } = require('../utils/emailService');
 
+const Cart    = require('../models/Cart');
+const Product = require('../models/Product');
+
+// Helper — create order from cart
+const createOrderFromCart = async (userId, orderData) => {
+  const Order = require('../models/Order');
+
+  const cart = await Cart.findOne({ customer: userId })
+    .populate('items.product', 'name images price stock isActive seller discount');
+
+  if (!cart || cart.items.length === 0) {
+    throw new Error('Cart is empty');
+  }
+
+  // Validate stock
+  const orderItems = [];
+  for (const item of cart.items) {
+    const product = item.product;
+    if (!product || !product.isActive) {
+      throw new Error(`Product "${product?.name}" is no longer available`);
+    }
+    if (product.stock < item.quantity) {
+      throw new Error(`Insufficient stock for "${product.name}"`);
+    }
+    orderItems.push({
+      product:  product._id,
+      name:     product.name,
+      image:    product.images[0]?.url || '',
+      price:    item.price,
+      quantity: item.quantity,
+      seller:   product.seller,
+    });
+  }
+
+  const subtotal       = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const deliveryCharge = subtotal >= 2000 ? 0 : 100;
+  const total          = subtotal + deliveryCharge;
+  const commissionRate = 5;
+  const commissionAmount = +(total * commissionRate / 100).toFixed(2);
+
+  const order = await Order.create({
+    customer: userId,
+    items:    orderItems,
+    deliveryAddress:  orderData.deliveryAddress,
+    paymentMethod:    orderData.paymentMethod,
+    customerNote:     orderData.customerNote || '',
+    subtotal,
+    deliveryCharge,
+    total,
+    commissionRate,
+    commissionAmount,
+    status:        'confirmed', // Auto-confirm for online payments
+    paymentStatus: 'paid',
+    confirmedAt:   new Date(),
+  });
+
+  // Deduct stock
+  for (const item of cart.items) {
+    const updated = await Product.findByIdAndUpdate(
+      item.product._id,
+      { $inc: { stock: -item.quantity } },
+      { new: true }
+    );
+    if (updated && updated.stock <= 5 && updated.stock >= 0) {
+      const seller = await User.findById(updated.seller);
+      if (seller) {
+        const { sendLowStockEmail } = require('../utils/emailService');
+        sendLowStockEmail(seller, updated);
+      }
+    }
+  }
+
+  // Clear cart
+  cart.items = [];
+  await cart.save();
+
+  return order;
+};
+
 // ─────────────────────────────────────────────────────────
 // @desc    Initiate Khalti payment
 // @route   POST /api/payment/khalti/initiate
 // @access  Customer only
 // ─────────────────────────────────────────────────────────
+
 const initiateKhalti = asyncHandler(async (req, res) => {
-  const { orderId } = req.body;
+  const { deliveryAddress, customerNote, cartSummary } = req.body;
 
-  const order = await Order.findById(orderId)
-    .populate('customer', 'firstName lastName email phone');
-
-  if (!order) {
-    res.status(404);
-    throw new Error('Order not found');
-  }
-
-  if (order.customer._id.toString() !== req.user._id.toString()) {
-    res.status(403);
-    throw new Error('Not authorized');
-  }
-
-  if (order.paymentStatus === 'paid') {
+  if (!deliveryAddress?.fullName || !deliveryAddress?.phone ||
+      !deliveryAddress?.street || !deliveryAddress?.city || !deliveryAddress?.district) {
     res.status(400);
-    throw new Error('Order is already paid');
+    throw new Error('Complete delivery address is required');
   }
 
-  // Khalti expects amount in paisa (1 Rs = 100 paisa)
-  const amountInPaisa = Math.round(order.total * 100);
+  // Get cart to calculate amount
+  const cart = await Cart.findOne({ customer: req.user._id })
+    .populate('items.product', 'name price discount stock isActive');
+
+  if (!cart || cart.items.length === 0) {
+    res.status(400);
+    throw new Error('Cart is empty');
+  }
+
+  const subtotal       = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const deliveryCharge = subtotal >= 2000 ? 0 : 100;
+  const total          = subtotal + deliveryCharge;
+  const amountInPaisa  = Math.round(total * 100);
+
+  // Store order data in a temporary pending payment record
+  // We use a simple approach — store in session via a temp field
+  // We'll pass orderData back and store it on frontend
+  const orderData = {
+    deliveryAddress,
+    customerNote: customerNote || '',
+    paymentMethod: 'khalti',
+    total,
+  };
 
   const payload = {
-    return_url:    `${process.env.FRONTEND_URL}/payment/khalti/verify`,
-    website_url:   process.env.FRONTEND_URL,
-    amount:        amountInPaisa,
-    purchase_order_id:   order._id.toString(),
-    purchase_order_name: `NepShop Order #${order._id.toString().slice(-8).toUpperCase()}`,
+    return_url:          `${process.env.FRONTEND_URL}/payment/khalti/verify`,
+    website_url:          process.env.FRONTEND_URL,
+    amount:               amountInPaisa,
+    purchase_order_id:    `NEPSHOP-${req.user._id}-${Date.now()}`,
+    purchase_order_name: `NepShop Order`,
     customer_info: {
-      name:  `${order.customer.firstName} ${order.customer.lastName}`,
-      email: order.customer.email,
-      phone: order.customer.phone,
+      name:  `${req.user.firstName} ${req.user.lastName}`,
+      email:  req.user.email,
+      phone:  req.user.phone,
     },
   };
 
@@ -61,9 +150,10 @@ const initiateKhalti = asyncHandler(async (req, res) => {
   );
 
   res.status(200).json({
-    success:     true,
-    paymentUrl:  response.data.payment_url,
-    pidx:        response.data.pidx,
+    success:    true,
+    paymentUrl: response.data.payment_url,
+    pidx:       response.data.pidx,
+    orderData,  // Send back to frontend to store temporarily
   });
 });
 
@@ -73,11 +163,11 @@ const initiateKhalti = asyncHandler(async (req, res) => {
 // @access  Customer only
 // ─────────────────────────────────────────────────────────
 const verifyKhalti = asyncHandler(async (req, res) => {
-  const { pidx, orderId } = req.body;
+  const { pidx, orderData } = req.body;
 
-  if (!pidx || !orderId) {
+  if (!pidx || !orderData) {
     res.status(400);
-    throw new Error('pidx and orderId are required');
+    throw new Error('pidx and orderData are required');
   }
 
   // Verify with Khalti
@@ -94,44 +184,41 @@ const verifyKhalti = asyncHandler(async (req, res) => {
 
   const khaltiData = response.data;
 
-  const order = await Order.findById(orderId);
-  if (!order) {
-    res.status(404);
-    throw new Error('Order not found');
-  }
-
   if (khaltiData.status === 'Completed') {
-    order.paymentStatus = 'paid';
-    order.status        = 'confirmed';
-    order.confirmedAt   = new Date();
-    await order.save();
+    // Create order NOW after payment confirmed
+    const order = await createOrderFromCart(req.user._id, orderData);
 
-    // Clear cart only after successful payment
-    const Cart = require('../models/Cart');
-    const cart = await Cart.findOne({ customer: order.customer });
-    if (cart) { cart.items = []; await cart.save(); }
+    // Send emails
+    const customer = await User.findById(req.user._id);
+    const {
+      sendOrderPlacedEmail,
+      sendNewOrderToSeller,
+    } = require('../utils/emailService');
 
-    // Notify customer
-    const customer = await User.findById(order.customer);
-    if (customer) sendOrderStatusEmail(customer, order, 'confirmed');
+    sendOrderPlacedEmail(customer, order);
+    const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+    for (const sellerId of sellerIds) {
+      const seller = await User.findById(sellerId);
+      if (seller) sendNewOrderToSeller(seller, order);
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'Payment successful',
+      message: 'Payment successful — order placed!',
       order,
     });
   }
 
-  // Payment failed or pending
-  order.paymentStatus = 'failed';
-  await order.save();
-
+  // Payment failed — don't create order, cart stays intact
   res.status(400).json({
     success: false,
-    message: `Payment ${khaltiData.status}. Please try again.`,
-    status:  khaltiData.status,
+    message: khaltiData.status === 'User canceled'
+      ? 'Payment was cancelled. Your cart is still saved.'
+      : `Payment ${khaltiData.status}. Please try again.`,
+    status: khaltiData.status,
   });
 });
+
 
 // ─────────────────────────────────────────────────────────
 // @desc    Initiate eSewa payment
@@ -139,50 +226,60 @@ const verifyKhalti = asyncHandler(async (req, res) => {
 // @access  Customer only
 // ─────────────────────────────────────────────────────────
 const initiateEsewa = asyncHandler(async (req, res) => {
-  const { orderId } = req.body;
+  const { deliveryAddress, customerNote } = req.body;
 
-  const order = await Order.findById(orderId);
-  if (!order) {
-    res.status(404);
-    throw new Error('Order not found');
-  }
-
-  if (order.customer.toString() !== req.user._id.toString()) {
-    res.status(403);
-    throw new Error('Not authorized');
-  }
-
-  if (order.paymentStatus === 'paid') {
+  if (!deliveryAddress?.fullName || !deliveryAddress?.phone ||
+      !deliveryAddress?.street || !deliveryAddress?.city || !deliveryAddress?.district) {
     res.status(400);
-    throw new Error('Order is already paid');
+    throw new Error('Complete delivery address is required');
   }
 
-  // Generate eSewa signature
-  // Format: total_amount,transaction_uuid,product_code
-  const transactionUuid = `${order._id}-${Date.now()}`;
-  const message = `total_amount=${order.total},transaction_uuid=${transactionUuid},product_code=${process.env.ESEWA_MERCHANT_ID}`;
+  const cart = await Cart.findOne({ customer: req.user._id })
+    .populate('items.product', 'name price stock isActive');
+
+  if (!cart || cart.items.length === 0) {
+    res.status(400);
+    throw new Error('Cart is empty');
+  }
+
+  const subtotal       = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const deliveryCharge = subtotal >= 2000 ? 0 : 100;
+  const total          = subtotal + deliveryCharge;
+
+  const orderData = {
+    deliveryAddress,
+    customerNote: customerNote || '',
+    paymentMethod: 'esewa',
+    total,
+  };
+
+  const transactionUuid = `NEPSHOP-${req.user._id}-${Date.now()}`;
+  const crypto = require('crypto');
+  const message = `total_amount=${total},transaction_uuid=${transactionUuid},product_code=${process.env.ESEWA_MERCHANT_ID}`;
   const signature = crypto
     .createHmac('sha256', process.env.ESEWA_SECRET_KEY)
     .update(message)
     .digest('base64');
 
-  // Return form data for eSewa
-  // eSewa uses form POST so we return the data and let frontend submit
+  // Encode orderData to pass through eSewa redirect
+  const encodedOrderData = Buffer.from(JSON.stringify(orderData)).toString('base64');
+
   res.status(200).json({
-    success:         true,
-    gatewayUrl:      `${process.env.ESEWA_GATEWAY_URL}/api/epay/main/v2/form`,
+    success:    true,
+    gatewayUrl: `${process.env.ESEWA_GATEWAY_URL}/api/epay/main/v2/form`,
     transactionUuid,
+    orderData,
     formData: {
-      amount:           order.total,
-      tax_amount:       0,
-      total_amount:     order.total,
-      transaction_uuid: transactionUuid,
-      product_code:     process.env.ESEWA_MERCHANT_ID,
-      product_service_charge:  0,
-      product_delivery_charge: 0,
-      success_url: `${process.env.FRONTEND_URL}/payment/esewa/verify?orderId=${orderId}`,
-      failure_url: `${process.env.FRONTEND_URL}/payment/failed?orderId=${orderId}`,
-      signed_field_names: 'total_amount,transaction_uuid,product_code',
+      amount:                    total,
+      tax_amount:                0,
+      total_amount:              total,
+      transaction_uuid:          transactionUuid,
+      product_code:              process.env.ESEWA_MERCHANT_ID,
+      product_service_charge:    0,
+      product_delivery_charge:   0,
+      success_url: `${process.env.FRONTEND_URL}/payment/esewa/verify?orderData=${encodedOrderData}`,
+      failure_url: `${process.env.FRONTEND_URL}/payment/failed`,
+      signed_field_names:        'total_amount,transaction_uuid,product_code',
       signature,
     },
   });
@@ -194,58 +291,48 @@ const initiateEsewa = asyncHandler(async (req, res) => {
 // @access  Customer only
 // ─────────────────────────────────────────────────────────
 const verifyEsewa = asyncHandler(async (req, res) => {
-  const { orderId, data } = req.body;
+  const { data, orderData } = req.body;
 
-  if (!data || !orderId) {
+  if (!data || !orderData) {
     res.status(400);
-    throw new Error('data and orderId are required');
+    throw new Error('data and orderData are required');
   }
 
-  // Decode base64 response from eSewa
   const decoded     = JSON.parse(Buffer.from(data, 'base64').toString('utf-8'));
   const status      = decoded.status;
   const totalAmount = decoded.total_amount;
 
-  const order = await Order.findById(orderId);
-  if (!order) {
-    res.status(404);
-    throw new Error('Order not found');
-  }
-
   if (status === 'COMPLETE') {
-    // Verify amount matches
-    if (parseFloat(totalAmount) !== order.total) {
+    const parsedOrderData = typeof orderData === 'string'
+      ? JSON.parse(Buffer.from(orderData, 'base64').toString('utf-8'))
+      : orderData;
+
+    if (parseFloat(totalAmount) !== parsedOrderData.total) {
       res.status(400);
       throw new Error('Payment amount mismatch');
     }
 
-    order.paymentStatus = 'paid';
-    order.status        = 'confirmed';
-    order.confirmedAt   = new Date();
-    await order.save();
+    const order = await createOrderFromCart(req.user._id, parsedOrderData);
 
-    // Clear cart only after successful payment
-    const Cart = require('../models/Cart');
-    const cart = await Cart.findOne({ customer: order.customer });
-    if (cart) { cart.items = []; await cart.save(); }
-
-    // Notify customer
-    const customer = await User.findById(order.customer);
-    if (customer) sendOrderStatusEmail(customer, order, 'confirmed');
+    const customer = await User.findById(req.user._id);
+    const { sendOrderPlacedEmail, sendNewOrderToSeller } = require('../utils/emailService');
+    sendOrderPlacedEmail(customer, order);
+    const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+    for (const sellerId of sellerIds) {
+      const seller = await User.findById(sellerId);
+      if (seller) sendNewOrderToSeller(seller, order);
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'eSewa payment verified successfully',
+      message: 'eSewa payment verified — order placed!',
       order,
     });
   }
 
-  order.paymentStatus = 'failed';
-  await order.save();
-
   res.status(400).json({
     success: false,
-    message: 'eSewa payment failed or incomplete',
+    message: 'eSewa payment failed. Your cart is still saved.',
   });
 });
 

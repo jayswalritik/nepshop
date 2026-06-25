@@ -23,17 +23,17 @@ const seedAdmin = async () => {
     const admin = await User.create({
       firstName: 'Super',
       lastName: 'Admin',
-      email: 'admin@nepshop.com',
+      email: 'rockr8379@gmail.com',
       phone: '9800000000',
-      password: 'Admin@1234',
+      password: 'Test1234',
       role: 'admin',
       status: 'active',
     });
 
     console.log('✅ Admin account created successfully!');
     console.log('─────────────────────────────────────');
-    console.log('   Email    : admin@nepshop.com');
-    console.log('   Password : Admin@1234');
+    console.log('   Email    : rockr8379@gmail.com');
+    console.log('   Password : Test1234');
     console.log('   Role     : admin');
     console.log('─────────────────────────────────────');
     console.log('⚠️  Change this password after first login!');
