@@ -614,6 +614,41 @@ const rejectRoleRequest = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Instantly add customer role (no approval needed)
+// @route   POST /api/auth/add-customer-role
+// @access  Authenticated users (seller/delivery)
+// ─────────────────────────────────────────────────────────
+const addCustomerRole = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  const currentRoles = user.roles && user.roles.length ? user.roles : [user.role];
+
+  if (currentRoles.includes('admin')) {
+    res.status(403);
+    throw new Error('Admin accounts cannot add other roles');
+  }
+
+  if (currentRoles.includes('customer')) {
+    res.status(409);
+    throw new Error('You already have a customer account');
+  }
+
+  currentRoles.push('customer');
+  user.roles = currentRoles;
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'You can now shop on NepShop! Switch to customer mode anytime.',
+    user:    user.toPublicJSON(),
+  });
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -626,4 +661,5 @@ module.exports = {
   applyForRole,
   approveRoleRequest,
   rejectRoleRequest,
+  addCustomerRole,
 };
