@@ -45,7 +45,7 @@ const createOrderFromCart = async (userId, orderData) => {
   const deliveryCharge = subtotal >= 2000 ? 0 : 100;
   const total          = subtotal + deliveryCharge;
   const commissionRate = 5;
-  const commissionAmount = +(total * commissionRate / 100).toFixed(2);
+  const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2); // commission on product price only
 
   const order = await Order.create({
     customer: userId,

@@ -325,22 +325,29 @@ const SellerOrdersPage = () => {
             {/* Pricing */}
             <div className="bg-indigo-50 rounded-xl p-4 mb-4">
               <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-500">Subtotal</span>
+                <span className="text-gray-500">Product subtotal</span>
                 <span>Rs {selected.subtotal.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-500">Delivery</span>
-                <span>{selected.deliveryCharge === 0 ? 'FREE' : `Rs ${selected.deliveryCharge}`}</span>
               </div>
               <div className="flex justify-between text-sm mb-2">
                 <span className="text-gray-500">Commission ({selected.commissionRate}%)</span>
                 <span className="text-red-500">- Rs {selected.commissionAmount}</span>
               </div>
-              <div className="flex justify-between font-bold border-t border-indigo-100 pt-2">
+              <div className="flex justify-between font-bold border-t border-indigo-100 pt-2 mb-3">
                 <span>Your earnings</span>
                 <span className="text-green-600">
-                  Rs {(selected.total - selected.commissionAmount).toLocaleString()}
+                  Rs {(selected.subtotal - selected.commissionAmount).toLocaleString()}
                 </span>
+              </div>
+
+              {/* Delivery — clearly not the seller's money */}
+              <div className="bg-white/60 border border-indigo-100 rounded-lg px-3 py-2">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Delivery charge (customer pays)</span>
+                  <span>{selected.deliveryCharge === 0 ? 'FREE' : `Rs ${selected.deliveryCharge}`}</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Paid to the delivery agent — not part of your earnings.
+                </p>
               </div>
             </div>
 

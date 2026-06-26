@@ -40,6 +40,28 @@ const markDelivered = asyncHandler(async (req, res) => {
 
   order.status      = 'delivered';
   order.deliveredAt = new Date();
+
+  // ── Settlement on delivery ──────────────────────────────
+  // Agent's Rs 50 released immediately (work is done, unambiguous).
+  // Seller share + commission locked for 7 days (return window).
+  const deliveryEarning = order.deliveryEarning || 50;
+  const sellerShare = +(order.subtotal - order.commissionAmount).toFixed(2);
+
+  const lockUntil = new Date();
+  lockUntil.setDate(lockUntil.getDate() + 7); // 7-day return window
+
+  order.settlement = {
+    ...order.settlement,
+    status:              'partial', // agent paid, rest locked
+    deliveryAgentPaid:   true,
+    deliveryAgentPaidAt: new Date(),
+    sellerShare:         sellerShare > 0 ? sellerShare : 0,
+    sellerReleased:      false,
+    sellerReleasedAt:    null,
+    commissionBooked:    false,
+    lockUntil:           lockUntil,
+  };
+
   await order.save();
 
   // Send delivered email to customer

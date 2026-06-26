@@ -66,7 +66,7 @@ const placeOrder = asyncHandler(async (req, res) => {
   const deliveryCharge = subtotal >= 2000 ? 0 : 100; // Free delivery above Rs 2000
   const total          = subtotal + deliveryCharge;
   const commissionRate = 5;
-  const commissionAmount = +(total * commissionRate / 100).toFixed(2);
+  const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2); // commission on product price only
 
   // Create order
   const order = await Order.create({

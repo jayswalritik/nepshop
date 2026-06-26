@@ -58,21 +58,47 @@ const CommissionManagement = () => {
         </div>
       )}
 
-      {/* Overall stats */}
+      {/* NepShop income breakdown */}
+      <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-6 mb-6 text-white">
+        <p className="text-sm text-indigo-200 mb-1">Total NepShop Income (delivered orders)</p>
+        <p className="text-4xl font-bold mb-4">
+          Rs {report?.overall?.nepShopIncome?.toLocaleString() || 0}
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-white/10 rounded-xl p-4">
+            <p className="text-xs text-indigo-200 mb-1">💼 Commission Income</p>
+            <p className="text-2xl font-bold">
+              Rs {report?.overall?.totalCommission?.toLocaleString() || 0}
+            </p>
+            <p className="text-xs text-indigo-200 mt-1">5% of product price</p>
+          </div>
+          <div className="bg-white/10 rounded-xl p-4">
+            <p className="text-xs text-indigo-200 mb-1">🚚 Delivery Margin</p>
+            <p className="text-2xl font-bold">
+              Rs {report?.overall?.deliveryMargin?.toLocaleString() || 0}
+            </p>
+            <p className="text-xs text-indigo-200 mt-1">
+              Collected Rs {report?.overall?.totalDeliveryCharge?.toLocaleString() || 0} − paid agents Rs {report?.overall?.totalDeliveryPaid?.toLocaleString() || 0}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Secondary stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Confirmed Revenue</p>
+          <p className="text-xs text-gray-400 mb-1">Product Revenue</p>
           <p className="text-2xl font-bold text-gray-900">
-            Rs {report?.overall?.totalRevenue?.toLocaleString() || 0}
+            Rs {report?.overall?.productRevenue?.toLocaleString() || 0}
           </p>
-          <p className="text-xs text-green-500 mt-1">✅ Delivered orders only</p>
+          <p className="text-xs text-gray-400 mt-1">Goes to sellers (− commission)</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-xs text-gray-400 mb-1">Commission Earned</p>
-          <p className="text-2xl font-bold text-green-600">
-            Rs {report?.overall?.totalCommission?.toLocaleString() || 0}
+          <p className="text-xs text-gray-400 mb-1">Paid to Agents</p>
+          <p className="text-2xl font-bold text-purple-600">
+            Rs {report?.overall?.totalDeliveryPaid?.toLocaleString() || 0}
           </p>
-          <p className="text-xs text-green-500 mt-1">✅ Delivered orders only</p>
+          <p className="text-xs text-gray-400 mt-1">Rs 50 × delivered orders</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs text-gray-400 mb-1">Pending Revenue</p>
@@ -98,10 +124,10 @@ const CommissionManagement = () => {
         <div>
           <p className="text-sm font-semibold text-indigo-900 mb-1">How commission works</p>
           <p className="text-sm text-indigo-700">
-            Default commission is <strong>5%</strong> of each order total.
-            <strong> Confirmed Revenue</strong> = delivered orders only.
-            <strong> Pending Revenue</strong> = orders still being processed (not yet earned).
-            Cancelled orders are excluded entirely.
+            NepShop earns from two sources: <strong>commission</strong> (5% of product price) and
+            <strong> delivery margin</strong> (delivery charge collected minus the Rs 50 paid to agents).
+            On a Rs 1,000 product: seller gets Rs 950, agent gets Rs 50, and NepShop keeps Rs 100
+            (Rs 50 commission + Rs 50 delivery margin). All figures from delivered orders only.
           </p>
         </div>
       </div>

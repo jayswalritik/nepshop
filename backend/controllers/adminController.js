@@ -443,15 +443,32 @@ pendingStats.forEach(s => {
     select: 'firstName lastName shopName email commissionRate',
   });
 
-  // Overall confirmed stats
+  // Overall confirmed stats — delivered orders only
   const overall = await Order.aggregate([
     { $match: { status: 'delivered' } },
     {
       $group: {
         _id:             null,
-        totalRevenue:    { $sum: '$total' },
-        totalCommission: { $sum: '$commissionAmount' },
+        totalRevenue:    { $sum: '$total' },          // what customers paid
+        productRevenue:  { $sum: '$subtotal' },        // product portion
+        totalCommission: { $sum: '$commissionAmount' },// NepShop commission income
+        totalDeliveryCharge: { $sum: '$deliveryCharge' }, // delivery collected from customers
+        totalDeliveryPaid:   { $sum: '$deliveryEarning' }, // paid to agents
         totalOrders:     { $sum: 1 },
+      },
+    },
+    {
+      $project: {
+        totalRevenue:        1,
+        productRevenue:      1,
+        totalCommission:     1,
+        totalDeliveryCharge: 1,
+        totalDeliveryPaid:   1,
+        totalOrders:         1,
+        // NepShop delivery margin = collected − paid to agents
+        deliveryMargin: { $subtract: ['$totalDeliveryCharge', '$totalDeliveryPaid'] },
+        // Total NepShop income = commission + delivery margin
+        nepShopIncome:  { $add: ['$totalCommission', { $subtract: ['$totalDeliveryCharge', '$totalDeliveryPaid'] }] },
       },
     },
   ]);

@@ -17,35 +17,41 @@ const EarningsPage = () => {
       const { data } = await API.get('/orders/seller?limit=100');
       const all = data.orders;
 
-      // Filter by period
-      const now   = new Date();
-      const filtered = all.filter(o => {
-        if (o.status !== 'delivered') return false;
-        if (period === 'today') {
-          return new Date(o.createdAt).toDateString() === now.toDateString();
-        }
-        if (period === 'week') {
-          const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
-          return new Date(o.createdAt) >= weekAgo;
-        }
-        if (period === 'month') {
-          return new Date(o.createdAt).getMonth() === now.getMonth() &&
-                 new Date(o.createdAt).getFullYear() === now.getFullYear();
-        }
-        return true; // all
+      const now = new Date();
+      const inPeriod = (o) => {
+        if (period === 'today') return new Date(o.createdAt).toDateString() === now.toDateString();
+        if (period === 'week')  return new Date(o.createdAt) >= new Date(now - 7 * 24 * 60 * 60 * 1000);
+        if (period === 'month') return new Date(o.createdAt).getMonth() === now.getMonth() &&
+                                       new Date(o.createdAt).getFullYear() === now.getFullYear();
+        return true;
+      };
+
+      // Delivered orders in period = earned (subject to settlement window)
+      const delivered = all.filter(o => o.status === 'delivered' && inPeriod(o));
+
+      // Seller earning per order = subtotal − commission (NEVER includes delivery)
+      const sellerEarning = (o) => o.subtotal - o.commissionAmount;
+
+      const productRevenue = delivered.reduce((sum, o) => sum + o.subtotal, 0);
+      const totalCommission = delivered.reduce((sum, o) => sum + o.commissionAmount, 0);
+      const totalEarnings   = delivered.reduce((sum, o) => sum + sellerEarning(o), 0);
+
+      // Available vs pending — based on settlement lock
+      let available = 0, pending = 0;
+      delivered.forEach(o => {
+        const earning = sellerEarning(o);
+        const released = o.settlement?.sellerReleased;
+        if (released) available += earning;
+        else pending += earning;
       });
 
-      // Calculate stats
-      const totalRevenue    = filtered.reduce((sum, o) => sum + o.total, 0);
-      const totalCommission = filtered.reduce((sum, o) => sum + o.commissionAmount, 0);
-      const totalEarnings   = totalRevenue - totalCommission;
-      const totalOrders     = filtered.length;
-      const delivered       = filtered.length; // all filtered are delivered
-      const pending         = all.filter(o => ['pending', 'confirmed', 'packed', 'dispatched'].includes(o.status)).length;
-      
+      // In-progress orders (not yet delivered, not yet earned)
+      const inProgress = all.filter(o => ['pending', 'confirmed', 'packed', 'dispatched'].includes(o.status));
+      const inProgressEarning = inProgress.reduce((sum, o) => sum + sellerEarning(o), 0);
+
       // Top products
       const productMap = {};
-      filtered.forEach(o => {
+      delivered.forEach(o => {
         o.items.forEach(item => {
           if (!productMap[item.name]) {
             productMap[item.name] = { name: item.name, image: item.image, qty: 0, revenue: 0 };
@@ -54,20 +60,20 @@ const EarningsPage = () => {
           productMap[item.name].revenue += item.price * item.quantity;
         });
       });
-      const topProducts = Object.values(productMap)
-        .sort((a, b) => b.revenue - a.revenue)
-        .slice(0, 5);
+      const topProducts = Object.values(productMap).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
 
       setStats({
-        totalRevenue,
+        productRevenue,
         totalCommission,
         totalEarnings,
-        totalOrders,
-        delivered,
+        available,
         pending,
+        inProgressCount: inProgress.length,
+        inProgressEarning,
+        deliveredCount: delivered.length,
         topProducts,
       });
-      setOrders(filtered.slice(0, 10));
+      setOrders(delivered.slice(0, 10));
     } catch (err) {
       console.error('Failed to fetch earnings:', err);
     } finally {
@@ -82,6 +88,8 @@ const EarningsPage = () => {
       </div>
     );
   }
+
+  const sellerEarning = (o) => o.subtotal - o.commissionAmount;
 
   return (
     <div>
@@ -106,37 +114,57 @@ const EarningsPage = () => {
         ))}
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-  <div className="bg-white border border-gray-200 rounded-xl p-5">
-    <p className="text-xs text-gray-400 mb-1">Confirmed Revenue</p>
-    <p className="text-2xl font-bold text-gray-900">
-      Rs {stats?.totalRevenue.toLocaleString()}
-    </p>
-    <p className="text-xs text-green-500 mt-1">✅ From delivered orders only</p>
-  </div>
-  <div className="bg-white border border-gray-200 rounded-xl p-5">
-    <p className="text-xs text-gray-400 mb-1">Your Earnings</p>
-    <p className="text-2xl font-bold text-green-600">
-      Rs {stats?.totalEarnings.toLocaleString()}
-    </p>
-    <p className="text-xs text-gray-400 mt-1">After {stats?.totalOrders > 0 ? '5' : '0'}% commission</p>
-  </div>
-  <div className="bg-white border border-gray-200 rounded-xl p-5">
-    <p className="text-xs text-gray-400 mb-1">Commission Paid</p>
-    <p className="text-2xl font-bold text-orange-500">
-      Rs {stats?.totalCommission.toLocaleString()}
-    </p>
-    <p className="text-xs text-gray-400 mt-1">Platform fee</p>
-  </div>
-  <div className="bg-white border border-gray-200 rounded-xl p-5">
-    <p className="text-xs text-gray-400 mb-1">Pending Orders</p>
-    <p className="text-2xl font-bold text-yellow-500">{stats?.pending}</p>
-    <p className="text-xs text-gray-400 mt-1">Revenue not yet confirmed</p>
-  </div>
-</div>
-      <div className="grid lg:grid-cols-2 gap-6">
+      {/* Balance cards — the settlement view */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-5">
+          <p className="text-xs text-green-700 mb-1 font-medium">💰 Available Balance</p>
+          <p className="text-3xl font-bold text-green-700">
+            Rs {stats?.available.toLocaleString()}
+          </p>
+          <p className="text-xs text-green-600 mt-1">Released — ready to withdraw</p>
+        </div>
+        <div className="bg-gradient-to-br from-yellow-50 to-amber-50 border border-yellow-200 rounded-xl p-5">
+          <p className="text-xs text-yellow-700 mb-1 font-medium">⏳ Pending (in escrow)</p>
+          <p className="text-3xl font-bold text-yellow-600">
+            Rs {stats?.pending.toLocaleString()}
+          </p>
+          <p className="text-xs text-yellow-600 mt-1">Locked during 7-day return window</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs text-gray-400 mb-1">Total Earned (delivered)</p>
+          <p className="text-3xl font-bold text-gray-900">
+            Rs {stats?.totalEarnings.toLocaleString()}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">{stats?.deliveredCount} delivered orders</p>
+        </div>
+      </div>
 
+      {/* Breakdown cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs text-gray-400 mb-1">Product Revenue</p>
+          <p className="text-2xl font-bold text-gray-900">
+            Rs {stats?.productRevenue.toLocaleString()}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">Before commission</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs text-gray-400 mb-1">Commission Paid</p>
+          <p className="text-2xl font-bold text-orange-500">
+            − Rs {stats?.totalCommission.toLocaleString()}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">5% platform fee on products</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-5">
+          <p className="text-xs text-gray-400 mb-1">In-Progress Orders</p>
+          <p className="text-2xl font-bold text-indigo-500">{stats?.inProgressCount}</p>
+          <p className="text-xs text-gray-400 mt-1">
+            ~Rs {stats?.inProgressEarning.toLocaleString()} once delivered
+          </p>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
         {/* Top products */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <h3 className="font-semibold text-gray-900 mb-4">Top Selling Products</h3>
@@ -152,11 +180,8 @@ const EarningsPage = () => {
                   <div className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-600 text-xs font-bold flex items-center justify-center flex-shrink-0">
                     {i + 1}
                   </div>
-                  <img
-                    src={product.image}
-                    alt={product.name}
-                    className="w-10 h-10 rounded-lg object-cover border border-gray-100 flex-shrink-0"
-                  />
+                  <img src={product.image} alt={product.name}
+                    className="w-10 h-10 rounded-lg object-cover border border-gray-100 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{product.name}</p>
                     <p className="text-xs text-gray-400">{product.qty} units sold</p>
@@ -172,12 +197,11 @@ const EarningsPage = () => {
 
         {/* Recent orders */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <h3 className="font-semibold text-gray-900 mb-4">Recent Orders</h3>
-          <p className="text-xs text-gray-400 mb-3">Showing delivered orders only</p>
+          <h3 className="font-semibold text-gray-900 mb-4">Recent Delivered Orders</h3>
           {orders.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <div className="text-3xl mb-2">🧾</div>
-              <p className="text-sm">No orders in this period</p>
+              <p className="text-sm">No delivered orders in this period</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -188,25 +212,20 @@ const EarningsPage = () => {
                       #{order._id.slice(-8).toUpperCase()}
                     </p>
                     <p className="text-xs text-gray-400">
-                      {new Date(order.createdAt).toLocaleDateString('en-NP', {
-                        day: 'numeric', month: 'short'
-                      })}
+                      {new Date(order.createdAt).toLocaleDateString('en-NP', { day: 'numeric', month: 'short' })}
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-semibold text-gray-900">
-                      Rs {order.total.toLocaleString()}
+                    <p className="text-xs text-gray-400">
+                      Product Rs {order.subtotal.toLocaleString()}
                     </p>
-                    <p className="text-xs text-green-600">
-                      Earned: Rs {(order.total - order.commissionAmount).toLocaleString()}
+                    <p className="text-sm font-semibold text-green-600">
+                      You earn Rs {sellerEarning(order).toLocaleString()}
                     </p>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full font-medium ml-2
-                    ${order.status === 'delivered' ? 'bg-green-100 text-green-700'
-                    : order.status === 'pending' ? 'bg-yellow-100 text-yellow-700'
-                    : order.status === 'dispatched' ? 'bg-purple-100 text-purple-700'
-                    : 'bg-indigo-100 text-indigo-700'}`}>
-                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                    ${order.settlement?.sellerReleased ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                    {order.settlement?.sellerReleased ? 'Released' : 'Pending'}
                   </span>
                 </div>
               ))}
@@ -215,18 +234,17 @@ const EarningsPage = () => {
         </div>
       </div>
 
-      {/* Commission info */}
+      {/* How earnings work */}
       <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-5 mt-5">
         <div className="flex items-start gap-3">
           <span className="text-2xl">💡</span>
           <div>
-            <p className="text-sm font-semibold text-indigo-900 mb-1">
-              How earnings are calculated
-            </p>
+            <p className="text-sm font-semibold text-indigo-900 mb-1">How your earnings work</p>
             <p className="text-sm text-indigo-700">
-              NepShop charges a <strong>5% commission</strong> on each order total.
-              Your earnings = Order total − 5% commission − delivery charge (if applicable).
-              Payout requests will be available in the next update.
+              Your earning = <strong>product price − 5% commission</strong>. The delivery charge is
+              <strong> not</strong> part of your earnings — it pays the delivery agent.
+              After delivery, your earning is held in escrow for <strong>7 days</strong> (the return window).
+              Once the window passes with no return, it moves to your <strong>Available Balance</strong>.
             </p>
           </div>
         </div>

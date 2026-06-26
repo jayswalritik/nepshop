@@ -95,6 +95,44 @@ const orderSchema = new mongoose.Schema(
     commissionAmount: { type: Number, default: 0 },
     deliveryEarning: { type: Number, default: 50 }, // Rs 50 per delivery
 
+    // ── Settlement (escrow model) ─────────────────────────
+    settlement: {
+      // Overall state of this order's money
+      // held      → customer paid, nothing released yet
+      // partial   → delivery agent paid, seller+commission locked
+      // released  → 7-day window passed, seller paid, commission booked
+      // refunded  → returned, money reversed per fault rules
+      status: {
+        type: String,
+        enum: ['held', 'partial', 'released', 'refunded'],
+        default: 'held',
+      },
+
+      // Delivery agent earning — released immediately on delivery
+      deliveryAgentPaid:   { type: Boolean, default: false },
+      deliveryAgentPaidAt: { type: Date, default: null },
+
+      // Seller share (product subtotal minus commission) — locked then released
+      sellerShare:         { type: Number, default: 0 },
+      sellerReleased:      { type: Boolean, default: false },
+      sellerReleasedAt:    { type: Date, default: null },
+
+      // Commission — booked on release, reversed on return
+      commissionBooked:    { type: Boolean, default: false },
+
+      // When the 7-day lock expires (set on delivery)
+      lockUntil:           { type: Date, default: null },
+
+      // Return / reversal tracking
+      returnPickupAgent:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      returnPickupEarning: { type: Number, default: 0 },
+      returnFault:         { type: String, enum: ['seller', 'customer', null], default: null },
+      refundToCustomer:    { type: Number, default: 0 },
+      sellerBearsDelivery: { type: Number, default: 0 }, // how much delivery cost seller absorbs
+      customerBearsDelivery:{ type: Number, default: 0 }, // how much delivery cost customer absorbs
+      settledAt:           { type: Date, default: null },
+    },
+
     // ── Notes ─────────────────────────────────────────────
     customerNote: { type: String, default: '' },
 
