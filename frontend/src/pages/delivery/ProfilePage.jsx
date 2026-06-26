@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
+import BecomeCustomer from '../../components/common/BecomeCustomer';
 
 const DeliveryProfilePage = () => {
   const { user, login } = useAuth();
@@ -57,6 +58,9 @@ const DeliveryProfilePage = () => {
 
   return (
     <div className="max-w-2xl">
+
+      {/* Become a customer */}
+      <BecomeCustomer />
 
       {/* Personal info */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 mb-5">
