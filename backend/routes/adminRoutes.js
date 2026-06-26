@@ -3,6 +3,7 @@ const User = require('../models/User');
 const express = require('express');
 const {
   getAllUsers,
+  getRoleRequests,
   approveUser,
   rejectUser,
   undoRejectUser,
@@ -41,6 +42,7 @@ router.get('/stats', getPlatformStats);
 
 // User management
 router.get('/users',                  getAllUsers);
+router.get('/role-requests',          getRoleRequests);
 router.get('/users/:id',              getUserById);
 router.put('/users/:id/approve',      approveUser);
 router.put('/users/:id/reject',       rejectUser);

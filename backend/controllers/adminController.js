@@ -14,6 +14,15 @@ const getAllUsers = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, users });
 });
 
+// @desc  Get all users with a pending role request
+// @route GET /api/admin/role-requests
+// @access Admin only
+const getRoleRequests = asyncHandler(async (req, res) => {
+  const users = await User.find({ 'pendingRoleRequest.status': 'pending' })
+    .sort({ 'pendingRoleRequest.requestedAt': -1 });
+  res.status(200).json({ success: true, users });
+});
+
 // @desc  Approve a user
 // @route PUT /api/admin/users/:id/approve
 // @access Admin only
@@ -499,6 +508,7 @@ const updateSellerCommission = asyncHandler(async (req, res) => {
 
 module.exports = {
   getAllUsers,
+  getRoleRequests,
   approveUser,
   rejectUser,
   undoRejectUser,

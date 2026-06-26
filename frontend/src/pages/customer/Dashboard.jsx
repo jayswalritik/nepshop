@@ -5,6 +5,8 @@ import ProductsPage from './ProductsPage';
 import CartPage from './CartPage';
 import OrdersPage from './OrdersPage';
 import ProfilePage from './ProfilePage';
+import RoleSwitcher from '../../components/common/RoleSwitcher';
+
 
 const CustomerDashboard = () => {
   const { user, logout } = useAuth();
@@ -56,6 +58,7 @@ const CustomerDashboard = () => {
 
           {/* Right side */}
           <div className="flex items-center gap-3">
+            <RoleSwitcher />
             <span className="hidden md:block text-sm text-gray-500">
               Hi, {user?.firstName}
             </span>

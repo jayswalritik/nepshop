@@ -16,7 +16,10 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
+  // Multi-role aware — check the roles array (fallback to legacy single role)
+  const userRoles = user.roles && user.roles.length ? user.roles : [user.role];
+
+  if (allowedRoles && !allowedRoles.some((r) => userRoles.includes(r))) {
     return <Navigate to="/unauthorized" replace />;
   }
 

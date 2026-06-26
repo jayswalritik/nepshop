@@ -6,6 +6,7 @@ import SellerOrdersPage from './OrdersPage';
 import SettingsPage from './SettingsPage';
 import EarningsPage from './EarningsPage';
 import ReviewsPage from './ReviewsPage';
+import RoleSwitcher from '../../components/common/RoleSwitcher';
 
 const SellerDashboard = () => {
   const { user, logout } = useAuth();
@@ -68,8 +69,11 @@ const SellerDashboard = () => {
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="p-3 border-t border-gray-100">
+        {/* Role switcher + Logout */}
+        <div className="p-3 border-t border-gray-100 space-y-2">
+          <div className="px-1">
+            <RoleSwitcher openDirection="up" />
+          </div>
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-all"

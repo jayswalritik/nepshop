@@ -13,6 +13,7 @@ const {
   approveRoleRequest,
   rejectRoleRequest,
   addCustomerRole,
+  switchActiveRole,
 } = require('../controllers/authController');
 const { reapplyUser } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
@@ -108,5 +109,8 @@ router.put('/role-request/:userId/reject',  protect, authorizeRoles('admin'), re
 
 // Multi-role — instantly add customer role (no approval)
 router.post('/add-customer-role', protect, addCustomerRole);
+
+// Multi-role — switch active role (dashboard mode)
+router.post('/switch-role', protect, switchActiveRole);
 
 module.exports = router;

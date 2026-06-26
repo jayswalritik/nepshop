@@ -5,6 +5,7 @@ import UserManagement from './UserManagement';
 import OrderMonitoring from './OrderMonitoring';
 import CommissionManagement from './CommissionManagement';
 import ReturnsManagement from './ReturnsManagement';
+import RoleRequests from './RoleRequests';
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -15,10 +16,12 @@ const AdminDashboard = () => {
   const navItems = [
     { key: 'overview',  label: 'Overview',        icon: '📊' },
     { key: 'users',     label: 'User Management', icon: '👥' },
+    { key: 'requests',  label: 'Role Requests',   icon: '📋' },
     { key: 'orders',    label: 'Order Monitoring', icon: '🧾' },
     { key: 'commission',label: 'Commission',       icon: '💰' },
     { key: 'returns',   label: 'Returns',          icon: '🔄' },
   ];
+
 
   useEffect(() => {
     fetchStats();
@@ -108,6 +111,7 @@ const AdminDashboard = () => {
             {activeTab === 'orders'     && 'Monitor all orders across the platform'}
             {activeTab === 'commission' && 'Track and manage platform commission'}
             {activeTab === 'returns'    && 'Review and process customer return requests'}
+            {activeTab === 'requests'  && 'Review customer applications to become sellers or delivery agents'}
           </p>
         </div>
 
@@ -117,6 +121,7 @@ const AdminDashboard = () => {
         {activeTab === 'orders'     && <OrderMonitoring />}
         {activeTab === 'commission' && <CommissionManagement />}
         {activeTab === 'returns' && <ReturnsManagement />}
+        {activeTab === 'requests' && <RoleRequests />}
       </div>
     </div>
   );

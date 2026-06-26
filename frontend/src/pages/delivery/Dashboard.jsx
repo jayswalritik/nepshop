@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import DeliveryProfilePage from './ProfilePage';
+import RoleSwitcher from '../../components/common/RoleSwitcher';
 
 const statusColors = {
   pending:    'bg-yellow-100 text-yellow-700',
@@ -120,7 +121,10 @@ const DeliveryDashboard = () => {
           ))}
         </nav>
 
-        <div className="p-3 border-t border-gray-100">
+        <div className="p-3 border-t border-gray-100 space-y-2">
+          <div className="px-1">
+            <RoleSwitcher openDirection="up" />
+          </div>
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-500 hover:bg-red-50 transition-all"

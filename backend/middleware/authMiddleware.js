@@ -38,12 +38,19 @@ const protect = asyncHandler(async (req, res, next) => {
 
 // ── Role guard factory — restrict to specific roles ───────
 // Usage: authorizeRoles('admin'), authorizeRoles('seller', 'admin')
+// Multi-role aware: passes if the user HAS any of the allowed roles.
 const authorizeRoles = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const userRoles = req.user.roles && req.user.roles.length
+      ? req.user.roles
+      : [req.user.role];
+
+    const allowed = roles.some((r) => userRoles.includes(r));
+
+    if (!allowed) {
       res.status(403);
       throw new Error(
-        `Access denied — role '${req.user.role}' is not authorized for this route`
+        `Access denied — you don't have permission for this route`
       );
     }
     next();

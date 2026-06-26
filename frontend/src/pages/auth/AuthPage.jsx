@@ -97,7 +97,7 @@ const AuthPage = () => {
         role: currentRole,
       });
       login(data.user, data.token);
-      redirectAfterLogin(data.user.role);
+      redirectAfterLogin(data.user.activeRole || data.user.role);
     } catch (err) {
       setApiError(err.response?.data?.message || 'Login failed. Please try again.');
     } finally {

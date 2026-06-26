@@ -123,7 +123,7 @@ const registerUser = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// @desc    Login user (all roles)
+// @desc    Login user (all roles) — multi-role aware
 // @route   POST /api/auth/login
 // @access  Public
 // ─────────────────────────────────────────────────────────
@@ -136,9 +136,8 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const { email, password, role } = req.body;
 
-  // 1. Find user by email AND role
-  // This prevents a customer token from working on the seller dashboard
-  const user = await User.findOne({ email, role }).select('+password');
+  // 1. Find user by email only
+  const user = await User.findOne({ email }).select('+password');
 
   if (!user) {
     res.status(401);
@@ -152,7 +151,19 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new Error('Invalid email or password');
   }
 
-  // 3. Check account status
+  // 3. Verify the user actually has the role they're trying to log in as
+  const userRoles = user.roles && user.roles.length ? user.roles : [user.role];
+
+  if (role && !userRoles.includes(role)) {
+    res.status(403);
+    const roleLabels = { customer: 'customer', seller: 'seller', delivery: 'delivery agent' };
+    throw new Error(
+      `This email is not registered as a ${roleLabels[role] || role}. ` +
+      `You have access to: ${userRoles.join(', ')}.`
+    );
+  }
+
+  // 4. Check account status
   if (user.status === 'pending') {
     res.status(403);
     throw new Error(
@@ -170,8 +181,13 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new Error('Your account application was rejected. Please contact support for more information.');
   }
 
-  // 4. Issue token and return
-  const token = generateToken(user._id, user.role);
+  // 5. Set activeRole to the role they logged in as (Approach B)
+  const loginRole = role && userRoles.includes(role) ? role : (user.activeRole || userRoles[0]);
+  user.activeRole = loginRole;
+  await user.save();
+
+  // 6. Issue token and return
+  const token = generateToken(user._id, loginRole);
 
   res.status(200).json({
     success: true,
@@ -649,6 +665,37 @@ const addCustomerRole = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Switch active role (which dashboard the user is using)
+// @route   POST /api/auth/switch-role
+// @access  Authenticated users
+// ─────────────────────────────────────────────────────────
+const switchActiveRole = asyncHandler(async (req, res) => {
+  const { role } = req.body;
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  const userRoles = user.roles && user.roles.length ? user.roles : [user.role];
+
+  if (!userRoles.includes(role)) {
+    res.status(403);
+    throw new Error(`You don't have access to the ${role} role`);
+  }
+
+  user.activeRole = role;
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: `Switched to ${role} mode`,
+    user:    user.toPublicJSON(),
+  });
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -662,4 +709,5 @@ module.exports = {
   approveRoleRequest,
   rejectRoleRequest,
   addCustomerRole,
+  switchActiveRole,
 };
