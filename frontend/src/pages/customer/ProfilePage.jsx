@@ -165,7 +165,9 @@ const ProfilePage = () => {
         <div className="space-y-3">
           <div className="flex justify-between py-2 border-b border-gray-50">
             <span className="text-sm text-gray-500">Account Type</span>
-            <span className="text-sm font-medium text-gray-700">Customer</span>
+            <span className="text-sm font-medium text-gray-700 capitalize">
+              {(user?.roles || [user?.role]).join(', ')}
+            </span>
           </div>
           <div className="flex justify-between py-2 border-b border-gray-50">
             <span className="text-sm text-gray-500">Account Status</span>

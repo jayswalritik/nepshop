@@ -20,8 +20,6 @@ const RoleSwitcher = ({ openDirection = 'down' }) => {
   const roles      = user?.roles && user.roles.length ? user.roles : [user?.role];
   const activeRole = user?.activeRole || user?.role;
 
-  console.log('🔍 RoleSwitcher sees:', { user, roles, rolesLength: roles?.length, activeRole });
-
   // Close dropdown on outside click
   useEffect(() => {
     const handleClick = (e) => {

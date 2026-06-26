@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import API from '../utils/api';
 
 const AuthContext = createContext();
 
@@ -7,15 +8,28 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Load user from localStorage on app start
+  // Load user from localStorage on app start, then refresh from backend
   useEffect(() => {
     const savedToken = localStorage.getItem('nepshop_token');
     const savedUser  = localStorage.getItem('nepshop_user');
+
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
+
+      // Refresh from backend to pick up role approvals, status changes, etc.
+      API.get('/auth/me')
+        .then(({ data }) => {
+          if (data?.user) {
+            setUser(data.user);
+            localStorage.setItem('nepshop_user', JSON.stringify(data.user));
+          }
+        })
+        .catch(() => { /* keep cached user if refresh fails */ })
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   const login = (userData, userToken) => {

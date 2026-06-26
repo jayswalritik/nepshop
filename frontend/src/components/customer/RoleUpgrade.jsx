@@ -118,17 +118,48 @@ const RoleUpgrade = () => {
 
       {/* Pending state */}
       {pending && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-4 flex items-center gap-3">
-          <span className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-pulse flex-shrink-0"></span>
-          <div>
-            <p className="text-sm font-medium text-orange-800">
-              Your {pending} application is under review
-            </p>
-            <p className="text-xs text-orange-600 mt-0.5">
-              You'll be notified by email once an admin approves it. Meanwhile you can keep shopping.
-            </p>
+        <>
+          {/* Pending badge */}
+          <div className="inline-flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-full px-4 py-2 text-sm text-orange-700 mb-4">
+            <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
+            {pending.charAt(0).toUpperCase() + pending.slice(1)} application — Pending admin approval
           </div>
-        </div>
+
+          {/* Office visit instruction */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-4 text-left mb-4">
+            <p className="text-amber-800 font-semibold text-sm mb-2">
+              📋 Next step — Visit NepShop Office
+            </p>
+            <p className="text-amber-700 text-sm mb-3">
+              To complete your verification, please visit our office with the following documents:
+            </p>
+            {pending === 'seller' && (
+              <ul className="text-amber-700 text-sm space-y-1">
+                <li>• Citizenship card (original + photocopy)</li>
+                <li>• PAN registration certificate</li>
+                <li>• Business registration document</li>
+                <li>• Recent passport-size photo</li>
+              </ul>
+            )}
+            {pending === 'delivery' && (
+              <ul className="text-amber-700 text-sm space-y-1">
+                <li>• Citizenship card (original + photocopy)</li>
+                <li>• Driving license</li>
+                <li>• Vehicle registration document (bluebook)</li>
+                <li>• Recent passport-size photo</li>
+              </ul>
+            )}
+            <div className="mt-3 pt-3 border-t border-amber-200">
+              <p className="text-amber-800 text-xs font-medium">📍 NepShop Office</p>
+              <p className="text-amber-700 text-xs">Kathmandu, Bagmati Province, Nepal</p>
+              <p className="text-amber-700 text-xs">Office hours: Sun – Fri, 10:00 AM – 5:00 PM</p>
+            </div>
+          </div>
+
+          <p className="text-gray-400 text-xs">
+            You will receive an email notification once your account is approved. Meanwhile, you can keep shopping.
+          </p>
+        </>
       )}
 
       {/* Action cards */}
