@@ -14,6 +14,9 @@ const AuthPage = () => {
   const [success, setSuccess] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
+  const [resending, setResending] = useState(false);
 
   // Form fields
   const [formData, setFormData] = useState({
@@ -99,9 +102,28 @@ const AuthPage = () => {
       login(data.user, data.token);
       redirectAfterLogin(data.user.activeRole || data.user.role);
     } catch (err) {
-      setApiError(err.response?.data?.message || 'Login failed. Please try again.');
+      const msg = err.response?.data?.message || 'Login failed. Please try again.';
+      if (msg === 'EMAIL_NOT_VERIFIED') {
+        setNeedsVerification(true);
+        setApiError('');
+      } else {
+        setApiError(msg);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setResending(true);
+    setResendMsg('');
+    try {
+      await API.post('/auth/resend-verification', { email: formData.email });
+      setResendMsg('A new verification link has been sent. Please check your inbox.');
+    } catch (err) {
+      setResendMsg('Could not resend. Please try again.');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -152,6 +174,8 @@ const AuthPage = () => {
     setErrors({});
     setApiError('');
     setSuccess(null);
+    setNeedsVerification(false);
+    setResendMsg('');
     setFormData({
       firstName: '',
       lastName: '',
@@ -175,6 +199,8 @@ const AuthPage = () => {
     setErrors({});
     setApiError('');
     setSuccess(null);
+    setNeedsVerification(false);
+    setResendMsg('');
     setFormData({
       firstName: '',
       lastName: '',
@@ -319,8 +345,8 @@ const AuthPage = () => {
     {currentRole === 'customer' && (
       <>
         <p className="text-gray-500 text-sm mb-4">{success}</p>
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-indigo-700 mb-5 text-left">
-          ✔ Your account is ready. Please sign in with your email and password to start shopping.
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700 mb-5 text-left">
+          📧 Please check your email and click the verification link to activate your account, then sign in.
         </div>
       </>
     )}
@@ -328,16 +354,26 @@ const AuthPage = () => {
     {/* Seller / Delivery flow */}
     {(currentRole === 'seller' || currentRole === 'delivery') && (
       <>
+        {/* Email verification step */}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-left mb-4">
+          <p className="text-amber-800 font-semibold text-sm mb-1">
+            📧 Step 1 — Verify your email
+          </p>
+          <p className="text-amber-700 text-sm">
+            We've sent a verification link to your email. Please click it to confirm your address — this is required before your account can be activated.
+          </p>
+        </div>
+
         {/* Pending badge */}
         <div className="inline-flex items-center gap-2 bg-orange-50 border border-orange-200 rounded-full px-4 py-2 text-sm text-orange-700 mb-4">
           <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></span>
-          Pending admin approval
+          Step 2 — Pending admin approval
         </div>
 
         {/* Office visit instruction */}
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-4 text-left mb-4">
           <p className="text-amber-800 font-semibold text-sm mb-2">
-            📋 Next step — Visit NepShop Office
+            📋 Step 3 — Visit NepShop Office
           </p>
           <p className="text-amber-700 text-sm mb-3">
             To complete your verification, please visit our office with the following documents:
@@ -392,6 +428,29 @@ const AuthPage = () => {
                 <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 mb-4 flex items-start gap-2">
                   <span className="mt-0.5">⚠️</span>
                   <span>{apiError}</span>
+                </div>
+              )}
+
+              {/* Email verification needed */}
+              {needsVerification && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-4">
+                  <div className="flex items-start gap-2 mb-2">
+                    <span className="mt-0.5">📧</span>
+                    <span className="text-sm text-amber-800">
+                      Please verify your email before signing in. Check your inbox for the verification link.
+                    </span>
+                  </div>
+                  {resendMsg ? (
+                    <p className="text-xs text-green-700 font-medium ml-6">{resendMsg}</p>
+                  ) : (
+                    <button
+                      onClick={handleResendVerification}
+                      disabled={resending}
+                      className="ml-6 text-xs font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-60 underline"
+                    >
+                      {resending ? 'Sending...' : 'Resend verification email'}
+                    </button>
+                  )}
                 </div>
               )}
 

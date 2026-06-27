@@ -230,6 +230,7 @@ const sendEmail = async ({ to, subject, html, preheader }) => {
 // CUSTOMER EMAILS
 // ═════════════════════════════════════════════════════════
 
+
 // 1. Welcome email
 const sendWelcomeEmail = (user) => sendEmail({
   to:        user.email,
@@ -269,6 +270,30 @@ const sendWelcomeEmail = (user) => sendEmail({
     `)}
   `,
 });
+
+
+// 1b. Email verification link
+const sendVerificationEmail = (user, verifyUrl) => sendEmail({
+  to:        user.email,
+  subject:   'Verify your NepShop email address',
+  preheader: 'Confirm your email to activate your NepShop account. This link expires in 24 hours.',
+  html: `
+    ${hero('📧', 'Verify Your Email', `Welcome ${user.firstName}! Please confirm your email address to activate your NepShop account.`, 'Action Required', '#d97706')}
+    ${section(`
+      <p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 8px;">
+        Click the button below to verify your email address and activate your account:
+      </p>
+      ${ctaButton('Verify Email Address', verifyUrl, '#16a34a')}
+      ${alertBox('This verification link expires in <strong>24 hours</strong>. If you did not create a NepShop account, you can safely ignore this email.', 'warning')}
+      ${divider()}
+      <p style="color:#94a3b8;font-size:12px;margin:0;">
+        Or copy this link into your browser:<br>
+        <span style="color:#6366f1;word-break:break-all;">${verifyUrl}</span>
+      </p>
+    `)}
+  `,
+});
+
 
 // 2. Password reset
 const sendPasswordResetEmail = (user, resetUrl) => sendEmail({
@@ -1198,6 +1223,7 @@ const sendCancelRefundToCustomer = (customer, order) => {
 module.exports = {
   // Customer
   sendWelcomeEmail,
+  sendVerificationEmail,
   sendPasswordResetEmail,
   sendOrderPlacedEmail,
   sendOrderStatusEmail,

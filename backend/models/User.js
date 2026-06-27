@@ -155,9 +155,14 @@ shopAddress: {
       default: null,
     },
 
-    // ── Password reset ───────────────────────────────────
+   // ── Password reset ───────────────────────────────────
     resetPasswordToken: { type: String, default: null },
     resetPasswordExpire: { type: Date, default: null },
+
+    // ── Email verification ───────────────────────────────
+    isEmailVerified:        { type: Boolean, default: false },
+    emailVerifyToken:       { type: String, default: null },
+    emailVerifyExpire:      { type: Date, default: null },
   },
   {
     timestamps: true, // adds createdAt and updatedAt
@@ -190,6 +195,17 @@ userSchema.methods.generateResetToken = function () {
   return resetToken; // Return unhashed token for email
 };
 
+// ── Generate email verification token ─────────────────────
+userSchema.methods.generateEmailVerifyToken = function () {
+  const crypto = require('crypto');
+  const verifyToken = crypto.randomBytes(32).toString('hex');
+
+  this.emailVerifyToken  = crypto.createHash('sha256').update(verifyToken).digest('hex');
+  this.emailVerifyExpire = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+
+  return verifyToken; // unhashed token for the email link
+};
+
 // ── Instance method: get public profile (no sensitive data) ──
 userSchema.methods.toPublicJSON = function () {
   return {
@@ -203,6 +219,7 @@ userSchema.methods.toPublicJSON = function () {
     activeRole:         this.activeRole || this.role,
     pendingRoleRequest: this.pendingRoleRequest,
     status:             this.status,
+    isEmailVerified:    this.isEmailVerified,
     shopName:           this.shopName,
     shopAddress:        this.shopAddress,
     panNumber:          this.panNumber,

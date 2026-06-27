@@ -14,6 +14,8 @@ const {
   rejectRoleRequest,
   addCustomerRole,
   switchActiveRole,
+  verifyEmail,
+  resendVerification,
 } = require('../controllers/authController');
 const { reapplyUser } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
@@ -78,6 +80,9 @@ router.post('/register', registerValidation, registerUser);
 
 // POST /api/auth/login
 router.post('/login', loginValidation, loginUser);
+
+router.get('/verify-email/:token',  verifyEmail);
+router.post('/resend-verification', resendVerification);
 
 // GET /api/auth/me  (protected)
 router.get('/me', protect, getMe);

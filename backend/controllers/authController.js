@@ -82,6 +82,14 @@ const registerUser = asyncHandler(async (req, res) => {
     citizenshipNumber: role === 'delivery' ? citizenshipNumber : null,
   });
 
+  // 6b. Generate email verification token and send the email
+  const verifyToken = user.generateEmailVerifyToken();
+  await user.save();
+
+  const { sendVerificationEmail } = require('../utils/emailService');
+  const verifyUrl = `${process.env.FRONTEND_URL}/verify-email/${verifyToken}`;
+  sendVerificationEmail(user, verifyUrl);
+
   // 7. Build response
   const {
     sendWelcomeEmail,
@@ -90,16 +98,15 @@ const registerUser = asyncHandler(async (req, res) => {
     sendNewApplicationToAdmin,
   } = require('../utils/emailService');
 
+  
   if (role === 'customer') {
-    const token = generateToken(user._id, user.role);
-
     // Send welcome email
     sendWelcomeEmail(user);
 
+    // NOTE: no token issued — user must verify email before logging in
     return res.status(201).json({
       success: true,
-      message: 'Account created successfully. Welcome to NepShop!',
-      token,
+      message: 'Account created! Please check your email to verify your account before signing in.',
       user: user.toPublicJSON(),
     });
   } else {
@@ -116,7 +123,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: `Your ${role} account has been submitted for review. You will be notified by email once an admin approves your account.`,
+      message: `Your ${role} account has been submitted. Please verify your email, and an admin will review your application.`,
       user: user.toPublicJSON(),
     });
   }
@@ -149,6 +156,12 @@ const loginUser = asyncHandler(async (req, res) => {
   if (!isMatch) {
     res.status(401);
     throw new Error('Invalid email or password');
+  }
+
+  // 2b. Require verified email before login
+  if (!user.isEmailVerified) {
+    res.status(403);
+    throw new Error('EMAIL_NOT_VERIFIED');
   }
 
   // 3. Verify the user actually has the role they're trying to log in as
@@ -696,6 +709,71 @@ const switchActiveRole = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Verify email via token link
+// @route   GET /api/auth/verify-email/:token
+// @access  Public
+// ─────────────────────────────────────────────────────────
+const verifyEmail = asyncHandler(async (req, res) => {
+  const crypto = require('crypto');
+  const hashed = crypto.createHash('sha256').update(req.params.token).digest('hex');
+
+  const user = await User.findOne({
+    emailVerifyToken:  hashed,
+    emailVerifyExpire: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    res.status(400);
+    throw new Error('Verification link is invalid or has expired. Please request a new one.');
+  }
+
+  user.isEmailVerified  = true;
+  user.emailVerifyToken = null;
+  user.emailVerifyExpire = null;
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    message: 'Email verified successfully! You can now sign in.',
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Resend verification email
+// @route   POST /api/auth/resend-verification
+// @access  Public
+// ─────────────────────────────────────────────────────────
+const resendVerification = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    res.status(400);
+    throw new Error('Email is required');
+  }
+
+  const user = await User.findOne({ email });
+
+  // Always respond success (don't reveal whether the email exists)
+  if (!user || user.isEmailVerified) {
+    return res.status(200).json({
+      success: true,
+      message: 'If an unverified account exists for this email, a new verification link has been sent.',
+    });
+  }
+
+  const verifyToken = user.generateEmailVerifyToken();
+  await user.save();
+
+  const { sendVerificationEmail } = require('../utils/emailService');
+  const verifyUrl = `${process.env.FRONTEND_URL}/verify-email/${verifyToken}`;
+  sendVerificationEmail(user, verifyUrl);
+
+  res.status(200).json({
+    success: true,
+    message: 'A new verification link has been sent to your email.',
+  });
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -710,4 +788,6 @@ module.exports = {
   rejectRoleRequest,
   addCustomerRole,
   switchActiveRole,
+  verifyEmail,
+  resendVerification,
 };

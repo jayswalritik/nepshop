@@ -4,6 +4,7 @@ import { CartProvider } from './context/CartContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
 import AuthPage from './pages/auth/AuthPage';
+import VerifyEmailPage from './pages/auth/VerifyEmailPage';
 import Unauthorized from './pages/auth/Unauthorized';
 import CustomerDashboard from './pages/customer/Dashboard';
 import SellerDashboard from './pages/seller/Dashboard';
@@ -26,6 +27,7 @@ function App() {
             <Routes>
               {/* Public */}
               <Route path="/login" element={<AuthPage />} />
+              <Route path="/verify-email/:token" element={<VerifyEmailPage />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="/admin/login" element={<AdminLoginPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />
