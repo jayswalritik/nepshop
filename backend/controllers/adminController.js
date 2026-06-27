@@ -351,7 +351,7 @@ const adminUpdateOrderStatus = asyncHandler(async (req, res) => {
 const getCommissionReport = asyncHandler(async (req, res) => {
   const Order = require('../models/Order');
 
-  // Confirmed stats — delivered orders only
+// Confirmed stats — delivered orders only
 const confirmedStats = await Order.aggregate([
   { $match: { status: 'delivered' } },
   { $unwind: '$items' },
@@ -372,12 +372,11 @@ const confirmedStats = await Order.aggregate([
   {
     $project: {
       confirmedOrders:     { $size: '$confirmedOrders' },
-      confirmedRevenue:    { $sum: '$orderDocs.total' },
+      confirmedRevenue:    { $sum: '$orderDocs.subtotal' },        // product revenue, not total
       confirmedCommission: { $sum: '$orderDocs.commissionAmount' },
     },
   },
-]);
-  
+]);  
 // Pending stats — in-progress orders
 const pendingStats = await Order.aggregate([
   { $match: { status: { $in: ['pending', 'confirmed', 'packed', 'dispatched'] } } },
@@ -399,7 +398,7 @@ const pendingStats = await Order.aggregate([
   {
     $project: {
       pendingOrders:  { $size: '$pendingOrders' },
-      pendingRevenue: { $sum: '$orderDocs.total' },
+      pendingRevenue: { $sum: '$orderDocs.subtotal' },
     },
   },
 ]);
@@ -556,6 +555,142 @@ const releaseSettlements = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc  Get pending payouts (sellers + delivery agents)
+// @route GET /api/admin/payouts
+// @access Admin only
+const getPayouts = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+
+  // ── SELLER PAYOUTS ──────────────────────────────────────
+  // Released seller earnings (cleared escrow) not yet paid out
+  const sellerOrders = await Order.find({
+    'settlement.sellerReleased': true,
+    'settlement.sellerPaidOut':  false,
+  }).select('items subtotal commissionAmount settlement total');
+
+  const sellerMap = {};
+  for (const order of sellerOrders) {
+    // An order can have items from one seller in your model (single-seller orders)
+    const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+    for (const sid of sellerIds) {
+      if (!sellerMap[sid]) sellerMap[sid] = { sellerId: sid, amount: 0, orders: 0, orderIds: [] };
+      sellerMap[sid].amount  += order.settlement.sellerShare || 0;
+      sellerMap[sid].orders  += 1;
+      sellerMap[sid].orderIds.push(order._id);
+    }
+  }
+
+  // ── AGENT PAYOUTS ───────────────────────────────────────
+  // Delivery agent earnings (paid on delivery) not yet paid out.
+  // Includes forward delivery (deliveryEarning) on delivered/returned orders.
+  const agentOrders = await Order.find({
+    'settlement.deliveryAgentPaid': true,
+    'settlement.agentPaidOut':      false,
+    deliveryAgent: { $ne: null },
+  }).select('deliveryAgent deliveryEarning settlement');
+
+  const agentMap = {};
+  for (const order of agentOrders) {
+    const aid = order.deliveryAgent.toString();
+    if (!agentMap[aid]) agentMap[aid] = { agentId: aid, amount: 0, jobs: 0, orderIds: [] };
+    agentMap[aid].amount += order.deliveryEarning || 50;
+    agentMap[aid].jobs   += 1;
+    agentMap[aid].orderIds.push(order._id);
+  }
+
+  // Populate seller + agent names
+  const sellers = await User.populate(Object.values(sellerMap), {
+    path: 'sellerId', select: 'firstName lastName shopName email payoutDetails',
+  });
+  const agents = await User.populate(Object.values(agentMap), {
+    path: 'agentId', select: 'firstName lastName email vehicleType payoutDetails',
+  });
+
+  const totalSellerPayout = sellers.reduce((s, x) => s + x.amount, 0);
+  const totalAgentPayout  = agents.reduce((s, x) => s + x.amount, 0);
+
+  // Seller money still locked in escrow (delivered, not yet released)
+  const escrowOrders = await Order.find({
+    'settlement.status': 'partial',
+    'settlement.sellerReleased': false,
+  }).select('settlement');
+  const inEscrow = escrowOrders.reduce((s, o) => s + (o.settlement.sellerShare || 0), 0);
+
+  res.status(200).json({
+    success: true,
+    sellers,
+    agents,
+    totals: {
+      sellerPayout: totalSellerPayout,
+      agentPayout:  totalAgentPayout,
+      grandTotal:   totalSellerPayout + totalAgentPayout,
+      inEscrow,
+    },
+  });
+});
+
+// @desc  Mark a seller's released earnings as paid out
+// @route POST /api/admin/payouts/seller/:sellerId
+// @access Admin only
+const paySeller = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+  const now = new Date();
+
+  const result = await Order.updateMany(
+    {
+      'items.seller': req.params.sellerId,
+      'settlement.sellerReleased': true,
+      'settlement.sellerPaidOut':  false,
+    },
+    {
+      $set: {
+        'settlement.sellerPaidOut':   true,
+        'settlement.sellerPaidOutAt': now,
+      },
+    }
+  );
+
+  const seller = await User.findById(req.params.sellerId);
+
+  // Optional: email the seller their payout was processed
+  if (seller) {
+    const { sendPayoutProcessedEmail } = require('../utils/emailService');
+    // amount isn't recomputed here; email is informational
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Marked ${result.modifiedCount} order(s) as paid out for this seller.`,
+  });
+});
+
+// @desc  Mark a delivery agent's earnings as paid out
+// @route POST /api/admin/payouts/agent/:agentId
+// @access Admin only
+const payAgent = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+  const now = new Date();
+
+  const result = await Order.updateMany(
+    {
+      deliveryAgent: req.params.agentId,
+      'settlement.deliveryAgentPaid': true,
+      'settlement.agentPaidOut':      false,
+    },
+    {
+      $set: {
+        'settlement.agentPaidOut':   true,
+        'settlement.agentPaidOutAt': now,
+      },
+    }
+  );
+
+  res.status(200).json({
+    success: true,
+    message: `Marked ${result.modifiedCount} delivery job(s) as paid out for this agent.`,
+  });
+});
+
 module.exports = {
   getAllUsers,
   getRoleRequests,
@@ -573,4 +708,7 @@ module.exports = {
   getCommissionReport,
   updateSellerCommission,
   releaseSettlements,
+  getPayouts,
+  paySeller,
+  payAgent,
 };

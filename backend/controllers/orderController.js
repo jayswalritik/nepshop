@@ -214,6 +214,19 @@ const cancelOrder = asyncHandler(async (req, res) => {
 
   order.status      = 'cancelled';
   order.cancelledAt = new Date();
+
+  // If the customer already paid online, refund them (no delivery happened)
+  let refunded = false;
+  if (order.paymentStatus === 'paid') {
+    order.paymentStatus = 'refunded';
+    refunded = true;
+    if (order.settlement) {
+      order.settlement.status           = 'refunded';
+      order.settlement.refundToCustomer = order.total; // full refund — nothing was delivered
+      order.settlement.settledAt        = new Date();
+    }
+  }
+
   await order.save();
 
   // Send emails
@@ -229,7 +242,9 @@ const cancelOrder = asyncHandler(async (req, res) => {
 
   res.status(200).json({
     success: true,
-    message: 'Order cancelled successfully',
+    message: refunded
+      ? 'Order cancelled. A full refund has been processed to your original payment method.'
+      : 'Order cancelled successfully',
     order,
   });
 });
@@ -334,7 +349,18 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
         $inc: { stock: item.quantity },
       });
     }
+    // If the customer already paid online, refund them (no delivery happened)
+    if (order.paymentStatus === 'paid') {
+      order.paymentStatus = 'refunded';
+      if (order.settlement) {
+        order.settlement.status           = 'refunded';
+        order.settlement.refundToCustomer = order.total; // full refund
+        order.settlement.settledAt        = new Date();
+      }
+    }
   }
+
+  await order.save();
 
   await order.save();
 

@@ -58,9 +58,8 @@ const createOrderFromCart = async (userId, orderData) => {
     total,
     commissionRate,
     commissionAmount,
-    status:        'confirmed', // Auto-confirm for online payments
-    paymentStatus: 'paid',
-    confirmedAt:   new Date(),
+    status:        'pending', // Seller still confirms — payment & fulfillment are separate
+    paymentStatus: 'paid',    // Money is secured
   });
 
   // Deduct stock

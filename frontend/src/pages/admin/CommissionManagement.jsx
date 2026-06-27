@@ -154,7 +154,7 @@ const CommissionManagement = () => {
                 {[
                   'Seller',
                   'Confirmed Orders',
-                  'Confirmed Revenue',
+                  'Product Revenue',
                   'Commission Earned',
                   'Pending Revenue',
                   'Rate',
@@ -185,7 +185,7 @@ const CommissionManagement = () => {
                     <p className="text-sm font-medium text-gray-900">
                       Rs {s.confirmedRevenue?.toLocaleString() || 0}
                     </p>
-                    <p className="text-xs text-green-500">✅ Confirmed</p>
+                    <p className="text-xs text-green-500">Before Commission</p>
                   </td>
                   <td className="px-4 py-4">
                     <p className="text-sm font-medium text-green-600">

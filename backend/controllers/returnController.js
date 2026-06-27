@@ -222,9 +222,158 @@ const processReturn = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Get return-pickup jobs assigned to this delivery agent
+// @route   GET /api/returns/pickups
+// @access  Delivery agent only
+// ─────────────────────────────────────────────────────────
+const getMyReturnPickups = asyncHandler(async (req, res) => {
+  const returns = await Return.find({
+    returnAgent: req.user._id,
+    status: { $in: ['approved', 'picked_up'] },
+  })
+    .sort({ createdAt: -1 })
+    .populate('customer', 'firstName lastName phone')
+    .populate('order', '_id total deliveryAddress pickupAddress items');
+
+  res.status(200).json({ success: true, returns });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Agent marks return as picked up from customer
+// @route   PUT /api/returns/:id/pickup
+// @access  Delivery agent only
+// ─────────────────────────────────────────────────────────
+const markReturnPickedUp = asyncHandler(async (req, res) => {
+  const returnRequest = await Return.findById(req.params.id);
+  if (!returnRequest) {
+    res.status(404);
+    throw new Error('Return request not found');
+  }
+  if (returnRequest.returnAgent?.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error('Not authorized — this return is not assigned to you');
+  }
+  if (returnRequest.status !== 'approved') {
+    res.status(400);
+    throw new Error('This return is not ready for pickup');
+  }
+
+  returnRequest.status     = 'picked_up';
+  returnRequest.pickedUpAt = new Date();
+  await returnRequest.save();
+
+  // Update order status
+  await Order.findByIdAndUpdate(returnRequest.order, {
+    status: 'return_in_transit',
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'Return marked as picked up. Now deliver it to the seller.',
+    return:  returnRequest,
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Agent marks return as returned to seller → FIRES REVERSAL
+// @route   PUT /api/returns/:id/complete
+// @access  Delivery agent only
+// ─────────────────────────────────────────────────────────
+const completeReturn = asyncHandler(async (req, res) => {
+  const returnRequest = await Return.findById(req.params.id)
+    .populate('customer', 'firstName lastName email');
+  if (!returnRequest) {
+    res.status(404);
+    throw new Error('Return request not found');
+  }
+  if (returnRequest.returnAgent?.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error('Not authorized — this return is not assigned to you');
+  }
+  if (returnRequest.status !== 'picked_up') {
+    res.status(400);
+    throw new Error('This return must be picked up before completing');
+  }
+
+  const order = await Order.findById(returnRequest.order);
+  if (!order) {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+
+  // ══ FAULT-BASED REVERSAL MATH ══════════════════════════
+  const fault          = returnRequest.fault;
+  const subtotal       = order.subtotal;
+  const commission     = order.commissionAmount;
+  const forwardDelivery = order.deliveryEarning || 50; // Rs 50 already paid to forward agent
+  const returnDelivery  = returnRequest.returnAgentEarning || 50; // Rs 50 to return agent
+
+  let refundToCustomer = 0;
+  let sellerBears = 0;
+  let customerBears = 0;
+
+  if (fault === 'seller') {
+    // Seller's fault: customer made 100% whole (full total incl. delivery)
+    refundToCustomer = order.total;
+    // Seller bears both delivery legs
+    sellerBears = forwardDelivery + returnDelivery;
+  } else {
+    // Customer's choice: refund product minus BOTH delivery legs
+    refundToCustomer = Math.max(0, subtotal - forwardDelivery - returnDelivery);
+    customerBears = forwardDelivery + returnDelivery;
+  }
+
+  // ── Apply settlement reversal ───────────────────────────
+  order.status = 'returned';
+  if (order.settlement) {
+    order.settlement.status              = 'refunded';
+    order.settlement.sellerReleased      = false;   // seller share reversed (never released)
+    order.settlement.sellerShare         = 0;       // seller earns nothing on returned order
+    order.settlement.commissionBooked    = false;   // commission reversed
+    order.settlement.returnFault         = fault;
+    order.settlement.returnPickupAgent   = returnRequest.returnAgent;
+    order.settlement.returnPickupEarning = returnDelivery;
+    order.settlement.refundToCustomer    = refundToCustomer;
+    order.settlement.sellerBearsDelivery = sellerBears;
+    order.settlement.customerBearsDelivery = customerBears;
+    order.settlement.settledAt           = new Date();
+  }
+  order.paymentStatus = 'refunded';
+  await order.save();
+
+  // ── Complete the return record ──────────────────────────
+  returnRequest.status             = 'refunded';
+  returnRequest.returnedToSellerAt = new Date();
+  returnRequest.refundAmount       = refundToCustomer;
+  await returnRequest.save();
+
+  // ── Restore stock to seller ─────────────────────────────
+  const Product = require('../models/Product');
+  for (const item of returnRequest.items) {
+    await Product.findByIdAndUpdate(item.product, {
+      $inc: { stock: item.quantity },
+    });
+  }
+
+  // ── Email customer that refund is processed ─────────────
+  const { sendReturnApprovedEmail } = require('../utils/emailService');
+  const customer = await User.findById(returnRequest.customer._id);
+  if (customer) sendReturnApprovedEmail(customer, returnRequest, order);
+
+  res.status(200).json({
+    success: true,
+    message: `Return completed. Customer refunded Rs ${refundToCustomer}. Agent earned Rs ${returnDelivery}.`,
+    return:  returnRequest,
+  });
+});
+
 module.exports = {
   requestReturn,
   getMyReturns,
   getAllReturns,
   processReturn,
+  getMyReturnPickups,
+  markReturnPickedUp,
+  completeReturn,
 };

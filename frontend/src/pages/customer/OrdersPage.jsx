@@ -126,9 +126,16 @@ const OrdersPage = () => {
                     })}
                   </p>
                 </div>
-                <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColors[order.status]}`}>
-                  {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${statusColors[order.status]}`}>
+                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                  </span>
+                  {order.paymentStatus === 'refunded' && (
+                    <span className="px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                      💸 Refunded
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Order items */}

@@ -135,6 +135,12 @@ const orderSchema = new mongoose.Schema(
       sellerBearsDelivery: { type: Number, default: 0 }, // how much delivery cost seller absorbs
       customerBearsDelivery:{ type: Number, default: 0 }, // how much delivery cost customer absorbs
       settledAt:           { type: Date, default: null },
+
+      // ── Payout tracking (admin marks these paid) ──────────
+      sellerPaidOut:       { type: Boolean, default: false },
+      sellerPaidOutAt:     { type: Date, default: null },
+      agentPaidOut:        { type: Boolean, default: false },
+      agentPaidOutAt:      { type: Date, default: null },
     },
 
     // ── Notes ─────────────────────────────────────────────

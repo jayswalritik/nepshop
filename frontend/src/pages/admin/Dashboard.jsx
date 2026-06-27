@@ -6,6 +6,7 @@ import OrderMonitoring from './OrderMonitoring';
 import CommissionManagement from './CommissionManagement';
 import ReturnsManagement from './ReturnsManagement';
 import RoleRequests from './RoleRequests';
+import Payouts from './Payouts';
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -20,6 +21,7 @@ const AdminDashboard = () => {
     { key: 'orders',    label: 'Order Monitoring', icon: '🧾' },
     { key: 'commission',label: 'Commission',       icon: '💰' },
     { key: 'returns',   label: 'Returns',          icon: '🔄' },
+    { key: 'payouts',   label: 'Payouts',          icon: '💸' },
   ];
 
 
@@ -112,6 +114,7 @@ const AdminDashboard = () => {
             {activeTab === 'commission' && 'Track and manage platform commission'}
             {activeTab === 'returns'    && 'Review and process customer return requests'}
             {activeTab === 'requests'  && 'Review customer applications to become sellers or delivery agents'}
+            {activeTab === 'payouts' && 'Process payouts to sellers and delivery agents'}
           </p>
         </div>
 
@@ -122,6 +125,7 @@ const AdminDashboard = () => {
         {activeTab === 'commission' && <CommissionManagement />}
         {activeTab === 'returns' && <ReturnsManagement />}
         {activeTab === 'requests' && <RoleRequests />}
+        {activeTab === 'payouts' && <Payouts />}
       </div>
     </div>
   );

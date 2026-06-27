@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import DeliveryProfilePage from './ProfilePage';
 import RoleSwitcher from '../../components/common/RoleSwitcher';
+import ReturnPickups from './ReturnPickups';
 
 const statusColors = {
   pending:    'bg-yellow-100 text-yellow-700',
@@ -26,6 +27,7 @@ const DeliveryDashboard = () => {
 
   const navItems = [
     { key: 'active',    label: 'Active Deliveries', icon: '🚚' },
+    { key: 'returns',   label: 'Return Pickups',    icon: '🔄' },
     { key: 'delivered', label: 'Completed',          icon: '✅' },
     { key: 'earnings',  label: 'Earnings',           icon: '💰' },
     { key: 'profile',   label: 'Profile & Payout',   icon: '👤' },
@@ -169,6 +171,8 @@ const DeliveryDashboard = () => {
         {/* Orders */}
         {activeTab === 'profile' ? (
           <DeliveryProfilePage />
+        ) : activeTab === 'returns' ? (
+          <ReturnPickups />
         ) : activeTab === 'earnings' ? (
           <EarningsTab orders={orders} stats={stats} />
         ) : (

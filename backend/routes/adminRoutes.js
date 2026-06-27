@@ -17,6 +17,9 @@ const {
   getCommissionReport,
   updateSellerCommission,
   releaseSettlements,
+  getPayouts,
+  paySeller,
+  payAgent,
 } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -61,5 +64,10 @@ router.get('/commission',             getCommissionReport);
 router.put('/commission/:sellerId',   updateSellerCommission);
 
 router.post('/settlement/release', releaseSettlements);
+
+// Payouts
+router.get('/payouts',                    getPayouts);
+router.post('/payouts/seller/:sellerId',  paySeller);
+router.post('/payouts/agent/:agentId',    payAgent);
 
 module.exports = router;
