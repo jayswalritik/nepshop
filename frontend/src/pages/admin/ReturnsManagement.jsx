@@ -2,10 +2,21 @@ import { useState, useEffect } from 'react';
 import API from '../../utils/api';
 
 const statusColors = {
-  pending:  'bg-yellow-100 text-yellow-700',
-  approved: 'bg-blue-100 text-blue-700',
-  rejected: 'bg-red-100 text-red-700',
-  refunded: 'bg-green-100 text-green-700',
+  pending:   'bg-yellow-100 text-yellow-700',
+  approved:  'bg-blue-100 text-blue-700',
+  picked_up: 'bg-purple-100 text-purple-700',
+  refunded:  'bg-green-100 text-green-700',
+  rejected:  'bg-red-100 text-red-700',
+};
+
+// Suggested fault based on return reason
+const faultSuggestion = {
+  'Damaged product':          'seller',
+  'Wrong product delivered':  'seller',
+  'Product not as described':  'seller',
+  'Changed my mind':           'customer',
+  'Better price available':    'customer',
+  'Other':                     null,
 };
 
 const ReturnsManagement = () => {
@@ -13,12 +24,16 @@ const ReturnsManagement = () => {
   const [loading, setLoading]   = useState(true);
   const [filter, setFilter]     = useState('pending');
   const [selected, setSelected] = useState(null);
-  const [adminNote, setAdminNote]     = useState('');
+  const [adminNote, setAdminNote]       = useState('');
   const [refundMethod, setRefundMethod] = useState('original_payment');
+  const [fault, setFault]               = useState('');
+  const [returnAgent, setReturnAgent]   = useState('');
+  const [agents, setAgents]             = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     fetchReturns();
+    fetchAgents();
   }, [filter]);
 
   const fetchReturns = async () => {
@@ -35,33 +50,89 @@ const ReturnsManagement = () => {
     }
   };
 
-  const handleProcess = async (status) => {
+  const fetchAgents = async () => {
+    try {
+      const { data } = await API.get('/admin/delivery-agents');
+      setAgents(data.agents);
+    } catch (err) {
+      console.error('Failed to fetch agents:', err);
+    }
+  };
+
+  // When opening a return, pre-fill the fault suggestion
+  const openReturn = (r) => {
+    setSelected(r);
+    setAdminNote('');
+    setRefundMethod('original_payment');
+    setReturnAgent('');
+    setFault(faultSuggestion[r.reason] || '');
+  };
+
+  const handleApprove = async () => {
+    if (!fault) { alert('Please confirm who is at fault'); return; }
+    if (!returnAgent) { alert('Please assign a pickup agent'); return; }
     setActionLoading(true);
     try {
       await API.put(`/returns/${selected._id}/process`, {
-        status,
+        status: 'approved',
         adminNote,
         refundMethod,
+        fault,
+        returnAgentId: returnAgent,
       });
       fetchReturns();
       setSelected(null);
-      setAdminNote('');
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to process return');
+      alert(err.response?.data?.message || 'Failed to approve return');
     } finally {
       setActionLoading(false);
     }
   };
 
+  const handleReject = async () => {
+    setActionLoading(true);
+    try {
+      await API.put(`/returns/${selected._id}/process`, {
+        status: 'rejected',
+        adminNote,
+      });
+      fetchReturns();
+      setSelected(null);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to reject return');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Refund preview based on fault
+  const refundPreview = () => {
+    if (!selected) return null;
+    const total    = selected.order?.total || 0;
+    const subtotal = total - 100; // delivery was 100 (or 0 for free delivery; simplified for preview)
+    if (fault === 'seller') {
+      return { customerGets: total, note: 'Full refund (seller at fault — customer pays nothing).' };
+    }
+    if (fault === 'customer') {
+      const refund = Math.max(0, subtotal - 50 - 50); // product − forward delivery − return pickup
+      return { customerGets: refund, note: 'Product price minus both delivery legs (customer\'s choice).' };
+    }
+    return null;
+  };
+
+  const preview = refundPreview();
+
   return (
     <div>
       {/* Filter tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-5 w-fit">
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-5 w-fit flex-wrap">
         {[
-          { key: 'pending',  label: 'Pending' },
-          { key: 'refunded', label: 'Refunded' },
-          { key: 'rejected', label: 'Rejected' },
-          { key: '',         label: 'All' },
+          { key: 'pending',   label: 'Pending' },
+          { key: 'approved',  label: 'In Pickup' },
+          { key: 'picked_up', label: 'In Transit' },
+          { key: 'refunded',  label: 'Refunded' },
+          { key: 'rejected',  label: 'Rejected' },
+          { key: '',          label: 'All' },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -114,6 +185,9 @@ const ReturnsManagement = () => {
                   </td>
                   <td className="px-4 py-4">
                     <p className="text-sm text-gray-700">{r.reason}</p>
+                    {r.fault && (
+                      <p className="text-xs text-gray-400">Fault: {r.fault}</p>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     <p className="text-sm font-semibold text-gray-900">
@@ -122,7 +196,7 @@ const ReturnsManagement = () => {
                   </td>
                   <td className="px-4 py-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[r.status]}`}>
-                      {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                      {r.status.replace('_', ' ').charAt(0).toUpperCase() + r.status.replace('_', ' ').slice(1)}
                     </span>
                   </td>
                   <td className="px-4 py-4 text-xs text-gray-400">
@@ -132,7 +206,7 @@ const ReturnsManagement = () => {
                   </td>
                   <td className="px-4 py-4">
                     <button
-                      onClick={() => { setSelected(r); setAdminNote(''); }}
+                      onClick={() => openReturn(r)}
                       className="text-xs text-indigo-600 font-medium px-3 py-1.5 border border-indigo-200 rounded-lg hover:border-indigo-300 transition-all"
                     >
                       Review
@@ -186,10 +260,8 @@ const ReturnsManagement = () => {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Refund Amount</span>
-                  <span className="font-bold text-green-600">
-                    Rs {selected.refundAmount?.toLocaleString()}
-                  </span>
+                  <span className="text-gray-500">Order Total</span>
+                  <span className="font-medium">Rs {selected.order?.total?.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Payment Method</span>
@@ -222,11 +294,73 @@ const ReturnsManagement = () => {
 
             {selected.status === 'pending' && (
               <>
-                {/* Refund method */}
+                {/* FAULT SELECTOR */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Refund Method
+                    Who is at fault? <span className="text-red-500">*</span>
                   </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setFault('seller')}
+                      className={`p-3 border rounded-xl text-left transition-all
+                        ${fault === 'seller' ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-gray-300'}`}
+                    >
+                      <p className="text-sm font-semibold text-gray-900">🏪 Seller</p>
+                      <p className="text-xs text-gray-500">Damaged / wrong / not as described</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFault('customer')}
+                      className={`p-3 border rounded-xl text-left transition-all
+                        ${fault === 'customer' ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}
+                    >
+                      <p className="text-sm font-semibold text-gray-900">🛍️ Customer</p>
+                      <p className="text-xs text-gray-500">Changed mind / better price</p>
+                    </button>
+                  </div>
+                  {faultSuggestion[selected.reason] && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Suggested based on reason: <strong>{faultSuggestion[selected.reason]}</strong>
+                    </p>
+                  )}
+                </div>
+
+                {/* REFUND PREVIEW */}
+                {preview && (
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-4">
+                    <p className="text-sm font-semibold text-indigo-900">
+                      Customer will be refunded: Rs {preview.customerGets.toLocaleString()}
+                    </p>
+                    <p className="text-xs text-indigo-700 mt-1">{preview.note}</p>
+                  </div>
+                )}
+
+                {/* PICKUP AGENT */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Assign Pickup Agent <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={returnAgent}
+                    onChange={(e) => setReturnAgent(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+                  >
+                    <option value="">Select agent for return pickup</option>
+                    {agents.map((a) => (
+                      <option key={a._id} value={a._id}>
+                        {a.firstName} {a.lastName} — {a.vehicleType}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Agent collects from customer → delivers to seller. Earns Rs 50.
+                  </p>
+                </div>
+
+                {/* Refund method */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Refund Method</label>
                   <select
                     value={refundMethod}
                     onChange={(e) => setRefundMethod(e.target.value)}
@@ -248,25 +382,25 @@ const ReturnsManagement = () => {
                     value={adminNote}
                     onChange={(e) => setAdminNote(e.target.value)}
                     placeholder="Explain your decision..."
-                    rows={3}
+                    rows={2}
                     className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-none"
                   />
                 </div>
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => handleProcess('rejected')}
+                    onClick={handleReject}
                     disabled={actionLoading}
                     className="flex-1 bg-red-50 hover:bg-red-100 disabled:opacity-60 text-red-600 font-medium py-2.5 rounded-xl text-sm transition-all"
                   >
                     ✕ Reject
                   </button>
                   <button
-                    onClick={() => handleProcess('approved')}
+                    onClick={handleApprove}
                     disabled={actionLoading}
                     className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white font-medium py-2.5 rounded-xl text-sm transition-all"
                   >
-                    {actionLoading ? 'Processing...' : '✓ Approve & Refund'}
+                    {actionLoading ? 'Processing...' : '✓ Approve & Assign Pickup'}
                   </button>
                 </div>
               </>
@@ -275,11 +409,10 @@ const ReturnsManagement = () => {
             {selected.status !== 'pending' && (
               <div className={`rounded-xl p-4 ${statusColors[selected.status]}`}>
                 <p className="text-sm font-medium">
-                  Status: {selected.status.charAt(0).toUpperCase() + selected.status.slice(1)}
+                  Status: {selected.status.replace('_', ' ')}
                 </p>
-                {selected.adminNote && (
-                  <p className="text-sm mt-1">{selected.adminNote}</p>
-                )}
+                {selected.fault && <p className="text-sm mt-1">Fault: {selected.fault}</p>}
+                {selected.adminNote && <p className="text-sm mt-1">{selected.adminNote}</p>}
               </div>
             )}
           </div>

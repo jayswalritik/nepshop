@@ -39,9 +39,31 @@ const returnSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected', 'refunded'],
+      // pending → admin reviews
+      // approved → fault set, pickup agent assigned, awaiting pickup
+      // picked_up → agent collected from customer
+      // refunded → returned to seller, money reversed, complete
+      // rejected → admin declined
+      enum: ['pending', 'approved', 'picked_up', 'refunded', 'rejected'],
       default: 'pending',
     },
+
+    // ── Fault & settlement (set by admin on approval) ─────
+    fault: {
+      type: String,
+      enum: ['seller', 'customer', null],
+      default: null,
+    },
+
+    // ── Return pickup (reverse delivery job) ──────────────
+    returnAgent: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    pickedUpAt:        { type: Date, default: null },
+    returnedToSellerAt:{ type: Date, default: null },
+    returnAgentEarning:{ type: Number, default: 50 },
     refundAmount: {
       type: Number,
       default: 0,

@@ -63,7 +63,10 @@ const orderSchema = new mongoose.Schema(
       type: String,
       enum: [
         'pending', 'confirmed', 'packed',
-        'dispatched', 'delivered', 'cancelled', 'returned'
+        'dispatched', 'delivered', 'cancelled',
+        'return_assigned',     // return approved, pickup agent assigned
+        'return_in_transit',   // agent picked up from customer
+        'returned'             // returned to seller, complete
       ],
       default: 'pending',
     },

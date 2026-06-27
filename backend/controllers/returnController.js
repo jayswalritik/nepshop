@@ -127,12 +127,12 @@ const getAllReturns = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
-// @desc    Process a return (admin approve/reject)
+// @desc    Process a return (admin approve/reject + assign pickup)
 // @route   PUT /api/returns/:id/process
 // @access  Admin only
 // ─────────────────────────────────────────────────────────
 const processReturn = asyncHandler(async (req, res) => {
-  const { status, adminNote, refundMethod } = req.body;
+  const { status, adminNote, refundMethod, fault, returnAgentId } = req.body;
 
   if (!['approved', 'rejected'].includes(status)) {
     res.status(400);
@@ -153,49 +153,71 @@ const processReturn = asyncHandler(async (req, res) => {
     throw new Error('Return request has already been processed');
   }
 
-  returnRequest.status      = status;
+  const order = await Order.findById(returnRequest.order._id);
+
   returnRequest.adminNote   = adminNote || '';
   returnRequest.processedBy = req.user._id;
   returnRequest.processedAt = new Date();
 
-  if (status === 'approved') {
-    returnRequest.refundMethod = refundMethod || 'original_payment';
-    returnRequest.status       = 'refunded';
+  // ── REJECTED ────────────────────────────────────────────
+  if (status === 'rejected') {
+    returnRequest.status = 'rejected';
+    await returnRequest.save();
 
-    // Update order payment status
-    await Order.findByIdAndUpdate(returnRequest.order._id, {
-      paymentStatus: 'refunded',
-    });
-
-    // Restore product stock
-    const Product = require('../models/Product');
-    for (const item of returnRequest.items) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: item.quantity },
-      });
+    // Unfreeze settlement — return back to normal, cron will release it
+    if (order && order.settlement) {
+      order.settlement.status = 'partial';
+      order.status = 'delivered'; // restore delivered status
+      await order.save();
     }
+
+    const { sendReturnRejectedEmail } = require('../utils/emailService');
+    const customer = await User.findById(returnRequest.customer._id);
+    if (customer) sendReturnRejectedEmail(customer, returnRequest, returnRequest.order);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Return request rejected. Seller funds will release normally.',
+      return:  returnRequest,
+    });
   }
 
+  // ── APPROVED ────────────────────────────────────────────
+  // Require fault confirmation and a pickup agent
+  if (!fault || !['seller', 'customer'].includes(fault)) {
+    res.status(400);
+    throw new Error('Please confirm who is at fault (seller or customer) before approving');
+  }
+  if (!returnAgentId) {
+    res.status(400);
+    throw new Error('Please assign a delivery agent for the return pickup');
+  }
+
+  returnRequest.status       = 'approved';
+  returnRequest.fault        = fault;
+  returnRequest.returnAgent  = returnAgentId;
+  returnRequest.refundMethod = refundMethod || 'original_payment';
   await returnRequest.save();
 
-  const {
-    sendReturnApprovedEmail,
-    sendReturnRejectedEmail,
-  } = require('../utils/emailService');
-
-  const customer = await User.findById(returnRequest.customer._id);
-  if (customer) {
-    if (status === 'approved') {
-      sendReturnApprovedEmail(customer, returnRequest, returnRequest.order);
-    } else {
-      sendReturnRejectedEmail(customer, returnRequest, returnRequest.order);
+  // Mark order as return-assigned and store fault on settlement
+  if (order) {
+    order.status = 'return_assigned';
+    if (order.settlement) {
+      order.settlement.returnFault       = fault;
+      order.settlement.returnPickupAgent = returnAgentId;
+      order.settlement.status            = 'return_pending'; // still frozen
     }
+    await order.save();
   }
 
-  
+  // Email the customer — return approved, pickup coming
+  const { sendReturnApprovedEmail } = require('../utils/emailService');
+  const customer = await User.findById(returnRequest.customer._id);
+  if (customer) sendReturnApprovedEmail(customer, returnRequest, returnRequest.order);
+
   res.status(200).json({
     success: true,
-    message: `Return request ${status}`,
+    message: `Return approved. Fault: ${fault}. Pickup agent assigned.`,
     return:  returnRequest,
   });
 });
