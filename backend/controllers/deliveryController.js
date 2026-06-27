@@ -69,6 +69,10 @@ const markDelivered = asyncHandler(async (req, res) => {
 
   await order.save();
 
+  // Send delivery earning email to the agent (req.user is the agent)
+  const { sendDeliveryEarningEmail } = require('../utils/emailService');
+  sendDeliveryEarningEmail(req.user, order);
+
   // Send delivered email to customer
   const customer = await User.findById(order.customer);
   if (customer) sendOrderStatusEmail(customer, order, 'delivered');

@@ -46,6 +46,8 @@ cron.schedule('* * * * *', async () => {
     });
 
     let released = 0;
+    const { sendSettlementReleasedEmail } = require('./utils/emailService');
+    const UserModel = require('./models/User');
     for (const order of toRelease) {
       order.settlement.status           = 'released';
       order.settlement.sellerReleased   = true;
@@ -53,6 +55,12 @@ cron.schedule('* * * * *', async () => {
       order.settlement.commissionBooked = true;
       order.settlement.settledAt        = now;
       await order.save();
+      // Email the seller(s) that their earnings cleared
+      const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+      for (const sid of sellerIds) {
+        const seller = await UserModel.findById(sid);
+        if (seller) sendSettlementReleasedEmail(seller, order);
+      }
       released++;
     }
 
@@ -99,7 +107,6 @@ app.use('/api/delivery', require('./routes/deliveryRoutes'));
 app.use('/api/reviews', require('./routes/reviewRoutes'));
 app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/returns', require('./routes/returnRoutes'));
-app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 
 // Future routes (we'll add these in later steps):

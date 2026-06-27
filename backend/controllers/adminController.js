@@ -659,10 +659,18 @@ const paySeller = asyncHandler(async (req, res) => {
 
   const seller = await User.findById(req.params.sellerId);
 
-  // Optional: email the seller their payout was processed
-  if (seller) {
+  // Compute the amount we just paid (sum of released, now-paid sellerShares)
+  const paidOrders = await Order.find({
+    'items.seller': req.params.sellerId,
+    'settlement.sellerPaidOut': true,
+    'settlement.sellerPaidOutAt': now,
+  }).select('settlement');
+  const paidAmount = paidOrders.reduce((s, o) => s + (o.settlement.sellerShare || 0), 0);
+
+  if (seller && result.modifiedCount > 0) {
     const { sendPayoutProcessedEmail } = require('../utils/emailService');
-    // amount isn't recomputed here; email is informational
+    const method = seller.payoutDetails?.preferredMethod || 'registered payout method';
+    sendPayoutProcessedEmail(seller, paidAmount, method);
   }
 
   res.status(200).json({
@@ -692,9 +700,100 @@ const payAgent = asyncHandler(async (req, res) => {
     }
   );
 
+  const agent = await User.findById(req.params.agentId);
+  const paidJobs = await Order.find({
+    deliveryAgent: req.params.agentId,
+    'settlement.agentPaidOut': true,
+    'settlement.agentPaidOutAt': now,
+  }).select('deliveryEarning');
+  const paidAmount = paidJobs.reduce((s, o) => s + (o.deliveryEarning || 50), 0);
+
+  if (agent && result.modifiedCount > 0) {
+    const { sendPayoutProcessedEmail } = require('../utils/emailService');
+    const method = agent.payoutDetails?.preferredMethod || 'registered payout method';
+    sendPayoutProcessedEmail(agent, paidAmount, method);
+  }
+
   res.status(200).json({
     success: true,
     message: `Marked ${result.modifiedCount} delivery job(s) as paid out for this agent.`,
+  });
+});
+
+// @desc  Get payout history (already-paid disbursements)
+// @route GET /api/admin/payouts/history
+// @access Admin only
+const getPayoutHistory = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+
+  // ── Seller payouts already made ─────────────────────────
+  const sellerPaid = await Order.find({
+    'settlement.sellerPaidOut': true,
+  })
+    .select('items subtotal commissionAmount settlement')
+    .populate('items.seller', 'firstName lastName shopName email');
+
+  // Group by seller + payout timestamp (one click = one payout event)
+  const sellerEvents = {};
+  for (const order of sellerPaid) {
+    const paidAt = order.settlement.sellerPaidOutAt;
+    if (!paidAt) continue;
+    const sellerIds = [...new Set(order.items.map(i => i.seller?._id?.toString()))];
+    for (const sid of sellerIds) {
+      const sellerObj = order.items.find(i => i.seller?._id?.toString() === sid)?.seller;
+      const key = `${sid}_${new Date(paidAt).getTime()}`;
+      if (!sellerEvents[key]) {
+        sellerEvents[key] = {
+          type:       'seller',
+          name:       sellerObj?.shopName || `${sellerObj?.firstName} ${sellerObj?.lastName}`,
+          email:      sellerObj?.email || '',
+          amount:     0,
+          orderCount: 0,
+          paidAt,
+        };
+      }
+      sellerEvents[key].amount     += order.settlement.sellerShare || 0;
+      sellerEvents[key].orderCount += 1;
+    }
+  }
+
+  // ── Agent payouts already made ──────────────────────────
+  const agentPaid = await Order.find({
+    'settlement.agentPaidOut': true,
+  })
+    .select('deliveryAgent deliveryEarning settlement')
+    .populate('deliveryAgent', 'firstName lastName email vehicleType');
+
+  const agentEvents = {};
+  for (const order of agentPaid) {
+    const paidAt = order.settlement.agentPaidOutAt;
+    if (!paidAt || !order.deliveryAgent) continue;
+    const aid = order.deliveryAgent._id.toString();
+    const key = `${aid}_${new Date(paidAt).getTime()}`;
+    if (!agentEvents[key]) {
+      agentEvents[key] = {
+        type:       'agent',
+        name:       `${order.deliveryAgent.firstName} ${order.deliveryAgent.lastName}`,
+        email:      order.deliveryAgent.email || '',
+        amount:     0,
+        orderCount: 0,
+        paidAt,
+      };
+    }
+    agentEvents[key].amount     += order.deliveryEarning || 50;
+    agentEvents[key].orderCount += 1;
+  }
+
+  // Combine and sort by date (newest first)
+  const history = [...Object.values(sellerEvents), ...Object.values(agentEvents)]
+    .sort((a, b) => new Date(b.paidAt) - new Date(a.paidAt));
+
+  const totalPaid = history.reduce((s, h) => s + h.amount, 0);
+
+  res.status(200).json({
+    success: true,
+    history,
+    totalPaid,
   });
 });
 
@@ -718,4 +817,5 @@ module.exports = {
   getPayouts,
   paySeller,
   payAgent,
+  getPayoutHistory,
 };

@@ -265,6 +265,12 @@ const cancelOrder = asyncHandler(async (req, res) => {
   const customer = await User.findById(req.user._id);
   if (customer) sendOrderStatusEmail(customer, order, 'cancelled');
 
+  // If a refund was processed (paid online), send a refund confirmation
+  if (refunded && customer) {
+    const { sendCancelRefundToCustomer } = require('../utils/emailService');
+    sendCancelRefundToCustomer(customer, order);
+  }
+
   // Notify seller
   const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
   for (const sellerId of sellerIds) {
@@ -413,6 +419,13 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     const agent = await User.findById(deliveryAgentId);
     if (agent) sendDeliveryAssignedEmail(agent, order);
   }
+
+  // If a seller cancellation refunded a paid order, confirm the refund
+  if (status === 'cancelled' && order.paymentStatus === 'refunded' && customer) {
+    const { sendCancelRefundToCustomer } = require('../utils/emailService');
+    sendCancelRefundToCustomer(customer, order);
+  }
+
 
   res.status(200).json({
     success: true,

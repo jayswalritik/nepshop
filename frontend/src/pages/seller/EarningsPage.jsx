@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import API from '../../utils/api';
+import { exportToCsv } from '../../utils/exportCsv';
 
 const EarningsPage = () => {
   const [stats, setStats]     = useState(null);
@@ -81,6 +82,26 @@ const EarningsPage = () => {
     }
   };
 
+  const handleExport = () => {
+    const rows = orders.map(o => ({
+      orderId:      '#' + o._id.slice(-8).toUpperCase(),
+      date:         new Date(o.createdAt).toLocaleDateString('en-NP'),
+      productRevenue: o.subtotal,
+      commission:   o.commissionAmount,
+      earning:      o.subtotal - o.commissionAmount,
+      status:       o.settlement?.sellerReleased ? 'Released' : 'Pending',
+    }));
+    const headers = [
+      { key: 'orderId',        label: 'Order ID' },
+      { key: 'date',           label: 'Date' },
+      { key: 'productRevenue', label: 'Product Revenue (Rs)' },
+      { key: 'commission',     label: 'Commission (Rs)' },
+      { key: 'earning',        label: 'Your Earning (Rs)' },
+      { key: 'status',         label: 'Settlement Status' },
+    ];
+    exportToCsv(`nepshop-earnings-${Date.now()}.csv`, rows, headers);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -93,8 +114,8 @@ const EarningsPage = () => {
 
   return (
     <div>
-      {/* Period filter */}
-      <div className="flex gap-2 mb-6">
+      {/* Period filter + export */}
+      <div className="flex gap-2 mb-6 items-center">
         {[
           { key: 'today', label: 'Today' },
           { key: 'week',  label: 'This Week' },
@@ -112,6 +133,12 @@ const EarningsPage = () => {
             {p.label}
           </button>
         ))}
+        <button
+          onClick={handleExport}
+          className="ml-auto px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white transition-all flex items-center gap-1.5"
+        >
+          ⬇ Export CSV
+        </button>
       </div>
 
       {/* Balance cards — the settlement view */}

@@ -18,6 +18,7 @@ const {
   updateSellerCommission,
   releaseSettlements,
   getPayouts,
+  getPayoutHistory,
   paySeller,
   payAgent,
 } = require('../controllers/adminController');
@@ -67,6 +68,7 @@ router.post('/settlement/release', releaseSettlements);
 
 // Payouts
 router.get('/payouts',                    getPayouts);
+router.get('/payouts/history',            getPayoutHistory);
 router.post('/payouts/seller/:sellerId',  paySeller);
 router.post('/payouts/agent/:agentId',    payAgent);
 

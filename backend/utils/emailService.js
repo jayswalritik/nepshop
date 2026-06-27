@@ -923,6 +923,275 @@ const sendDailyAdminSummary = async (adminEmail) => {
   });
 };
 
+
+// ═════════════════════════════════════════════════════════
+// SETTLEMENT & PAYOUT EMAILS
+// ═════════════════════════════════════════════════════════
+
+// Seller — earnings released from escrow (cleared the return window)
+const sendSettlementReleasedEmail = (seller, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  const sellerEarning = (order.subtotal - order.commissionAmount).toFixed(0);
+  return sendEmail({
+    to:        seller.email,
+    subject:   `Earnings cleared for order #${shortId} — Rs ${sellerEarning} available 💰`,
+    preheader: `Your earnings for order #${shortId} have cleared the return window and are now available for payout.`,
+    html: `
+      ${hero('💰', 'Earnings Released', `Your earnings for order #${shortId} have cleared the return window and are now available for payout.`, 'Available', '#16a34a')}
+      ${section(`
+        <p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 16px;">
+          Good news, ${seller.firstName}! The return window for this order has passed with no returns, so your earnings have moved from <strong>pending</strong> to <strong>available</strong>.
+        </p>
+        ${infoBox([
+          ['Order ID',        `#${shortId}`],
+          ['Product Revenue', `Rs ${order.subtotal.toLocaleString()}`],
+          ['Commission (5%)', `− Rs ${order.commissionAmount.toLocaleString()}`],
+          ['Your Earnings',   `Rs ${Number(sellerEarning).toLocaleString()}`],
+          ['Status',          'Available for payout'],
+        ])}
+        <p style="color:#64748b;font-size:13px;line-height:1.6;margin:16px 0 0;">
+          This amount is now queued for payout. You'll receive another email once NepShop disburses it to your registered payout method.
+        </p>
+        ${ctaButton('View Earnings →', `${process.env.FRONTEND_URL}`)}
+      `)}
+    `,
+  });
+};
+
+
+
+// Delivery agent — earning credited on delivery
+const sendDeliveryEarningEmail = (agent, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  const earning = (order.deliveryEarning || 50).toFixed(0);
+  return sendEmail({
+    to:        agent.email,
+    subject:   `You earned Rs ${earning} for delivering order #${shortId} 🚚`,
+    preheader: `Your delivery earning of Rs ${earning} for order #${shortId} has been credited.`,
+    html: `
+      ${hero('🚚', 'Delivery Earning Credited', `You've earned Rs ${earning} for successfully delivering order #${shortId}.`, 'Credited', '#16a34a')}
+      ${section(`
+        <p style="color:#374151;font-size:14px;line-height:1.7;margin:0 0 16px;">
+          Great work, ${agent.firstName}! Your earning for this delivery has been credited immediately. It will be included in your next payout.
+        </p>
+        ${infoBox([
+          ['Order ID',       `#${shortId}`],
+          ['Delivery Fee',   `Rs ${Number(earning).toLocaleString()}`],
+          ['Delivered On',   formatDate(new Date())],
+          ['Status',         'Credited — awaiting payout'],
+        ])}
+        ${ctaButton('View Earnings →', `${process.env.FRONTEND_URL}`)}
+      `)}
+    `,
+  });
+};
+
+
+// ═════════════════════════════════════════════════════════
+// RETURN PICKUP & REVERSAL EMAILS
+// ═════════════════════════════════════════════════════════
+
+// Return pickup assigned to delivery agent
+const sendReturnPickupAssignedEmail = (agent, returnRequest, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        agent.email,
+    subject:   `🔄 Return Pickup Assigned — Order #${shortId} | NepShop`,
+    preheader: `You've been assigned a return pickup. Collect from the customer and deliver to the seller.`,
+    html: `
+      ${hero('🔄', 'Return Pickup Assigned', 'You have a new return pickup. Collect the item from the customer and deliver it back to the seller.', 'New Return Job', '#7c3aed')}
+      ${section(`
+        ${infoBox([
+          ['Return for Order', `#${shortId}`],
+          ['Reason',            returnRequest.reason],
+          ['Your Earning',     `<strong style="color:#16a34a;">${formatCurrency(returnRequest.returnAgentEarning || 50)}</strong>`],
+          ['Assigned On',       formatDateTime(new Date())],
+        ])}
+        ${divider()}
+        <p style="color:#374151;font-size:13px;font-weight:600;margin:0 0 10px;">📦 Collect From (Customer)</p>
+        ${infoBox([
+          ['Customer', `${returnRequest.customer?.firstName || order.deliveryAddress.fullName}`],
+          ['Phone',     order.deliveryAddress.phone],
+          ['Address',  `${order.deliveryAddress.street}, ${order.deliveryAddress.city}`],
+          ['District',  order.deliveryAddress.district],
+        ], '#eff6ff', '#bfdbfe')}
+        ${divider()}
+        <p style="color:#374151;font-size:13px;font-weight:600;margin:0 0 10px;">🏪 Deliver To (Seller)</p>
+        ${infoBox([
+          ['Shop',     order.pickupAddress?.shopName || 'Seller'],
+          ['Address',  `${order.pickupAddress?.street || ''}, ${order.pickupAddress?.city || ''}`],
+          ['Contact',   order.pickupAddress?.phone || 'Contact seller'],
+        ], '#f0fdf4', '#bbf7d0')}
+        ${ctaButton('Open in Dashboard →', `${process.env.FRONTEND_URL}/login`)}
+      `)}
+    `,
+  });
+};
+
+// Return picked up — notify customer
+const sendReturnPickedUpToCustomer = (customer, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        customer.email,
+    subject:   `Return Collected — Order #${shortId} | NepShop`,
+    preheader: `Your return for order #${shortId} has been collected and is on its way back to the seller.`,
+    html: `
+      ${hero('📦', 'Return Collected', `Our delivery agent has collected your return for order #${shortId}. It's now on its way back to the seller.`, 'Picked Up', '#7c3aed')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',    `#${shortId}`],
+          ['Collected On', formatDateTime(new Date())],
+          ['Status',       'On the way to seller'],
+        ])}
+        ${alertBox('Once the item reaches the seller, your refund will be processed automatically. We\'ll email you the moment it\'s done.', 'info')}
+        ${ctaButton('Track Return →', `${process.env.FRONTEND_URL}/customer/dashboard`)}
+      `)}
+    `,
+  });
+};
+
+// Return picked up — notify seller (item coming back)
+const sendReturnPickedUpToSeller = (seller, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        seller.email,
+    subject:   `Returned Item Incoming — Order #${shortId} | NepShop`,
+    preheader: `A returned item for order #${shortId} is on its way back to you.`,
+    html: `
+      ${hero('🔄', 'Returned Item On the Way', `A return for order #${shortId} has been collected from the customer and is being delivered back to you.`, 'Incoming', '#d97706')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',    `#${shortId}`],
+          ['Collected On', formatDateTime(new Date())],
+          ['Status',       'In transit to your shop'],
+        ])}
+        ${alertBox('Please be available to receive the returned item. Once you receive it, the settlement for this order will be finalized.', 'info')}
+        ${ctaButton('View Orders →', `${process.env.FRONTEND_URL}/seller/dashboard`)}
+      `)}
+    `,
+  });
+};
+
+
+// Return completed — refund processed to customer
+const sendRefundProcessedToCustomer = (customer, order, refundAmount, fault) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        customer.email,
+    subject:   `💚 Refund Processed — ${formatCurrency(refundAmount)} | Order #${shortId}`,
+    preheader: `Your refund of ${formatCurrency(refundAmount)} for order #${shortId} has been processed.`,
+    html: `
+      ${hero('💚', 'Refund Processed!', `Your returned item has reached the seller and your refund of ${formatCurrency(refundAmount)} has been processed.`, 'Refund Complete', '#16a34a')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',      `#${shortId}`],
+          ['Refund Amount',  formatCurrency(refundAmount)],
+          ['Processed On',   formatDateTime(new Date())],
+          ['Status',         '✅ Refund Complete'],
+        ], '#f0fdf4', '#bbf7d0')}
+        ${fault === 'customer' ? alertBox('As this return was a change-of-mind, the delivery charges were deducted from your refund as per our return policy.', 'info') : alertBox('You have been fully refunded including delivery charges.', 'success')}
+        ${alertBox('The refund will reflect in your original payment method within 3–5 business days. For Cash on Delivery orders, our team will contact you for your bank/wallet details.', 'info')}
+        ${ctaButton('View My Orders →', `${process.env.FRONTEND_URL}/customer/dashboard`)}
+      `)}
+    `,
+  });
+};
+
+// Return completed — notify seller (item received, settlement reversed)
+const sendReturnCompletedToSeller = (seller, order, fault) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        seller.email,
+    subject:   `Return Completed — Order #${shortId} | NepShop`,
+    preheader: `The returned item for order #${shortId} has been delivered back to you. Settlement adjusted.`,
+    html: `
+      ${hero('🔄', 'Return Completed', `The returned item for order #${shortId} has been delivered back to you and the settlement has been adjusted.`, 'Returned', '#dc2626')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',     `#${shortId}`],
+          ['Returned On',   formatDateTime(new Date())],
+          ['Fault',         fault === 'seller' ? 'Product issue (seller)' : 'Customer changed mind'],
+          ['Stock',         '✅ Restored to your inventory'],
+        ])}
+        ${fault === 'seller'
+          ? alertBox('As this return was due to a product issue, the earnings for this order have been reversed and the delivery costs were borne by your account, as per our return policy.', 'warning')
+          : alertBox('The earnings for this order have been reversed. The customer bore the delivery costs as this was a change-of-mind return.', 'info')}
+        ${alertBox('The product stock has been automatically restored to your inventory.', 'success')}
+        ${ctaButton('View Orders →', `${process.env.FRONTEND_URL}/seller/dashboard`)}
+      `)}
+    `,
+  });
+};
+
+// Return completed — notify agent of their earning
+const sendReturnEarningToAgent = (agent, returnRequest, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  const earning = returnRequest.returnAgentEarning || 50;
+  return sendEmail({
+    to:        agent.email,
+    subject:   `You earned ${formatCurrency(earning)} for return pickup — Order #${shortId} 🔄`,
+    preheader: `Your earning of ${formatCurrency(earning)} for the return pickup has been credited.`,
+    html: `
+      ${hero('🔄', 'Return Pickup Complete', `You've earned ${formatCurrency(earning)} for completing the return pickup for order #${shortId}.`, 'Credited', '#16a34a')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',     `#${shortId}`],
+          ['Return Fee',    formatCurrency(earning)],
+          ['Completed On',  formatDateTime(new Date())],
+          ['Status',        'Credited — awaiting payout'],
+        ], '#f0fdf4', '#bbf7d0')}
+        ${ctaButton('View Earnings →', `${process.env.FRONTEND_URL}/login`)}
+      `)}
+    `,
+  });
+};
+
+// New return request — alert admin
+const sendNewReturnToAdmin = (adminEmail, returnRequest, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        adminEmail,
+    subject:   `🔄 New Return Request — Order #${shortId} | NepShop`,
+    preheader: `A customer has requested a return for order #${shortId}. Review and process it.`,
+    html: `
+      ${hero('🔄', 'New Return Request', `A customer has requested a return for order #${shortId} and it needs your review.`, 'Review Required', '#d97706')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',      `#${shortId}`],
+          ['Reason',         returnRequest.reason],
+          ['Refund Amount',  formatCurrency(returnRequest.refundAmount)],
+          ['Requested On',   formatDateTime(new Date())],
+        ])}
+        ${returnRequest.description ? alertBox(`Customer note: ${returnRequest.description}`, 'info') : ''}
+        ${ctaButton('Review Return →', `${process.env.FRONTEND_URL}/admin/login`)}
+      `)}
+    `,
+  });
+};
+
+// Refund processed on cancellation — notify customer
+const sendCancelRefundToCustomer = (customer, order) => {
+  const shortId = order._id.toString().slice(-8).toUpperCase();
+  return sendEmail({
+    to:        customer.email,
+    subject:   `💚 Refund Processed — ${formatCurrency(order.total)} | Order #${shortId}`,
+    preheader: `Your order was cancelled and a refund of ${formatCurrency(order.total)} has been processed.`,
+    html: `
+      ${hero('💚', 'Refund Processed', `Your order #${shortId} was cancelled and your refund of ${formatCurrency(order.total)} has been processed.`, 'Refund Complete', '#16a34a')}
+      ${section(`
+        ${infoBox([
+          ['Order ID',      `#${shortId}`],
+          ['Refund Amount',  formatCurrency(order.total)],
+          ['Processed On',   formatDateTime(new Date())],
+          ['Status',         '✅ Refund Complete'],
+        ], '#f0fdf4', '#bbf7d0')}
+        ${alertBox('The refund will reflect in your original payment method within 3–5 business days.', 'info')}
+        ${ctaButton('View My Orders →', `${process.env.FRONTEND_URL}/customer/dashboard`)}
+      `)}
+    `,
+  });
+};
+
 // ═════════════════════════════════════════════════════════
 // EXPORTS
 // ═════════════════════════════════════════════════════════
@@ -955,4 +1224,17 @@ module.exports = {
   // Admin
   sendNewApplicationToAdmin,
   sendDailyAdminSummary,
+
+// Settlement & Payout
+  sendSettlementReleasedEmail,
+  sendDeliveryEarningEmail,
+  sendNewReturnToAdmin,
+  sendCancelRefundToCustomer,
+  sendReturnPickupAssignedEmail,
+  sendReturnPickedUpToCustomer,
+  sendReturnPickedUpToSeller,
+  sendRefundProcessedToCustomer,
+  sendReturnCompletedToSeller,
+  sendReturnEarningToAgent,
+  
 };

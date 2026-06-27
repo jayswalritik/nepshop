@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import API from '../../utils/api';
+import { exportToCsv } from '../../utils/exportCsv';
 
 const CommissionManagement = () => {
   const [report, setReport]         = useState(null);
@@ -42,6 +43,28 @@ const CommissionManagement = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleExport = () => {
+    const rows = (report?.sellers || []).map(s => ({
+      seller:       s._id?.shopName || 'Unknown',
+      email:        s._id?.email || '',
+      confirmedOrders: s.confirmedOrders,
+      productRevenue:  s.confirmedRevenue,
+      commission:      s.confirmedCommission,
+      pendingRevenue:  s.pendingRevenue || 0,
+      rate:           (s._id?.commissionRate || 5) + '%',
+    }));
+    const headers = [
+      { key: 'seller',          label: 'Seller' },
+      { key: 'email',           label: 'Email' },
+      { key: 'confirmedOrders', label: 'Confirmed Orders' },
+      { key: 'productRevenue',  label: 'Product Revenue (Rs)' },
+      { key: 'commission',      label: 'Commission Earned (Rs)' },
+      { key: 'pendingRevenue',  label: 'Pending Revenue (Rs)' },
+      { key: 'rate',            label: 'Commission Rate' },
+    ];
+    exportToCsv(`nepshop-commission-${Date.now()}.csv`, rows, headers);
   };
 
   if (loading) return (
@@ -141,11 +164,19 @@ const CommissionManagement = () => {
 
       {/* Per-seller breakdown */}
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-900">Commission by Seller</h3>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Confirmed = delivered orders · Pending = in-progress · Cancelled orders excluded
-          </p>
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Commission by Seller</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Confirmed = delivered orders · Pending = in-progress · Cancelled orders excluded
+            </p>
+          </div>
+          <button
+            onClick={handleExport}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 hover:bg-green-700 text-white transition-all flex items-center gap-1.5"
+          >
+            ⬇ Export CSV
+          </button>
         </div>
 
         {!report?.sellers?.length ? (

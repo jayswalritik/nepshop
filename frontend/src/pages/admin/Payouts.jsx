@@ -1,14 +1,18 @@
 import { useState, useEffect } from 'react';
 import API from '../../utils/api';
+import { exportToCsv } from '../../utils/exportCsv';
 
 const Payouts = () => {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying]   = useState(null);
   const [confirm, setConfirm] = useState(null); // { type, id, name, amount }
+  const [view, setView]       = useState('pending'); // 'pending' | 'history'
+  const [history, setHistory] = useState(null);
 
   useEffect(() => {
     fetchPayouts();
+    fetchHistory();
   }, []);
 
   const fetchPayouts = async () => {
@@ -23,6 +27,15 @@ const Payouts = () => {
     }
   };
 
+  const fetchHistory = async () => {
+    try {
+      const { data } = await API.get('/admin/payouts/history');
+      setHistory(data);
+    } catch (err) {
+      console.error('Failed to fetch payout history:', err);
+    }
+  };
+
   const handlePay = async () => {
     if (!confirm) return;
     setPaying(confirm.id);
@@ -33,11 +46,58 @@ const Payouts = () => {
       await API.post(url);
       setConfirm(null);
       fetchPayouts();
+      fetchHistory();
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to process payout');
     } finally {
       setPaying(null);
     }
+  };
+
+  const handleExport = () => {
+    const sellerRows = (data?.sellers || []).map(s => ({
+      type:   'Seller',
+      name:   s.sellerId?.shopName || `${s.sellerId?.firstName} ${s.sellerId?.lastName}`,
+      email:  s.sellerId?.email || '',
+      count:  s.orders,
+      amount: s.amount,
+    }));
+    const agentRows = (data?.agents || []).map(a => ({
+      type:   'Delivery Agent',
+      name:   `${a.agentId?.firstName} ${a.agentId?.lastName}`,
+      email:  a.agentId?.email || '',
+      count:  a.jobs,
+      amount: a.amount,
+    }));
+    const rows = [...sellerRows, ...agentRows];
+    const headers = [
+      { key: 'type',   label: 'Type' },
+      { key: 'name',   label: 'Name' },
+      { key: 'email',  label: 'Email' },
+      { key: 'count',  label: 'Orders / Deliveries' },
+      { key: 'amount', label: 'Amount Owed (Rs)' },
+    ];
+    exportToCsv(`nepshop-payouts-${Date.now()}.csv`, rows, headers);
+  };
+
+  const handleExportHistory = () => {
+    const rows = (history?.history || []).map(h => ({
+      type:   h.type === 'seller' ? 'Seller' : 'Delivery Agent',
+      name:   h.name,
+      email:  h.email,
+      count:  h.orderCount,
+      amount: h.amount,
+      paidOn: new Date(h.paidAt).toLocaleString('en-NP'),
+    }));
+    const headers = [
+      { key: 'type',   label: 'Type' },
+      { key: 'name',   label: 'Recipient' },
+      { key: 'email',  label: 'Email' },
+      { key: 'count',  label: 'Orders / Deliveries' },
+      { key: 'amount', label: 'Amount Paid (Rs)' },
+      { key: 'paidOn', label: 'Paid On' },
+    ];
+    exportToCsv(`nepshop-payout-history-${Date.now()}.csv`, rows, headers);
   };
 
   if (loading) {
@@ -58,6 +118,33 @@ const Payouts = () => {
 
   return (
     <div>
+      {/* Header with view toggle + export */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          <button
+            onClick={() => setView('pending')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all
+              ${view === 'pending' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Pending
+          </button>
+          <button
+            onClick={() => setView('history')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all
+              ${view === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            History
+          </button>
+        </div>
+        <button
+          onClick={view === 'pending' ? handleExport : handleExportHistory}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-green-600 hover:bg-green-700 text-white transition-all flex items-center gap-1.5"
+        >
+          ⬇ Export CSV
+        </button>
+      </div>
+
+      {view === 'pending' && (<>
       {/* Summary cards */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-5 text-white">
@@ -180,6 +267,66 @@ const Payouts = () => {
           </table>
         )}
       </div>
+
+      </>)}
+
+      {/* History view */}
+      {view === 'history' && (
+        <div>
+          <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-5 text-white mb-6">
+            <p className="text-xs text-indigo-200 mb-1">Total Disbursed (all time)</p>
+            <p className="text-3xl font-bold">Rs {history?.totalPaid?.toLocaleString() || 0}</p>
+            <p className="text-xs text-indigo-200 mt-1">{history?.history?.length || 0} payout events recorded</p>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100">
+              <h3 className="font-semibold text-gray-900">Payout History</h3>
+              <p className="text-xs text-gray-400 mt-0.5">A permanent record of all disbursements</p>
+            </div>
+            {!history?.history?.length ? (
+              <div className="text-center py-16 text-gray-400">
+                <div className="text-4xl mb-3">🧾</div>
+                <p className="font-medium">No payouts yet</p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {['Recipient', 'Type', 'Orders/Jobs', 'Amount Paid', 'Paid On'].map(h => (
+                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {history.history.map((h, i) => (
+                    <tr key={i} className="hover:bg-gray-50">
+                      <td className="px-4 py-4">
+                        <p className="text-sm font-medium text-gray-900">{h.name}</p>
+                        <p className="text-xs text-gray-400">{h.email}</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${h.type === 'seller' ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'}`}>
+                          {h.type === 'seller' ? '🏪 Seller' : '🚚 Agent'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-sm text-gray-700">{h.orderCount}</td>
+                      <td className="px-4 py-4">
+                        <p className="text-sm font-bold text-green-600">Rs {h.amount.toLocaleString()}</p>
+                      </td>
+                      <td className="px-4 py-4 text-xs text-gray-500">
+                        {new Date(h.paidAt).toLocaleString('en-NP', {
+                          day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Confirm modal */}
       {confirm && (

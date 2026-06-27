@@ -88,6 +88,11 @@ const requestReturn = asyncHandler(async (req, res) => {
     if (seller) sendReturnRequestToSeller(seller, returnRequest, order);
   }
 
+  // Notify admin
+  const { sendNewReturnToAdmin } = require('../utils/emailService');
+  const admin = await User.findOne({ role: 'admin' });
+  if (admin) sendNewReturnToAdmin(admin.email, returnRequest, order);
+
   res.status(201).json({
     success: true,
     message: 'Return request submitted. Admin will review and process your refund.',
@@ -211,9 +216,17 @@ const processReturn = asyncHandler(async (req, res) => {
   }
 
   // Email the customer — return approved, pickup coming
-  const { sendReturnApprovedEmail } = require('../utils/emailService');
+  const { sendReturnApprovedEmail, sendReturnPickupAssignedEmail } = require('../utils/emailService');
   const customer = await User.findById(returnRequest.customer._id);
   if (customer) sendReturnApprovedEmail(customer, returnRequest, returnRequest.order);
+
+  // Email the assigned return agent
+  const returnAgentUser = await User.findById(returnAgentId);
+  if (returnAgentUser) {
+    // attach customer info for the email's pickup address block
+    returnRequest.customer = customer;
+    sendReturnPickupAssignedEmail(returnAgentUser, returnRequest, order);
+  }
 
   res.status(200).json({
     success: true,
@@ -263,10 +276,24 @@ const markReturnPickedUp = asyncHandler(async (req, res) => {
   returnRequest.pickedUpAt = new Date();
   await returnRequest.save();
 
-  // Update order status
-  await Order.findByIdAndUpdate(returnRequest.order, {
-    status: 'return_in_transit',
-  });
+  const order = await Order.findById(returnRequest.order);
+  order.status = 'return_in_transit';
+  await order.save();
+
+  // Notify customer + seller
+  const {
+    sendReturnPickedUpToCustomer,
+    sendReturnPickedUpToSeller,
+  } = require('../utils/emailService');
+
+  const customer = await User.findById(order.customer);
+  if (customer) sendReturnPickedUpToCustomer(customer, order);
+
+  const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+  for (const sid of sellerIds) {
+    const seller = await User.findById(sid);
+    if (seller) sendReturnPickedUpToSeller(seller, order);
+  }
 
   res.status(200).json({
     success: true,
@@ -356,10 +383,24 @@ const completeReturn = asyncHandler(async (req, res) => {
     });
   }
 
-  // ── Email customer that refund is processed ─────────────
-  const { sendReturnApprovedEmail } = require('../utils/emailService');
+  // ── Emails: customer refund, seller settlement, agent earning ──
+  const {
+    sendRefundProcessedToCustomer,
+    sendReturnCompletedToSeller,
+    sendReturnEarningToAgent,
+  } = require('../utils/emailService');
+
   const customer = await User.findById(returnRequest.customer._id);
-  if (customer) sendReturnApprovedEmail(customer, returnRequest, order);
+  if (customer) sendRefundProcessedToCustomer(customer, order, refundToCustomer, fault);
+
+  const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
+  for (const sid of sellerIds) {
+    const seller = await User.findById(sid);
+    if (seller) sendReturnCompletedToSeller(seller, order, fault);
+  }
+
+  const agent = await User.findById(returnRequest.returnAgent);
+  if (agent) sendReturnEarningToAgent(agent, returnRequest, order);
 
   res.status(200).json({
     success: true,
