@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
+import { useWishlist } from '../../context/WishlistContext';
 
 const ProductsPage = ({ onGoToCart }) => {
   const { addToCart, loading: cartLoading } = useCart();
+  const { isWished, toggleWish } = useWishlist();
   const [products, setProducts]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -175,14 +177,12 @@ const ProductsPage = ({ onGoToCart }) => {
                 className="bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md transition-all group"
               >
                 {/* Image */}
-                <div
-                  className="relative cursor-pointer overflow-hidden"
-                  onClick={() => setSelectedProduct(product)}
-                >
+                <div className="relative overflow-hidden">
                   <img
                     src={product.images[0]?.url}
                     alt={product.name}
-                    className="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300"
+                    onClick={() => setSelectedProduct(product)}
+                    className="w-full h-48 object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
                   />
                   {product.discount > 0 && (
                     <span className="absolute top-2 left-2 bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
@@ -190,10 +190,20 @@ const ProductsPage = ({ onGoToCart }) => {
                     </span>
                   )}
                   {product.stock <= 5 && product.stock > 0 && (
-                    <span className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+                    <span className="absolute bottom-2 left-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
                       Only {product.stock} left
                     </span>
                   )}
+                  {/* Wishlist heart */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleWish(product._id); }}
+                    className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm transition-all"
+                    title={isWished(product._id) ? 'Remove from wishlist' : 'Add to wishlist'}
+                  >
+                    <span className="text-base leading-none">
+                      {isWished(product._id) ? '❤️' : '🤍'}
+                    </span>
+                  </button>
                 </div>
 
                 {/* Details */}

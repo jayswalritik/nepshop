@@ -7,7 +7,7 @@ import OrdersPage from './OrdersPage';
 import ProfilePage from './ProfilePage';
 import RoleSwitcher from '../../components/common/RoleSwitcher';
 import OffersPage from './OffersPage';
-
+import WishlistPage from './WishlistPage';
 
 const CustomerDashboard = () => {
   const { user, logout } = useAuth();
@@ -102,7 +102,7 @@ const CustomerDashboard = () => {
         {activeTab === 'cart'    && <CartPage onCheckoutSuccess={() => setActiveTab('orders')} />}
         {activeTab === 'orders'  && <OrdersPage />}
         {activeTab === 'offers'  && <OffersPage />}
-        {activeTab === 'wishlist' && <ComingSoon title="Wishlist" desc="Save products for later — coming soon." />}
+        {activeTab === 'wishlist' && <WishlistPage onGoToShop={() => setActiveTab('shop')} />}
         {activeTab === 'profile' && <ProfilePage />}
       </div>
     </div>

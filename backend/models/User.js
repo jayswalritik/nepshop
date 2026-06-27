@@ -116,6 +116,12 @@ shopAddress: {
       default: null,
     },
 
+    // Wishlist — products the customer saved
+    wishlist: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+    }],
+
     // ── Payout details (seller + delivery) ───────────────────
     payoutDetails: {
       preferredMethod: {

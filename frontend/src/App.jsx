@@ -15,55 +15,58 @@ import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import KhaltiVerify  from './pages/payment/KhaltiVerify';
 import EsewaVerify   from './pages/payment/EsewaVerify';
 import PaymentFailed from './pages/payment/PaymentFailed';
+import { WishlistProvider } from './context/WishlistContext';
 
 function App() {
   return (
     <AuthProvider>
       <CartProvider>
         <BrowserRouter>
-        <Routes>
-          {/* Public */}
-          <Route path="/login" element={<AuthPage />} />
-          <Route path="/unauthorized" element={<Unauthorized />} />
-          <Route path="/admin/login" element={<AdminLoginPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password/:token" element={<ResetPasswordPage />} /> 
-          <Route path="/payment/khalti/verify"  element={<KhaltiVerify />} />
-          <Route path="/payment/esewa/verify"   element={<EsewaVerify />} />
-          <Route path="/payment/failed"         element={<PaymentFailed />} />  
+          <WishlistProvider>
+            <Routes>
+              {/* Public */}
+              <Route path="/login" element={<AuthPage />} />
+              <Route path="/unauthorized" element={<Unauthorized />} />
+              <Route path="/admin/login" element={<AdminLoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password/:token" element={<ResetPasswordPage />} /> 
+              <Route path="/payment/khalti/verify"  element={<KhaltiVerify />} />
+              <Route path="/payment/esewa/verify"   element={<EsewaVerify />} />
+              <Route path="/payment/failed"         element={<PaymentFailed />} />  
 
-          {/* Protected — Customer */}
-          <Route path="/customer/dashboard" element={
-            <ProtectedRoute allowedRoles={['customer']}>
-              <CustomerDashboard />
-            </ProtectedRoute>
-          } />
+              {/* Protected — Customer */}
+              <Route path="/customer/dashboard" element={
+                <ProtectedRoute allowedRoles={['customer']}>
+                  <CustomerDashboard />
+                </ProtectedRoute>
+              } />
 
-          {/* Protected — Seller */}
-          <Route path="/seller/dashboard" element={
-            <ProtectedRoute allowedRoles={['seller']}>
-              <SellerDashboard />
-            </ProtectedRoute>
-          } />
+              {/* Protected — Seller */}
+              <Route path="/seller/dashboard" element={
+                <ProtectedRoute allowedRoles={['seller']}>
+                  <SellerDashboard />
+                </ProtectedRoute>
+              } />
 
-          {/* Protected — Delivery */}
-          <Route path="/delivery/dashboard" element={
-            <ProtectedRoute allowedRoles={['delivery']}>
-              <DeliveryDashboard />
-            </ProtectedRoute>
-          } />
+              {/* Protected — Delivery */}
+              <Route path="/delivery/dashboard" element={
+                <ProtectedRoute allowedRoles={['delivery']}>
+                  <DeliveryDashboard />
+                </ProtectedRoute>
+              } />
 
-          {/* Protected — Admin */}
-          <Route path="/admin/dashboard" element={
-            <ProtectedRoute allowedRoles={['admin']}>
-              <AdminDashboard />
-            </ProtectedRoute>
-          } />
+              {/* Protected — Admin */}
+              <Route path="/admin/dashboard" element={
+                <ProtectedRoute allowedRoles={['admin']}>
+                  <AdminDashboard />
+                </ProtectedRoute>
+              } />
 
-          {/* Default redirect */}
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+              {/* Default redirect */}
+              <Route path="/" element={<Navigate to="/login" replace />} />
+              <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
+          </WishlistProvider>
       </BrowserRouter>
       </CartProvider>
     </AuthProvider>
