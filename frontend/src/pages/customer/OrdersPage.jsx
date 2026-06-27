@@ -14,7 +14,8 @@ const statusColors = {
 const statusSteps = ['pending', 'confirmed', 'packed', 'dispatched', 'delivered'];
 
 // Return window — must match backend RETURN_WINDOW_MINUTES
-const RETURN_WINDOW_MINUTES = 5;
+// const RETURN_WINDOW_MINUTES = 5;             // uncomment for testing
+   const RETURN_WINDOW_MINUTES = 10080          // uncomment for development
 
 const OrdersPage = () => {
   const [orders, setOrders]   = useState([]);

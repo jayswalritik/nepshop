@@ -8,8 +8,8 @@ const {
 
 // ── Return window before seller funds are released ────────
 // TESTING: 5 minutes. PRODUCTION: change to 7 days.
-const RETURN_WINDOW_MINUTES = 5;
-// const RETURN_WINDOW_MINUTES = 7 * 24 * 60; // ← uncomment for production (7 days)
+//const RETURN_WINDOW_MINUTES = 5;            // uncomment for testing 
+  const RETURN_WINDOW_MINUTES = 7 * 24 * 60; // ← uncomment for production (7 days)
 
 // @desc  Get all orders assigned to delivery agent
 // @route GET /api/delivery/orders

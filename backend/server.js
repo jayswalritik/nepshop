@@ -32,7 +32,7 @@ cron.schedule('0 14 * * *', async () => {
 //cron.schedule('0 1 * * *', async () => {       // uncomment for 7 day lock (1:00 AM Nepal time)
 
 // Settlement release — TESTING: every minute. PRODUCTION: '0 1 * * *'
-cron.schedule('* * * * *', async () => {
+cron.schedule('0 18 * * *', async () => {
   try {
     const Order = require('./models/Order');
     const now = new Date();
