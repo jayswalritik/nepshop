@@ -28,6 +28,42 @@ cron.schedule('0 14 * * *', async () => {
   }
 }, { timezone: 'Asia/Kathmandu' });
 
+// Settlement release — runs every day, releases seller funds past their 7-day lock
+//cron.schedule('0 1 * * *', async () => {       // uncomment for 7 day lock (1:00 AM Nepal time)
+
+// Settlement release — TESTING: every minute. PRODUCTION: '0 1 * * *'
+cron.schedule('* * * * *', async () => {
+  try {
+    const Order = require('./models/Order');
+    const now = new Date();
+
+    // Find delivered orders whose lock has expired but seller not yet released
+    const toRelease = await Order.find({
+      status: 'delivered',
+      'settlement.status': 'partial',
+      'settlement.sellerReleased': false,
+      'settlement.lockUntil': { $lte: now },
+    });
+
+    let released = 0;
+    for (const order of toRelease) {
+      order.settlement.status           = 'released';
+      order.settlement.sellerReleased   = true;
+      order.settlement.sellerReleasedAt = now;
+      order.settlement.commissionBooked = true;
+      order.settlement.settledAt        = now;
+      await order.save();
+      released++;
+    }
+
+    if (released > 0) {
+      console.log(`💰 Settlement: released ${released} order(s) past their 7-day window`);
+    }
+  } catch (err) {
+    console.error('Settlement release failed:', err.message);
+  }
+}, { timezone: 'Asia/Kathmandu' });
+
 const app = express();
 
 // ── Core Middleware ───────────────────────────────────────

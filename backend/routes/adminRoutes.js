@@ -16,6 +16,7 @@ const {
   adminUpdateOrderStatus,
   getCommissionReport,
   updateSellerCommission,
+  releaseSettlements,
 } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
@@ -58,5 +59,7 @@ router.put('/orders/:id/status',      adminUpdateOrderStatus);
 // Commission
 router.get('/commission',             getCommissionReport);
 router.put('/commission/:sellerId',   updateSellerCommission);
+
+router.post('/settlement/release', releaseSettlements);
 
 module.exports = router;

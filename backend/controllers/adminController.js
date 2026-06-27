@@ -523,6 +523,39 @@ const updateSellerCommission = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc  Manually trigger settlement release (testing/admin)
+// @route POST /api/admin/settlement/release
+// @access Admin only
+const releaseSettlements = asyncHandler(async (req, res) => {
+  const Order = require('../models/Order');
+  const now = new Date();
+
+  // For manual trigger: release any delivered 'partial' order whose lock passed
+  const toRelease = await Order.find({
+    status: 'delivered',
+    'settlement.status': 'partial',
+    'settlement.sellerReleased': false,
+    'settlement.lockUntil': { $lte: now },
+  });
+
+  let released = 0;
+  for (const order of toRelease) {
+    order.settlement.status           = 'released';
+    order.settlement.sellerReleased   = true;
+    order.settlement.sellerReleasedAt = now;
+    order.settlement.commissionBooked = true;
+    order.settlement.settledAt        = now;
+    await order.save();
+    released++;
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Released ${released} order(s) that passed their return window.`,
+    released,
+  });
+});
+
 module.exports = {
   getAllUsers,
   getRoleRequests,
@@ -539,4 +572,5 @@ module.exports = {
   adminUpdateOrderStatus,
   getCommissionReport,
   updateSellerCommission,
+  releaseSettlements,
 };

@@ -102,9 +102,10 @@ const orderSchema = new mongoose.Schema(
       // partial   → delivery agent paid, seller+commission locked
       // released  → 7-day window passed, seller paid, commission booked
       // refunded  → returned, money reversed per fault rules
+      
       status: {
         type: String,
-        enum: ['held', 'partial', 'released', 'refunded'],
+        enum: ['held', 'partial', 'return_pending', 'released', 'refunded'],
         default: 'held',
       },
 

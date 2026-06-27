@@ -3,6 +3,11 @@ const Return = require('../models/Return');
 const Order  = require('../models/Order');
 const User   = require('../models/User');
 
+// ── Return request window after delivery ──────────────────
+// TESTING: 5 minutes. PRODUCTION: change to 7 days.
+const RETURN_WINDOW_MINUTES = 5;
+// const RETURN_WINDOW_MINUTES = 7 * 24 * 60; // ← uncomment for production (7 days)
+
 // ─────────────────────────────────────────────────────────
 // @desc    Request a return
 // @route   POST /api/returns
@@ -34,12 +39,12 @@ const requestReturn = asyncHandler(async (req, res) => {
     throw new Error('A return request already exists for this order');
   }
 
-  // Check return window — 7 days after delivery
-  const deliveredAt  = new Date(order.deliveredAt);
-  const daysSince    = (Date.now() - deliveredAt.getTime()) / (1000 * 60 * 60 * 24);
-  if (daysSince > 7) {
+  // Check return window
+  const deliveredAt    = new Date(order.deliveredAt);
+  const minutesSince   = (Date.now() - deliveredAt.getTime()) / (1000 * 60);
+  if (minutesSince > RETURN_WINDOW_MINUTES) {
     res.status(400);
-    throw new Error('Return window has expired. Returns are only accepted within 7 days of delivery.');
+    throw new Error('Return window has expired. Returns are no longer accepted for this order.');
   }
 
   const returnItems = order.items.map(item => ({
@@ -59,8 +64,12 @@ const requestReturn = asyncHandler(async (req, res) => {
     refundAmount: order.total,
   });
 
-  // Update order status to returned
+  // Freeze settlement — escrow must NOT auto-release while a return is pending.
+  // Order status becomes 'returned' to reflect a return is in progress.
   order.status = 'returned';
+  if (order.settlement) {
+    order.settlement.status = 'return_pending'; // cron skips this — money frozen
+  }
   await order.save();
 
   // Send emails

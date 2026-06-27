@@ -13,6 +13,9 @@ const statusColors = {
 
 const statusSteps = ['pending', 'confirmed', 'packed', 'dispatched', 'delivered'];
 
+// Return window — must match backend RETURN_WINDOW_MINUTES
+const RETURN_WINDOW_MINUTES = 5;
+
 const OrdersPage = () => {
   const [orders, setOrders]   = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,12 +27,31 @@ const OrdersPage = () => {
   const [reviewSuccess, setReviewSuccess] = useState(null);
   const [returnOrder, setReturnOrder] = useState(null);
   const [returnSuccess, setReturnSuccess] = useState('');
-  
+  const [now, setNow] = useState(Date.now()); // ticks every second for countdown
 
   useEffect(() => {
     fetchOrders();
   }, [filter]);
 
+  // Live clock — updates every second so countdowns tick down
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Returns remaining ms in the return window for a delivered order
+  const returnTimeLeft = (order) => {
+    if (order.status !== 'delivered' || !order.deliveredAt) return 0;
+    const expiry = new Date(order.deliveredAt).getTime() + RETURN_WINDOW_MINUTES * 60 * 1000;
+    return Math.max(0, expiry - now);
+  };
+
+  const formatTimeLeft = (ms) => {
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}m ${s.toString().padStart(2, '0')}s`;
+  };
   const fetchOrders = async () => {
     setLoading(true);
     try {
@@ -202,7 +224,7 @@ const OrdersPage = () => {
                             ⭐ Review
                         </button>
                     )}
-                    {order.status === 'delivered' && (
+                    {order.status === 'delivered' && returnTimeLeft(order) > 0 && (
                         <button
                           onClick={() => setReturnOrder(order)}
                           className="text-xs text-orange-500 hover:text-orange-700 font-medium px-3 py-1.5 border border-orange-200 rounded-lg hover:border-orange-300 transition-all"
@@ -212,6 +234,24 @@ const OrdersPage = () => {
                       )}
                 </div>
                 </div>
+
+                {/* Return window countdown / expiry message */}
+                {order.status === 'delivered' && (
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    {returnTimeLeft(order) > 0 ? (
+                      <p className="text-xs text-orange-600 flex items-center gap-1.5">
+                        <span>⏱</span>
+                        You can return this product within{' '}
+                        <span className="font-semibold">{formatTimeLeft(returnTimeLeft(order))}</span>
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                        <span>⛔</span>
+                        Return window has expired for this order
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -553,8 +593,8 @@ const ReturnModal = ({ order, onClose, onSuccess }) => {
         {/* Info */}
         <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-5">
           <p className="text-xs text-orange-700">
-            ⏰ Returns are accepted within <strong>7 days</strong> of delivery.
-            Refund will be processed within 3-5 business days after approval.
+            ⏰ Returns must be requested within the return window shown on your order.
+            Once approved, a delivery agent will collect the item and your refund will be processed.
           </p>
         </div>
 

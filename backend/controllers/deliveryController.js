@@ -6,6 +6,11 @@ const {
   sendOrderDeliveredToSeller,
 } = require('../utils/emailService');
 
+// ── Return window before seller funds are released ────────
+// TESTING: 5 minutes. PRODUCTION: change to 7 days.
+const RETURN_WINDOW_MINUTES = 5;
+// const RETURN_WINDOW_MINUTES = 7 * 24 * 60; // ← uncomment for production (7 days)
+
 // @desc  Get all orders assigned to delivery agent
 // @route GET /api/delivery/orders
 // @access Delivery agent only
@@ -48,8 +53,8 @@ const markDelivered = asyncHandler(async (req, res) => {
   const sellerShare = +(order.subtotal - order.commissionAmount).toFixed(2);
 
   const lockUntil = new Date();
-  lockUntil.setDate(lockUntil.getDate() + 7); // 7-day return window
-
+  lockUntil.setMinutes(lockUntil.getMinutes() + RETURN_WINDOW_MINUTES); // return window
+  
   order.settlement = {
     ...order.settlement,
     status:              'partial', // agent paid, rest locked
