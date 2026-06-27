@@ -7,6 +7,7 @@ import CommissionManagement from './CommissionManagement';
 import ReturnsManagement from './ReturnsManagement';
 import RoleRequests from './RoleRequests';
 import Payouts from './Payouts';
+import CouponsManagement from './CouponManagement';
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -19,6 +20,7 @@ const AdminDashboard = () => {
     { key: 'users',     label: 'User Management', icon: '👥' },
     { key: 'requests',  label: 'Role Requests',   icon: '📋' },
     { key: 'orders',    label: 'Order Monitoring', icon: '🧾' },
+    { key: 'coupons',   label: 'Coupons',          icon: '🎟️' },
     { key: 'commission',label: 'Commission',       icon: '💰' },
     { key: 'returns',   label: 'Returns',          icon: '🔄' },
     { key: 'payouts',   label: 'Payouts',          icon: '💸' },
@@ -111,6 +113,7 @@ const AdminDashboard = () => {
             {activeTab === 'overview'   && 'Platform overview and key metrics'}
             {activeTab === 'users'      && 'Manage all users, sellers and delivery agents'}
             {activeTab === 'orders'     && 'Monitor all orders across the platform'}
+            {activeTab === 'coupons' && 'Create and manage discount coupons'}
             {activeTab === 'commission' && 'Track and manage platform commission'}
             {activeTab === 'returns'    && 'Review and process customer return requests'}
             {activeTab === 'requests'  && 'Review customer applications to become sellers or delivery agents'}
@@ -122,6 +125,7 @@ const AdminDashboard = () => {
         {activeTab === 'overview'   && <OverviewTab stats={stats} loading={loading} onRefresh={fetchStats} />}
         {activeTab === 'users'      && <UserManagement />}
         {activeTab === 'orders'     && <OrderMonitoring />}
+        {activeTab === 'coupons' && <CouponsManagement />}
         {activeTab === 'commission' && <CommissionManagement />}
         {activeTab === 'returns' && <ReturnsManagement />}
         {activeTab === 'requests' && <RoleRequests />}

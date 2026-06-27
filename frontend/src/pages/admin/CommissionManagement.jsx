@@ -64,7 +64,7 @@ const CommissionManagement = () => {
         <p className="text-4xl font-bold mb-4">
           Rs {report?.overall?.nepShopIncome?.toLocaleString() || 0}
         </p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div className="bg-white/10 rounded-xl p-4">
             <p className="text-xs text-indigo-200 mb-1">💼 Commission Income</p>
             <p className="text-2xl font-bold">
@@ -78,8 +78,15 @@ const CommissionManagement = () => {
               Rs {report?.overall?.deliveryMargin?.toLocaleString() || 0}
             </p>
             <p className="text-xs text-indigo-200 mt-1">
-              Collected Rs {report?.overall?.totalDeliveryCharge?.toLocaleString() || 0} − paid agents Rs {report?.overall?.totalDeliveryPaid?.toLocaleString() || 0}
+              Collected {report?.overall?.totalDeliveryCharge?.toLocaleString() || 0} − paid {report?.overall?.totalDeliveryPaid?.toLocaleString() || 0}
             </p>
+          </div>
+          <div className="bg-white/10 rounded-xl p-4">
+            <p className="text-xs text-indigo-200 mb-1">🎟️ Coupons Funded</p>
+            <p className="text-2xl font-bold">
+              − Rs {report?.overall?.totalCouponDiscount?.toLocaleString() || 0}
+            </p>
+            <p className="text-xs text-indigo-200 mt-1">Discounts NepShop absorbed</p>
           </div>
         </div>
       </div>

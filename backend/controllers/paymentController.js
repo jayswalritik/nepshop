@@ -43,9 +43,27 @@ const createOrderFromCart = async (userId, orderData) => {
 
   const subtotal       = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const deliveryCharge = subtotal >= 2000 ? 0 : 100;
-  const total          = subtotal + deliveryCharge;
   const commissionRate = 5;
   const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2); // commission on product price only
+
+  // ── Apply coupon (platform-funded — does not affect seller/commission) ──
+  let couponDiscount = 0;
+  let couponCode     = null;
+  if (orderData.couponCode) {
+    const Coupon = require('../models/Coupon');
+    const coupon = await Coupon.findOne({ code: orderData.couponCode.toUpperCase().trim() });
+    if (coupon) {
+      const result = coupon.validateFor(subtotal);
+      if (result.valid) {
+        couponDiscount = result.discount;
+        couponCode     = coupon.code;
+        coupon.usedCount += 1;
+        await coupon.save();
+      }
+    }
+  }
+
+  const total = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
 
   const order = await Order.create({
     customer: userId,
@@ -55,11 +73,13 @@ const createOrderFromCart = async (userId, orderData) => {
     customerNote:     orderData.customerNote || '',
     subtotal,
     deliveryCharge,
+    couponCode,
+    couponDiscount,
     total,
     commissionRate,
     commissionAmount,
-    status:        'pending', // Seller still confirms — payment & fulfillment are separate
-    paymentStatus: 'paid',    // Money is secured
+    status:        'pending',
+    paymentStatus: 'paid',
   });
 
   // Deduct stock
@@ -111,16 +131,30 @@ const initiateKhalti = asyncHandler(async (req, res) => {
 
   const subtotal       = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const deliveryCharge = subtotal >= 2000 ? 0 : 100;
-  const total          = subtotal + deliveryCharge;
+
+  // ── Apply coupon to the amount charged ──────────────────
+  let couponDiscount = 0;
+  let couponCode     = null;
+  if (req.body.couponCode) {
+    const Coupon = require('../models/Coupon');
+    const coupon = await Coupon.findOne({ code: req.body.couponCode.toUpperCase().trim() });
+    if (coupon) {
+      const result = coupon.validateFor(subtotal);
+      if (result.valid) {
+        couponDiscount = result.discount;
+        couponCode     = coupon.code;
+      }
+    }
+  }
+
+  const total         = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
   const amountInPaisa  = Math.round(total * 100);
 
-  // Store order data in a temporary pending payment record
-  // We use a simple approach — store in session via a temp field
-  // We'll pass orderData back and store it on frontend
   const orderData = {
     deliveryAddress,
     customerNote: customerNote || '',
     paymentMethod: 'khalti',
+    couponCode, // passed through to order creation
     total,
   };
 
@@ -243,12 +277,29 @@ const initiateEsewa = asyncHandler(async (req, res) => {
 
   const subtotal       = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const deliveryCharge = subtotal >= 2000 ? 0 : 100;
-  const total          = subtotal + deliveryCharge;
+
+  // ── Apply coupon to the amount charged ──────────────────
+  let couponDiscount = 0;
+  let couponCode     = null;
+  if (req.body.couponCode) {
+    const Coupon = require('../models/Coupon');
+    const coupon = await Coupon.findOne({ code: req.body.couponCode.toUpperCase().trim() });
+    if (coupon) {
+      const result = coupon.validateFor(subtotal);
+      if (result.valid) {
+        couponDiscount = result.discount;
+        couponCode     = coupon.code;
+      }
+    }
+  }
+
+  const total = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
 
   const orderData = {
     deliveryAddress,
     customerNote: customerNote || '',
     paymentMethod: 'esewa',
+    couponCode, // passed through to order creation
     total,
   };
 

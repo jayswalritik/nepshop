@@ -91,6 +91,11 @@ const orderSchema = new mongoose.Schema(
     subtotal:       { type: Number, required: true },
     deliveryCharge: { type: Number, default: 0 },
     discount:       { type: Number, default: 0 },
+
+    // ── Coupon (platform-funded — does NOT affect seller/commission) ──
+    couponCode:     { type: String, default: null },
+    couponDiscount: { type: Number, default: 0 },
+
     total:          { type: Number, required: true },
 
     // ── Commission ────────────────────────────────────────

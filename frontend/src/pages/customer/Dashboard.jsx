@@ -6,6 +6,7 @@ import CartPage from './CartPage';
 import OrdersPage from './OrdersPage';
 import ProfilePage from './ProfilePage';
 import RoleSwitcher from '../../components/common/RoleSwitcher';
+import OffersPage from './OffersPage';
 
 
 const CustomerDashboard = () => {
@@ -17,6 +18,7 @@ const CustomerDashboard = () => {
     { key: 'shop',    label: 'Shop',       icon: '🏪' },
     { key: 'cart',    label: 'Cart',       icon: '🛒' },
     { key: 'orders',  label: 'My Orders',  icon: '📦' },
+    { key: 'offers',  label: 'Offers',     icon: '🎟️' },
     { key: 'wishlist',label: 'Wishlist',   icon: '❤️' },
     { key: 'profile', label: 'Profile',    icon: '👤' },
   ];
@@ -99,6 +101,7 @@ const CustomerDashboard = () => {
         {activeTab === 'shop'    && <ProductsPage onGoToCart={() => setActiveTab('cart')} />}
         {activeTab === 'cart'    && <CartPage onCheckoutSuccess={() => setActiveTab('orders')} />}
         {activeTab === 'orders'  && <OrdersPage />}
+        {activeTab === 'offers'  && <OffersPage />}
         {activeTab === 'wishlist' && <ComingSoon title="Wishlist" desc="Save products for later — coming soon." />}
         {activeTab === 'profile' && <ProfilePage />}
       </div>

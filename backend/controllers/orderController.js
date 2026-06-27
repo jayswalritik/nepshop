@@ -64,9 +64,30 @@ const placeOrder = asyncHandler(async (req, res) => {
   // Calculate pricing
   const subtotal       = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const deliveryCharge = subtotal >= 2000 ? 0 : 100; // Free delivery above Rs 2000
-  const total          = subtotal + deliveryCharge;
   const commissionRate = 5;
-  const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2); // commission on product price only
+  // Commission is ALWAYS on the real product subtotal — coupon never reduces it
+  const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2);
+
+  // ── Apply coupon (platform-funded) ──────────────────────
+  let couponDiscount = 0;
+  let couponCode     = null;
+  if (req.body.couponCode) {
+    const Coupon = require('../models/Coupon');
+    const coupon = await Coupon.findOne({ code: req.body.couponCode.toUpperCase().trim() });
+    if (coupon) {
+      const result = coupon.validateFor(subtotal);
+      if (result.valid) {
+        couponDiscount = result.discount;
+        couponCode     = coupon.code;
+        // Increment usage
+        coupon.usedCount += 1;
+        await coupon.save();
+      }
+    }
+  }
+
+  // Total = subtotal + delivery − coupon. Coupon comes out of NepShop's margin.
+  const total = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
 
   // Create order
   const order = await Order.create({
@@ -77,6 +98,8 @@ const placeOrder = asyncHandler(async (req, res) => {
     customerNote,
     subtotal,
     deliveryCharge,
+    couponCode,
+    couponDiscount,
     total,
     commissionRate,
     commissionAmount,
@@ -222,9 +245,18 @@ const cancelOrder = asyncHandler(async (req, res) => {
     refunded = true;
     if (order.settlement) {
       order.settlement.status           = 'refunded';
-      order.settlement.refundToCustomer = order.total; // full refund — nothing was delivered
+      order.settlement.refundToCustomer = order.total;
       order.settlement.settledAt        = new Date();
     }
+  }
+
+  // Restore coupon usage — the order never completed, so free up the use
+  if (order.couponCode) {
+    const Coupon = require('../models/Coupon');
+    await Coupon.findOneAndUpdate(
+      { code: order.couponCode },
+      { $inc: { usedCount: -1 } }
+    );
   }
 
   await order.save();
@@ -354,9 +386,17 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
       order.paymentStatus = 'refunded';
       if (order.settlement) {
         order.settlement.status           = 'refunded';
-        order.settlement.refundToCustomer = order.total; // full refund
+        order.settlement.refundToCustomer = order.total;
         order.settlement.settledAt        = new Date();
       }
+    }
+    // Restore coupon usage — order never completed
+    if (order.couponCode) {
+      const Coupon = require('../models/Coupon');
+      await Coupon.findOneAndUpdate(
+        { code: order.couponCode },
+        { $inc: { usedCount: -1 } }
+      );
     }
   }
 

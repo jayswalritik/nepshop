@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
@@ -142,6 +142,11 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState('');
   const [fieldErrors, setFieldErrors]     = useState({});
+  const [couponCode, setCouponCode]       = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState(null); // { code, discount }
+  const [couponError, setCouponError]     = useState('');
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState([]);
 
   const districts = [
     'Kathmandu', 'Lalitpur', 'Bhaktapur', 'Pokhara', 'Chitwan',
@@ -164,6 +169,62 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
     return errs;
   };
 
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) { setCouponError('Enter a coupon code'); return; }
+    setCouponLoading(true);
+    setCouponError('');
+    try {
+      const { data } = await API.post('/coupons/validate', {
+        code: couponCode.trim(),
+        subtotal: cart.total,
+      });
+      setAppliedCoupon({ code: data.code, discount: data.discount });
+      setCouponError('');
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(err.response?.data?.message || 'Invalid coupon');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCode('');
+    setCouponError('');
+  };
+
+  useEffect(() => {
+    const loadCoupons = async () => {
+      try {
+        const { data } = await API.get('/coupons/available');
+        setAvailableCoupons(data.coupons);
+      } catch (err) {
+        // silently ignore — coupons are optional
+      }
+    };
+    loadCoupons();
+  }, []);
+
+  const handleApplyCouponCode = async (code) => {
+    setCouponCode(code);
+    setCouponLoading(true);
+    setCouponError('');
+    try {
+      const { data } = await API.post('/coupons/validate', {
+        code,
+        subtotal: cart.total,
+      });
+      setAppliedCoupon({ code: data.code, discount: data.discount });
+      setCouponError('');
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(err.response?.data?.message || 'Invalid coupon');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
   const handlePlaceOrder = async () => {
     const errs = validate();
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
@@ -177,6 +238,7 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
           deliveryAddress: address,
           paymentMethod,
           customerNote,
+          couponCode: appliedCoupon?.code || null,
         });
         onSuccess();
         return;
@@ -186,6 +248,7 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
         const khaltiRes = await API.post('/payment/khalti/initiate', {
           deliveryAddress: address,
           customerNote,
+          couponCode: appliedCoupon?.code || null,
         });
         sessionStorage.setItem('khalti_order_data', JSON.stringify(khaltiRes.data.orderData));
         window.location.href = khaltiRes.data.paymentUrl;
@@ -196,6 +259,7 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
         const esewaRes = await API.post('/payment/esewa/initiate', {
           deliveryAddress: address,
           customerNote,
+          couponCode: appliedCoupon?.code || null,
         });
         const { gatewayUrl, formData: esewaFormData } = esewaRes.data;
         const form = document.createElement('form');
@@ -220,7 +284,9 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
     }
   };
 
-  const total = cart.total + (cart.total >= 2000 ? 0 : 100);
+  const deliveryCharge = cart.total >= 2000 ? 0 : 100;
+  const couponDiscount = appliedCoupon?.discount || 0;
+  const total = Math.max(0, cart.total + deliveryCharge - couponDiscount);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -365,6 +431,68 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
               ))}
             </div>
 
+            {/* Coupon input */}
+            <div className="border-t border-gray-100 pt-3 mb-3">
+              {!appliedCoupon ? (
+                <div>
+                  <div className="flex gap-2">
+                    <input
+                      value={couponCode}
+                      onChange={(e) => { setCouponCode(e.target.value.toUpperCase()); setCouponError(''); }}
+                      placeholder="Coupon code"
+                      className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 uppercase"
+                    />
+                    <button
+                      onClick={handleApplyCoupon}
+                      disabled={couponLoading}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-lg text-sm font-medium transition-all"
+                    >
+                      {couponLoading ? '...' : 'Apply'}
+                    </button>
+                  </div>
+                  {couponError && <p className="text-xs text-red-500 mt-1">{couponError}</p>}
+
+                  {availableCoupons.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-xs text-gray-400 mb-1.5">Available offers — tap to apply:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {availableCoupons.map((c) => {
+                          const eligible = cart.total >= (c.minOrder || 0);
+                          return (
+                            <button
+                              key={c.code}
+                              onClick={() => eligible && handleApplyCouponCode(c.code)}
+                              disabled={!eligible || couponLoading}
+                              className={`text-xs font-mono font-medium px-2.5 py-1.5 rounded-lg border border-dashed transition-all
+                                ${eligible
+                                  ? 'border-indigo-300 text-indigo-600 hover:bg-indigo-50 cursor-pointer'
+                                  : 'border-gray-200 text-gray-300 cursor-not-allowed'}`}
+                            >
+                              🎟️ {c.code} ({c.type === 'fixed' ? `Rs ${c.value}` : `${c.value}%`})
+                              {!eligible && <span className="ml-1 text-gray-400">· min Rs {c.minOrder}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-600">🎟️</span>
+                    <div>
+                      <p className="text-sm font-medium text-green-700">{appliedCoupon.code} applied</p>
+                      <p className="text-xs text-green-600">You saved Rs {appliedCoupon.discount.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <button onClick={handleRemoveCoupon} className="text-xs text-green-600 hover:text-green-800 font-medium">
+                    Remove
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="border-t border-gray-100 pt-3 space-y-2 mb-4">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Subtotal</span>
@@ -372,10 +500,16 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Delivery</span>
-                <span className={cart.total >= 2000 ? 'text-green-600 font-medium' : ''}>
-                  {cart.total >= 2000 ? 'FREE' : 'Rs 100'}
+                <span className={deliveryCharge === 0 ? 'text-green-600 font-medium' : ''}>
+                  {deliveryCharge === 0 ? 'FREE' : 'Rs 100'}
                 </span>
               </div>
+              {couponDiscount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Coupon discount</span>
+                  <span className="text-green-600 font-medium">− Rs {couponDiscount.toLocaleString()}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-lg pt-2 border-t border-gray-100">
                 <span>Total</span>
                 <span>Rs {total.toLocaleString()}</span>
