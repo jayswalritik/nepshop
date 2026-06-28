@@ -222,8 +222,17 @@ const sendEmail = async ({ to, subject, html, preheader }) => {
     });
     console.log(`✅ Email → ${to} | ${subject}`);
   } catch (err) {
-    console.error(`❌ Email failed → ${to} | ${err.message}`);
-  }
+  console.error("❌ FULL EMAIL ERROR:");
+  console.error(err);
+
+  console.error("Error code:", err.code);
+  console.error("Error errno:", err.errno);
+  console.error("Error command:", err.command);
+  console.error("Error address:", err.address);
+  console.error("Error port:", err.port);
+
+  console.error(`❌ Email failed → ${to} | ${err.message}`);
+}
 };
 
 // ═════════════════════════════════════════════════════════
