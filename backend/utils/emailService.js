@@ -9,8 +9,11 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  family: 4,                    // force IPv4 for the connection
+  tls: {
+    rejectUnauthorized: false,  // avoid cert issues on some hosts
+  },
 });
-
 // ── Helpers ───────────────────────────────────────────────
 const formatCurrency = (amount) =>
   `Rs ${Number(amount).toLocaleString('en-NP')}`;
