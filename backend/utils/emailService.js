@@ -1,19 +1,16 @@
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 
-// ── Transporter ───────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host:   process.env.EMAIL_HOST,
-  port:   Number(process.env.EMAIL_PORT),
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-  family: 4,                    // force IPv4 for the connection
-  tls: {
-    rejectUnauthorized: false,  // avoid cert issues on some hosts
-  },
-});
+// ── Brevo HTTP API config ─────────────────────────────────
+// Sends email over HTTPS (port 443), which cloud hosts allow —
+// unlike SMTP ports (587/465) that Render's free tier blocks.
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+
+// Parse "NepShop <email@x.com>" into { name, email } for Brevo
+const parseSender = (fromStr) => {
+  const match = fromStr && fromStr.match(/^(.*?)\s*<(.+?)>$/);
+  if (match) return { name: match[1].trim(), email: match[2].trim() };
+  return { name: 'NepShop', email: fromStr };
+};
 // ── Helpers ───────────────────────────────────────────────
 const formatCurrency = (amount) =>
   `Rs ${Number(amount).toLocaleString('en-NP')}`;
@@ -217,25 +214,30 @@ const divider = () => `<hr style="border:none;border-top:1px solid #f1f5f9;margi
 // ── Send helper ───────────────────────────────────────────
 const sendEmail = async ({ to, subject, html, preheader }) => {
   try {
-    await transporter.sendMail({
-      from:    process.env.EMAIL_FROM,
-      to,
-      subject,
-      html: layout(html, preheader),
-    });
+    const sender = parseSender(process.env.EMAIL_FROM);
+
+    await axios.post(
+      BREVO_API_URL,
+      {
+        sender,
+        to: [{ email: to }],
+        subject,
+        htmlContent: layout(html, preheader),
+      },
+      {
+        headers: {
+          'api-key':      process.env.BREVO_API_KEY,
+          'Content-Type': 'application/json',
+          'accept':       'application/json',
+        },
+      }
+    );
+
     console.log(`✅ Email → ${to} | ${subject}`);
   } catch (err) {
-  console.error("❌ FULL EMAIL ERROR:");
-  console.error(err);
-
-  console.error("Error code:", err.code);
-  console.error("Error errno:", err.errno);
-  console.error("Error command:", err.command);
-  console.error("Error address:", err.address);
-  console.error("Error port:", err.port);
-
-  console.error(`❌ Email failed → ${to} | ${err.message}`);
-}
+    const detail = err.response?.data?.message || err.message;
+    console.error(`❌ Email failed → ${to} | ${detail}`);
+  }
 };
 
 // ═════════════════════════════════════════════════════════
