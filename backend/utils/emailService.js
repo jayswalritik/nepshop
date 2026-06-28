@@ -2,14 +2,16 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   host:   process.env.EMAIL_HOST,
-  port:   Number(process.env.EMAIL_PORT),
-  secure: false,
+  port:   465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-  // Force IPv4 — Render's free tier can't reach Gmail over IPv6 (ENETUNREACH)
   family: 4,
+  connectionTimeout: 10000,
+  greetingTimeout:   10000,
+  socketTimeout:     15000,
 });
 
 // ── Helpers ───────────────────────────────────────────────
