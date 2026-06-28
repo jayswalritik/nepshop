@@ -3,7 +3,7 @@ const nodemailer = require('nodemailer');
 // ── Transporter ───────────────────────────────────────────
 const transporter = nodemailer.createTransport({
   host:   process.env.EMAIL_HOST,
-  port:   Number(process.env.EMAIL_PORT),
+  port:   587,
   secure: false,
   auth: {
     user: process.env.EMAIL_USER,
