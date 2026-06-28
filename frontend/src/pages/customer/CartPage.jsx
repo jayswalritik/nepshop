@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
+import RecommendationRow from '../../components/recommendations/RecommendationRow';
 
 const CartPage = ({ onCheckoutSuccess }) => {
   const { cart, updateQuantity, removeFromCart, clearCart } = useCart();
@@ -123,7 +124,73 @@ const CartPage = ({ onCheckoutSuccess }) => {
           Proceed to Checkout →
         </button>
       </div>
+
+      {/* Cart recommendations — "complete your cart" */}
+      <div className="mt-8">
+        <CartRecommendations
+          cartSignature={cart.items.map((i) => i.product?._id || i.product).join(',')}
+        />
+      </div>
     </div>
+  );
+};
+
+// ── Cart Recommendations ──────────────────────────────────
+// Self-contained: fetches /api/recommendations/cart and refetches whenever the
+// cart contents change (via the cartSignature prop). Adds items straight to cart.
+const CartRecommendations = ({ cartSignature }) => {
+  const { addToCart } = useCart();
+  const [recs, setRecs]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast]     = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    const fetchRecs = async () => {
+      setLoading(true);
+      try {
+        const { data } = await API.get('/recommendations/cart?limit=8');
+        if (active) setRecs(data.products || []);
+      } catch (err) {
+        console.error('Failed to fetch cart recommendations:', err);
+        if (active) setRecs([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    fetchRecs();
+    return () => { active = false; };
+  }, [cartSignature]);
+
+  const handleAdd = async (product) => {
+    const result = await addToCart(product._id, 1);
+    setToast(
+      result.success
+        ? { type: 'success', message: `"${product.name}" added to cart!` }
+        : { type: 'error', message: result.message }
+    );
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  return (
+    <>
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2
+          ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+          {toast.type === 'success' ? '✅' : '⚠️'} {toast.message}
+          <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
+      <RecommendationRow
+        title="🛒 Complete Your Cart"
+        subtitle="Frequently bought with items in your cart"
+        products={recs}
+        loading={loading}
+        onAddToCart={handleAdd}
+        showReason={true}
+        emptyText={null}
+      />
+    </>
   );
 };
 

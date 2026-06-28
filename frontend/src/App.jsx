@@ -6,7 +6,7 @@ import ProtectedRoute from './components/common/ProtectedRoute';
 import AuthPage from './pages/auth/AuthPage';
 import VerifyEmailPage from './pages/auth/VerifyEmailPage';
 import Unauthorized from './pages/auth/Unauthorized';
-import CustomerDashboard from './pages/customer/Dashboard';
+import CustomerDashboard from './pages/customer/CustomerDashboard';
 import SellerDashboard from './pages/seller/Dashboard';
 import DeliveryDashboard from './pages/delivery/Dashboard';
 import AdminDashboard from './pages/admin/Dashboard';

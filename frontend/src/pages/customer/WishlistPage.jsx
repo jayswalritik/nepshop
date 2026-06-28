@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useWishlist } from '../../context/WishlistContext';
 import { useCart } from '../../context/CartContext';
+import API from '../../utils/api';
+import RecommendationRow from '../../components/recommendations/RecommendationRow';
 
 const WishlistPage = ({ onGoToShop }) => {
   const { wishlist, toggleWish } = useWishlist();
@@ -125,7 +127,73 @@ const WishlistPage = ({ onGoToShop }) => {
           </div>
         ))}
       </div>
+
+      {/* Wishlist recommendations — "more you'll love" */}
+      <div className="mt-8">
+        <WishlistRecommendations
+          wishlistSignature={wishlist.map((p) => p._id).join(',')}
+        />
+      </div>
     </div>
+  );
+};
+
+// ── Wishlist Recommendations ──────────────────────────────
+// Self-contained: fetches /api/recommendations/wishlist and refetches whenever
+// the wishlist changes (via wishlistSignature). Adds items straight to cart.
+const WishlistRecommendations = ({ wishlistSignature }) => {
+  const { addToCart } = useCart();
+  const [recs, setRecs]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast]     = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    const fetchRecs = async () => {
+      setLoading(true);
+      try {
+        const { data } = await API.get('/recommendations/wishlist?limit=8');
+        if (active) setRecs(data.products || []);
+      } catch (err) {
+        console.error('Failed to fetch wishlist recommendations:', err);
+        if (active) setRecs([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    fetchRecs();
+    return () => { active = false; };
+  }, [wishlistSignature]);
+
+  const handleAdd = async (product) => {
+    const result = await addToCart(product._id, 1);
+    setToast(
+      result.success
+        ? { type: 'success', message: `"${product.name}" added to cart!` }
+        : { type: 'error', message: result.message }
+    );
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  return (
+    <>
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2
+          ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+          {toast.type === 'success' ? '✅' : '⚠️'} {toast.message}
+          <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
+      <RecommendationRow
+        title="💖 More You'll Love"
+        subtitle="Based on your wishlist"
+        products={recs}
+        loading={loading}
+        onAddToCart={handleAdd}
+        showReason={false}
+        emptyText={null}
+      />
+    </>
   );
 };
 

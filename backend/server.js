@@ -114,12 +114,8 @@ app.use('/api/payment', require('./routes/paymentRoutes'));
 app.use('/api/returns', require('./routes/returnRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/wishlist', require('./routes/wishlistRoutes'));
+app.use('/api/recommendations', require('./routes/recommendationRoutes'));
 
-// Future routes (we'll add these in later steps):
-// app.use('/api/products',  require('./routes/productRoutes'));
-// app.use('/api/orders',    require('./routes/orderRoutes'));
-// app.use('/api/admin',     require('./routes/adminRoutes'));
-// app.use('/api/delivery',  require('./routes/deliveryRoutes'));
 
 // ── 404 handler (unknown routes) ─────────────────────────
 app.use((req, res) => {

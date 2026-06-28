@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
+import HomePage from './HomePage';
 import ProductsPage from './ProductsPage';
 import CartPage from './CartPage';
 import OrdersPage from './OrdersPage';
@@ -12,9 +13,10 @@ import WishlistPage from './WishlistPage';
 const CustomerDashboard = () => {
   const { user, logout } = useAuth();
   const { cart } = useCart();
-  const [activeTab, setActiveTab] = useState('shop');
+  const [activeTab, setActiveTab] = useState('home');
 
   const navItems = [
+    { key: 'home',    label: 'Home',       icon: '🏠' },
     { key: 'shop',    label: 'Shop',       icon: '🏪' },
     { key: 'cart',    label: 'Cart',       icon: '🛒' },
     { key: 'orders',  label: 'My Orders',  icon: '📦' },
@@ -98,6 +100,7 @@ const CustomerDashboard = () => {
 
       {/* ── Page content ── */}
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {activeTab === 'home'    && <HomePage onGoToProducts={() => setActiveTab('shop')} onGoToCart={() => setActiveTab('cart')} />}
         {activeTab === 'shop'    && <ProductsPage onGoToCart={() => setActiveTab('cart')} />}
         {activeTab === 'cart'    && <CartPage onCheckoutSuccess={() => setActiveTab('orders')} />}
         {activeTab === 'orders'  && <OrdersPage />}

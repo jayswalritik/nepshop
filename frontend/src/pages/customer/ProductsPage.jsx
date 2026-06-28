@@ -1,7 +1,18 @@
+/**
+ * ProductsPage.jsx — with Similar Products recommendation in the detail modal
+ * frontend/src/pages/customer/ProductsPage.jsx
+ *
+ * Changes from original:
+ *   • Imports RecommendationRow
+ *   • ProductDetailModal fetches /api/recommendations/similar/:id and shows a row
+ *   • No other logic changed
+ */
+
 import { useState, useEffect } from 'react';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
+import RecommendationRow from '../../components/recommendations/RecommendationRow';
 
 const ProductsPage = ({ onGoToCart }) => {
   const { addToCart, loading: cartLoading } = useCart();
@@ -228,14 +239,18 @@ const ProductsPage = ({ onGoToCart }) => {
                     )}
                   </div>
 
-                  {/* Rating */}
-                  {product.numReviews > 0 && (
-                    <div className="flex items-center gap-1 mb-2">
-                      <span className="text-yellow-400 text-xs">★</span>
-                      <span className="text-xs text-gray-600">{product.rating}</span>
-                      <span className="text-xs text-gray-400">({product.numReviews})</span>
-                    </div>
-                  )}
+                  {/* Rating — always rendered so every card is the same height */}
+                  <div className="flex items-center gap-1 mb-2 h-4">
+                    {product.numReviews > 0 ? (
+                      <>
+                        <span className="text-yellow-400 text-xs">★</span>
+                        <span className="text-xs text-gray-600">{product.rating}</span>
+                        <span className="text-xs text-gray-400">({product.numReviews})</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-300">No reviews yet</span>
+                    )}
+                  </div>
 
                   {/* Add to cart */}
                   <button
@@ -291,6 +306,7 @@ const ProductsPage = ({ onGoToCart }) => {
           onClose={() => setSelectedProduct(null)}
           onAddToCart={(p) => { handleAddToCart(p); setSelectedProduct(null); }}
           onGoToCart={() => { setSelectedProduct(null); onGoToCart(); }}
+          onOpenSimilar={(p) => setSelectedProduct(p)}
         />
       )}
     </div>
@@ -298,9 +314,68 @@ const ProductsPage = ({ onGoToCart }) => {
 };
 
 // ── Product Detail Modal ──────────────────────────────────
-const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart }) => {
-  const [quantity, setQuantity]     = useState(1);
-  const [activeImage, setActiveImage] = useState(0);
+export const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart, onOpenSimilar }) => {
+  const [quantity, setQuantity]         = useState(1);
+  const [activeImage, setActiveImage]   = useState(0);
+  const [similar, setSimilar]           = useState([]);
+  const [similarLoading, setSimilarLoading] = useState(true);
+  const [boughtTogether, setBoughtTogether]       = useState([]);
+  const [boughtTogetherLoading, setBoughtTogetherLoading] = useState(true);
+  const [alsoBought, setAlsoBought]               = useState([]);
+  const [alsoBoughtLoading, setAlsoBoughtLoading] = useState(true);
+
+  // Reset image index and fetch all recommendation rows when product changes
+  useEffect(() => {
+    setActiveImage(0);
+    trackView();
+    fetchSimilar();
+    fetchBoughtTogether();
+    fetchAlsoBought();
+  }, [product._id]);
+
+  // Fire-and-forget view tracking (never blocks the UI; ignores failures)
+  const trackView = () => {
+    API.post(`/recommendations/track-view/${product._id}`).catch(() => {});
+  };
+
+  const fetchSimilar = async () => {
+    setSimilarLoading(true);
+    try {
+      const { data } = await API.get(`/recommendations/similar/${product._id}?limit=8`);
+      setSimilar(data.products || []);
+    } catch (err) {
+      console.error('Failed to fetch similar products:', err);
+      setSimilar([]);
+    } finally {
+      setSimilarLoading(false);
+    }
+  };
+
+  const fetchBoughtTogether = async () => {
+    setBoughtTogetherLoading(true);
+    try {
+      const { data } = await API.get(`/recommendations/bought-together/${product._id}?limit=6`);
+      setBoughtTogether(data.products || []);
+    } catch (err) {
+      console.error('Failed to fetch bought-together:', err);
+      setBoughtTogether([]);
+    } finally {
+      setBoughtTogetherLoading(false);
+    }
+  };
+
+  const fetchAlsoBought = async () => {
+    setAlsoBoughtLoading(true);
+    try {
+      const { data } = await API.get(`/recommendations/also-bought/${product._id}?limit=8`);
+      setAlsoBought(data.products || []);
+    } catch (err) {
+      console.error('Failed to fetch also-bought:', err);
+      setAlsoBought([]);
+    } finally {
+      setAlsoBoughtLoading(false);
+    }
+  };
 
   const discountedPrice = product.discount > 0
     ? Math.round(product.price - (product.price * product.discount / 100))
@@ -308,7 +383,7 @@ const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-screen overflow-y-auto shadow-2xl">
+      <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
 
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-100">
@@ -402,10 +477,10 @@ const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart }) => {
               )}
 
               {/* Reviews section */}
-                <ReviewsSection productId={product._id} />
+              <ReviewsSection productId={product._id} />
 
               {/* Actions */}
-              <div className="flex gap-3">
+              <div className="flex gap-3 mt-4">
                 <button
                   onClick={() => onAddToCart(product)}
                   disabled={product.stock === 0}
@@ -422,6 +497,49 @@ const ProductDetailModal = ({ product, onClose, onAddToCart, onGoToCart }) => {
               </div>
             </div>
           </div>
+
+          {/* ── Similar Products ──────────────────────────── */}
+          <div className="mt-6 border-t border-gray-100 pt-5">
+            <RecommendationRow
+              title="🔍 Similar Products"
+              subtitle={`More in ${product.category}`}
+              products={similar}
+              loading={similarLoading}
+              onProduct={(p) => onOpenSimilar && onOpenSimilar(p)}
+              showReason={true}
+              emptyText={null}
+            />
+          </div>
+
+          {/* ── Frequently Bought Together ────────────────── */}
+          {(boughtTogetherLoading || boughtTogether.length > 0) && (
+            <div className="mt-2">
+              <RecommendationRow
+                title="🧺 Frequently Bought Together"
+                subtitle="Often added to the same order"
+                products={boughtTogether}
+                loading={boughtTogetherLoading}
+                onProduct={(p) => onOpenSimilar && onOpenSimilar(p)}
+                showReason={true}
+                emptyText={null}
+              />
+            </div>
+          )}
+
+          {/* ── Customers Also Bought ─────────────────────── */}
+          {(alsoBoughtLoading || alsoBought.length > 0) && (
+            <div className="mt-2">
+              <RecommendationRow
+                title="👥 Customers Also Bought"
+                subtitle="Popular with shoppers who bought this"
+                products={alsoBought}
+                loading={alsoBoughtLoading}
+                onProduct={(p) => onOpenSimilar && onOpenSimilar(p)}
+                showReason={true}
+                emptyText={null}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
