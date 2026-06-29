@@ -63,12 +63,21 @@ module.exports = {
                         // just because the per-seller cap made it short.
   },
 
+  // ── Home landing-page rows (Deals, New Arrivals) ────────────────────────────
+  home: {
+    dealsLimit:        12,
+    newArrivalsLimit:  12,
+    maxPerSellerInRow: 3, // light hard cap so one shop can't flood a Home row
+  },
+
   // ── Diversity guard ─────────────────────────────────────────────────────────
   // Stops a single row from being dominated by one seller or one category.
   // Set a cap to null to disable that dimension.
   diversity: {
-    maxPerSeller:   1, // at most N products from the same seller in one row
+    maxPerSeller:   2, // at most N products from the same seller in one row
     maxPerCategory: 3, // at most N products from the same category in one row
     enabled:        true,
   },
 };
+
+// Modified in feature/recommendations branch

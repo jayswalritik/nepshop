@@ -14,6 +14,14 @@ const CustomerDashboard = () => {
   const { user, logout } = useAuth();
   const { cart } = useCart();
   const [activeTab, setActiveTab] = useState('home');
+  // Category to pre-select when opening the Shop tab (set by Home category tiles)
+  const [shopCategory, setShopCategory] = useState('');
+
+  // Navigate to Shop, optionally pre-filtered to a category
+  const goToShop = (category = '') => {
+    setShopCategory(category);
+    setActiveTab('shop');
+  };
 
   const navItems = [
     { key: 'home',    label: 'Home',       icon: '🏠' },
@@ -24,6 +32,13 @@ const CustomerDashboard = () => {
     { key: 'wishlist',label: 'Wishlist',   icon: '❤️' },
     { key: 'profile', label: 'Profile',    icon: '👤' },
   ];
+
+  // Top-nav clicks. Clicking "Shop" directly clears any tile pre-filter so the
+  // main Shop tab always shows everything; tiles on Home set their own filter.
+  const handleNav = (key) => {
+    if (key === 'shop') setShopCategory('');
+    setActiveTab(key);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -43,7 +58,7 @@ const CustomerDashboard = () => {
             {navItems.map((item) => (
               <button
                 key={item.key}
-                onClick={() => setActiveTab(item.key)}
+                onClick={() => handleNav(item.key)}
                 className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all relative
                   ${activeTab === item.key
                     ? 'bg-indigo-50 text-indigo-600'
@@ -80,7 +95,7 @@ const CustomerDashboard = () => {
           {navItems.map((item) => (
             <button
               key={item.key}
-              onClick={() => setActiveTab(item.key)}
+              onClick={() => handleNav(item.key)}
               className={`flex-1 min-w-fit flex flex-col items-center gap-0.5 py-2 px-3 text-xs font-medium transition-all relative
                 ${activeTab === item.key
                   ? 'text-indigo-600 border-b-2 border-indigo-600'
@@ -100,12 +115,12 @@ const CustomerDashboard = () => {
 
       {/* ── Page content ── */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {activeTab === 'home'    && <HomePage onGoToProducts={() => setActiveTab('shop')} onGoToCart={() => setActiveTab('cart')} />}
-        {activeTab === 'shop'    && <ProductsPage onGoToCart={() => setActiveTab('cart')} />}
+        {activeTab === 'home'    && <HomePage onGoToProducts={goToShop} onGoToCart={() => setActiveTab('cart')} />}
+        {activeTab === 'shop'    && <ProductsPage initialCategory={shopCategory} onGoToCart={() => setActiveTab('cart')} />}
         {activeTab === 'cart'    && <CartPage onCheckoutSuccess={() => setActiveTab('orders')} />}
         {activeTab === 'orders'  && <OrdersPage />}
         {activeTab === 'offers'  && <OffersPage />}
-        {activeTab === 'wishlist' && <WishlistPage onGoToShop={() => setActiveTab('shop')} />}
+        {activeTab === 'wishlist' && <WishlistPage onGoToShop={() => goToShop()} />}
         {activeTab === 'profile' && <ProfilePage />}
       </div>
     </div>
@@ -121,3 +136,5 @@ const ComingSoon = ({ title, desc }) => (
 );
 
 export default CustomerDashboard;
+
+// Modified in feature/recommendations branch

@@ -702,6 +702,76 @@ const getWishlistRecommendations = async (userId, options = {}) => {
   return scored.map(p => ({ ...p, _reason: 'Based on your wishlist' }));
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// capPerSeller  (small helper for Home landing rows)
+// ─────────────────────────────────────────────────────────────────────────────
+// Hard per-seller cap, preserving the incoming order. Used by Deals and New
+// Arrivals so one shop can't flood a Home row. No backfill — consistent with
+// the engine's hard-cap philosophy.
+// ─────────────────────────────────────────────────────────────────────────────
+const capPerSeller = (products, limit, maxPerSeller) => {
+  const out = [];
+  const count = {};
+  for (const p of products) {
+    if (out.length >= limit) break;
+    const sid = p.seller?.toString() || 'none';
+    if ((count[sid] || 0) < maxPerSeller) {
+      out.push(p);
+      count[sid] = (count[sid] || 0) + 1;
+    }
+  }
+  return out;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getDeals   (Home — discounted products)
+// ─────────────────────────────────────────────────────────────────────────────
+// STRICT: only products with discount > 0, active, in stock. Sorted by discount
+// desc (tie-break rating, then reviews). Seller-capped. Empty → row hides.
+// ─────────────────────────────────────────────────────────────────────────────
+const getDeals = async (options = {}) => {
+  const cfg = require('./recommendationConfig').home;
+  const { limit = cfg.dealsLimit } = options;
+
+  const products = await Product.find({
+    isActive: true,
+    stock: { $gt: 0 },
+    discount: { $gt: 0 },   // a deal MUST actually have a discount
+  })
+    .select(PRODUCT_SELECT)
+    .lean();
+
+  products.sort((a, b) => {
+    if (b.discount !== a.discount) return b.discount - a.discount;
+    if (b.rating   !== a.rating)   return b.rating   - a.rating;
+    return (b.numReviews || 0) - (a.numReviews || 0);
+  });
+
+  return capPerSeller(products, limit, cfg.maxPerSellerInRow);
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getNewArrivals   (Home — newest products)
+// ─────────────────────────────────────────────────────────────────────────────
+// Newest active, in-stock products by createdAt desc. Seller-capped so a seller
+// who just bulk-listed can't own the whole row. Empty → row hides.
+// ─────────────────────────────────────────────────────────────────────────────
+const getNewArrivals = async (options = {}) => {
+  const cfg = require('./recommendationConfig').home;
+  const { limit = cfg.newArrivalsLimit } = options;
+
+  const products = await Product.find({
+    isActive: true,
+    stock: { $gt: 0 },
+  })
+    .select(PRODUCT_SELECT)
+    .sort({ createdAt: -1 })
+    .limit(limit * 3)        // over-fetch so the seller cap still yields `limit`
+    .lean();
+
+  return capPerSeller(products, limit, cfg.maxPerSellerInRow);
+};
+
 module.exports = {
   getTrending,
   getSimilar,
@@ -712,4 +782,8 @@ module.exports = {
   getRecentlyViewed,
   getCartRecommendations,
   getWishlistRecommendations,
+  getDeals,
+  getNewArrivals,
 };
+
+// Modified in feature/recommendations branch
