@@ -3,7 +3,7 @@
  * NepShop Recommendation Engine  (backend/services/recommendationEngine.js)
  * ─────────────────────────────────────────────────────────────────────────────
  * Generic, modular scoring engine.  All NepShop-specific data fetching lives
- * in nepshopAdapter.js.  This file knows nothing about Mongoose.
+ * in nepShopAdapter.js.  This file knows nothing about Mongoose.
  *
  * All tunable numbers come from recommendationConfig.js — this file holds the
  * algorithms, the config holds the parameters.

@@ -1,6 +1,6 @@
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- * NepShop Recommendation Adapter  (backend/services/nepshopAdapter.js)
+ * NepShop Recommendation Adapter  (backend/services/nepShopAdapter.js)
  * ─────────────────────────────────────────────────────────────────────────────
  * Bridges NepShop's Mongoose models to the generic recommendation engine.
  * All MongoDB queries live here; the engine stays model-agnostic.

@@ -24,7 +24,7 @@ const {
   getWishlistRecommendations,
   getDeals,
   getNewArrivals,
-} = require('../services/nepshopAdapter');
+} = require('../services/nepShopAdapter');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // @desc    Trending products — time-decayed purchase velocity
