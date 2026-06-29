@@ -2,17 +2,15 @@
  * HomePage.jsx
  * (frontend/src/pages/customer/HomePage.jsx)
  *
- * The "Home" tab in the customer dashboard.
- * Shows:
- *   1. Personalized "For You" feed  (GET /api/recommendations/feed)
- *   2. Trending Products row         (GET /api/recommendations/trending)
+ * The "Home" tab in the customer dashboard. Standard marketplace landing order:
+ *   Hero → Shop by Category → 🏷️ Deals → ✨ For You → 🕘 Recently Viewed
+ *        → 🔥 Trending → 🆕 New Arrivals
  *
- * Clicking any product opens the SAME ProductDetailModal used on the Shop tab
- * (reviews + similar products included).
+ * Clicking any product opens the SAME ProductDetailModal used on the Shop tab.
  *
- * Props from customer/Dashboard:
- *   onGoToProducts fn()  — switch to the Shop tab
- *   onGoToCart     fn()  — switch to the Cart tab
+ * Props from CustomerDashboard:
+ *   onGoToProducts fn(category?) — switch to Shop; optional category pre-filter
+ *   onGoToCart     fn()          — switch to the Cart tab
  */
 
 import { useState, useEffect } from 'react';
@@ -21,15 +19,34 @@ import { useCart } from '../../context/CartContext';
 import RecommendationRow from '../../components/recommendations/RecommendationRow';
 import { ProductDetailModal } from './ProductsPage';
 
+// Fixed category taxonomy (matches ProductsPage). Tiles deep-link into Shop.
+const CATEGORIES = [
+  { name: 'Electronics',         icon: '📱' },
+  { name: 'Clothing',            icon: '👕' },
+  { name: 'Food & Grocery',      icon: '🛒' },
+  { name: 'Home & Kitchen',      icon: '🏠' },
+  { name: 'Beauty & Health',     icon: '💄' },
+  { name: 'Sports & Outdoors',   icon: '⚽' },
+  { name: 'Books & Stationery',  icon: '📚' },
+  { name: 'Toys & Games',        icon: '🧸' },
+  { name: 'Automotive',          icon: '🚗' },
+  { name: 'Other',               icon: '📦' },
+];
+
 const HomePage = ({ onGoToProducts, onGoToCart }) => {
   const { addToCart } = useCart();
 
   const [feed, setFeed]                 = useState([]);
   const [trending, setTrending]         = useState([]);
   const [recentlyViewed, setRecentlyViewed] = useState([]);
-  const [feedLoading, setFeedLoading]   = useState(true);
-  const [trendLoading, setTrendLoading] = useState(true);
+  const [deals, setDeals]               = useState([]);
+  const [newArrivals, setNewArrivals]   = useState([]);
+
+  const [feedLoading, setFeedLoading]     = useState(true);
+  const [trendLoading, setTrendLoading]   = useState(true);
   const [recentLoading, setRecentLoading] = useState(true);
+  const [dealsLoading, setDealsLoading]   = useState(true);
+  const [arrivalsLoading, setArrivalsLoading] = useState(true);
 
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [toast, setToast]                       = useState(null);
@@ -38,19 +55,9 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
     fetchFeed();
     fetchTrending();
     fetchRecentlyViewed();
+    fetchDeals();
+    fetchNewArrivals();
   }, []);
-
-  const fetchRecentlyViewed = async () => {
-    setRecentLoading(true);
-    try {
-      const { data } = await API.get('/recommendations/recently-viewed?limit=10');
-      setRecentlyViewed(data.products || []);
-    } catch (err) {
-      console.error('Failed to fetch recently viewed:', err);
-    } finally {
-      setRecentLoading(false);
-    }
-  };
 
   const fetchFeed = async () => {
     setFeedLoading(true);
@@ -76,6 +83,42 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
     }
   };
 
+  const fetchRecentlyViewed = async () => {
+    setRecentLoading(true);
+    try {
+      const { data } = await API.get('/recommendations/recently-viewed?limit=10');
+      setRecentlyViewed(data.products || []);
+    } catch (err) {
+      console.error('Failed to fetch recently viewed:', err);
+    } finally {
+      setRecentLoading(false);
+    }
+  };
+
+  const fetchDeals = async () => {
+    setDealsLoading(true);
+    try {
+      const { data } = await API.get('/recommendations/deals?limit=12');
+      setDeals(data.products || []);
+    } catch (err) {
+      console.error('Failed to fetch deals:', err);
+    } finally {
+      setDealsLoading(false);
+    }
+  };
+
+  const fetchNewArrivals = async () => {
+    setArrivalsLoading(true);
+    try {
+      const { data } = await API.get('/recommendations/new-arrivals?limit=12');
+      setNewArrivals(data.products || []);
+    } catch (err) {
+      console.error('Failed to fetch new arrivals:', err);
+    } finally {
+      setArrivalsLoading(false);
+    }
+  };
+
   const handleAddToCart = async (product) => {
     const result = await addToCart(product._id, 1);
     if (result.success) {
@@ -85,6 +128,11 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
     }
     setTimeout(() => setToast(null), 3000);
   };
+
+  // True only when EVERY data source is done and all came back empty
+  const everythingEmpty =
+    !feedLoading && !trendLoading && !recentLoading && !dealsLoading && !arrivalsLoading &&
+    !feed.length && !trending.length && !recentlyViewed.length && !deals.length && !newArrivals.length;
 
   return (
     <div>
@@ -97,8 +145,8 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
         </div>
       )}
 
-      {/* Hero banner */}
-      <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 rounded-2xl p-6 mb-8 text-white relative overflow-hidden">
+      {/* 1 · Hero banner */}
+      <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 rounded-2xl p-6 mb-6 text-white relative overflow-hidden">
         <div className="absolute right-0 top-0 w-48 h-full opacity-10">
           <div className="text-9xl absolute -right-4 -top-4">🛍️</div>
         </div>
@@ -108,14 +156,45 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
         </h1>
         <p className="text-indigo-200 text-sm mb-4">Nepal's favourite marketplace — discover products just for you</p>
         <button
-          onClick={onGoToProducts}
+          onClick={() => onGoToProducts()}
           className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-5 py-2 rounded-lg transition-all shadow-md"
         >
           Browse All Products →
         </button>
       </div>
 
-      {/* Personalized feed */}
+      {/* 2 · Shop by Category */}
+      <div className="mb-8">
+        <h2 className="text-base font-bold text-gray-900 mb-3">Shop by Category</h2>
+        <div className="grid grid-cols-4 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c.name}
+              onClick={() => onGoToProducts(c.name)}
+              className="flex flex-col items-center justify-center gap-1.5 bg-white border border-gray-100 rounded-xl py-3 px-1 hover:border-indigo-300 hover:shadow-sm transition-all group"
+            >
+              <span className="text-2xl group-hover:scale-110 transition-transform">{c.icon}</span>
+              <span className="text-[10px] text-gray-600 text-center leading-tight font-medium">{c.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 3 · Deals */}
+      {(dealsLoading || deals.length > 0) && (
+        <RecommendationRow
+          title="🏷️ Deals & Offers"
+          subtitle="Biggest discounts on NepShop right now"
+          products={deals}
+          loading={dealsLoading}
+          onProduct={(p) => setSelectedProduct(p)}
+          onAddToCart={handleAddToCart}
+          showReason={false}
+          emptyText={null}
+        />
+      )}
+
+      {/* 4 · For You */}
       <RecommendationRow
         title="✨ For You"
         subtitle="Based on your shopping history"
@@ -127,7 +206,7 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
         emptyText={null}
       />
 
-      {/* Recently viewed — only render if there's something to show */}
+      {/* 5 · Recently Viewed */}
       {(recentLoading || recentlyViewed.length > 0) && (
         <RecommendationRow
           title="🕘 Recently Viewed"
@@ -141,7 +220,7 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
         />
       )}
 
-      {/* Trending */}
+      {/* 6 · Trending */}
       <RecommendationRow
         title="🔥 Trending Now"
         subtitle="Most popular on NepShop this month"
@@ -153,8 +232,22 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
         emptyText="Check back soon — trending products will appear here as orders come in."
       />
 
-      {/* Browse CTA when both sections are empty and not loading */}
-      {!feedLoading && !trendLoading && !feed.length && !trending.length && (
+      {/* 7 · New Arrivals */}
+      {(arrivalsLoading || newArrivals.length > 0) && (
+        <RecommendationRow
+          title="🆕 New Arrivals"
+          subtitle="Freshly added to the marketplace"
+          products={newArrivals}
+          loading={arrivalsLoading}
+          onProduct={(p) => setSelectedProduct(p)}
+          onAddToCart={handleAddToCart}
+          showReason={false}
+          emptyText={null}
+        />
+      )}
+
+      {/* Absolute empty state — only when literally nothing exists */}
+      {everythingEmpty && (
         <div className="bg-white border border-dashed border-gray-200 rounded-2xl p-12 text-center">
           <div className="text-5xl mb-4">🛒</div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No products yet</h3>
@@ -162,7 +255,7 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
             Browse all products or check back later as the marketplace grows.
           </p>
           <button
-            onClick={onGoToProducts}
+            onClick={() => onGoToProducts()}
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2.5 rounded-lg transition-all"
           >
             Browse Products
@@ -185,3 +278,5 @@ const HomePage = ({ onGoToProducts, onGoToCart }) => {
 };
 
 export default HomePage;
+
+// Modified in feature/recommendations branch

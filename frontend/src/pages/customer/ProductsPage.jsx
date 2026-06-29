@@ -14,13 +14,13 @@ import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import RecommendationRow from '../../components/recommendations/RecommendationRow';
 
-const ProductsPage = ({ onGoToCart }) => {
+const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
   const { addToCart, loading: cartLoading } = useCart();
   const { isWished, toggleWish } = useWishlist();
   const [products, setProducts]   = useState([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
-  const [category, setCategory]   = useState('');
+  const [category, setCategory]   = useState(initialCategory);
   const [sort, setSort]           = useState('newest');
   const [page, setPage]           = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -608,3 +608,5 @@ const ReviewsSection = ({ productId }) => {
 };
 
 export default ProductsPage;
+
+// Modified in feature/recommendations branch

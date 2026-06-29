@@ -22,6 +22,8 @@ const {
   getRecentlyViewed,
   getCartRecommendations,
   getWishlistRecommendations,
+  getDeals,
+  getNewArrivals,
 } = require('../services/nepShopAdapter');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,6 +184,28 @@ const getWishlistRecs = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// @desc    Deals — discounted products
+// @route   GET /api/recommendations/deals
+// @access  Public
+// ─────────────────────────────────────────────────────────────────────────────
+const getDealsProducts = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 12, 24);
+  const products = await getDeals({ limit });
+  res.json({ success: true, count: products.length, products });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @desc    New Arrivals — newest products
+// @route   GET /api/recommendations/new-arrivals
+// @access  Public
+// ─────────────────────────────────────────────────────────────────────────────
+const getNewArrivalsProducts = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 12, 24);
+  const products = await getNewArrivals({ limit });
+  res.json({ success: true, count: products.length, products });
+});
+
 module.exports = {
   getTrendingProducts,
   getSimilarProducts,
@@ -192,4 +216,9 @@ module.exports = {
   getRecentlyViewedProducts,
   getCartRecs,
   getWishlistRecs,
+  getDealsProducts,
+  getNewArrivalsProducts,
 };
+
+
+// Modified in feature/recommendations branch

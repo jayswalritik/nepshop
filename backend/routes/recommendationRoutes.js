@@ -15,6 +15,8 @@ const {
   getRecentlyViewedProducts,
   getCartRecs,
   getWishlistRecs,
+  getDealsProducts,
+  getNewArrivalsProducts,
 } = require('../controllers/recommendationController');
 
 // ── Public — no auth required (works for guest visitors too) ──
@@ -24,6 +26,10 @@ router.get('/similar/:productId',          getSimilarProducts);
 // Phase 2 — collaborative filtering (public)
 router.get('/bought-together/:productId',  getBoughtTogether);
 router.get('/also-bought/:productId',      getAlsoBought);
+
+// Home landing rows (public)
+router.get('/deals',                       getDealsProducts);
+router.get('/new-arrivals',                getNewArrivalsProducts);
 
 // ── Protected — logged-in customer only ──
 router.get('/feed',             protect, authorizeRoles('customer'), getPersonalizedHomeFeed);
@@ -35,3 +41,5 @@ router.get('/cart',                   protect, authorizeRoles('customer'), getCa
 router.get('/wishlist',               protect, authorizeRoles('customer'), getWishlistRecs);
 
 module.exports = router;
+
+// Modified in feature/recommendations branch
