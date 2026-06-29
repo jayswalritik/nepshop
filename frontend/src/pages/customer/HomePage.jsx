@@ -10,7 +10,7 @@
  * Clicking any product opens the SAME ProductDetailModal used on the Shop tab
  * (reviews + similar products included).
  *
- * Props from CustomerDashboard:
+ * Props from customer/Dashboard:
  *   onGoToProducts fn()  — switch to the Shop tab
  *   onGoToCart     fn()  — switch to the Cart tab
  */
