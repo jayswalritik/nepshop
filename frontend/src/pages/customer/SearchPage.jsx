@@ -7,12 +7,17 @@
  * is passed via the `initialQuery` prop. It reacts live as the prop changes
  * (each keystroke in the navbar triggers a new search after debounce).
  *
+ * STABILITY FIX: debounced searches could return OUT OF ORDER — a response for
+ * "gaming" arriving after "gaming laptop" would overwrite the correct results
+ * with partial-word ones. Each request is now tagged with the query it was for,
+ * and stale responses (not matching the latest query) are ignored.
+ *
  * Props:
  *   initialQuery  string  — current search string from the navbar
  *   onGoToCart    fn      — navigate to cart tab
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
@@ -179,34 +184,50 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
   const [removedChips, setRemovedChips] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  // ── Search whenever the navbar query changes (debounced) ──────────────────
-  useEffect(() => {
-    if (!initialQuery.trim()) return;
-
-    const timer = setTimeout(() => {
-      runSearch(initialQuery.trim());
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [initialQuery]);
+  // Tracks the most recent query we care about. Any response whose query does
+  // not match this ref is stale (a slower earlier request) and is discarded.
+  const latestQueryRef = useRef('');
 
   const runSearch = useCallback(async (q) => {
+    latestQueryRef.current = q;      // this is now the query we care about
     setLoading(true);
     setRemovedChips([]);
     try {
       const { data } = await API.get(`/search?q=${encodeURIComponent(q)}&limit=20`);
+      // Ignore this response if a newer query has since been issued.
+      if (latestQueryRef.current !== q) return;
       setResults(data.products || []);
       setRescue(data.rescue || []);
       setTotalFound(data.totalFound || 0);
       setUnderstanding(data.understanding);
       setIntent(data.intent);
     } catch (err) {
+      if (latestQueryRef.current !== q) return; // stale error, ignore
       console.error('Search failed:', err);
       setResults([]);
     } finally {
-      setLoading(false);
+      // Only clear loading if this is still the active query.
+      if (latestQueryRef.current === q) setLoading(false);
     }
   }, []);
+
+  // ── Search whenever the navbar query changes (debounced) ──────────────────
+  useEffect(() => {
+    const q = initialQuery.trim();
+    if (!q) {
+      latestQueryRef.current = '';
+      setResults([]);
+      setUnderstanding(null);
+      setIntent(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      runSearch(q);
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [initialQuery, runSearch]);
 
   const handleAddToCart = async (product) => {
     const result = await addToCart(product._id, 1);
@@ -232,8 +253,6 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
   // The backend already returns the correct, ranked products. The ONLY optional
   // client-side filtering is EXCLUSION: if the user clicks a chip to relax a
   // constraint, drop products that only matched because of that constraint.
-  // We never ADD or broaden results here — that was the "black shoes → all black
-  // products" bug (a color chip was being used to widen, not narrow).
   const displayResults = results.filter(p => {
     for (const chip of removedChips) {
       if (chip.type === 'category' && p.category === chip.value) return false;
