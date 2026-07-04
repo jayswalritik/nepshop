@@ -97,6 +97,16 @@ const productSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+
+    // ── Semantic search embedding ─────────────────────────
+    // 384-number meaning-vector (all-MiniLM-L6-v2). Hidden from normal queries
+    // via select:false, so existing code is unaffected; semantic search opts in
+    // with .select('+embedding').
+    embedding: {
+      type: [Number],
+      select: false,
+      default: undefined,
+    },
   },
   {
     timestamps: true,

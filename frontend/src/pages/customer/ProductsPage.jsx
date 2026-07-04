@@ -1,11 +1,12 @@
 /**
- * ProductsPage.jsx — with Similar Products recommendation in the detail modal
+ * ProductsPage.jsx — Pure browse page (search bar removed)
  * frontend/src/pages/customer/ProductsPage.jsx
  *
- * Changes from original:
- *   • Imports RecommendationRow
- *   • ProductDetailModal fetches /api/recommendations/similar/:id and shows a row
- *   • No other logic changed
+ * Changes from previous version:
+ *   • Removed the internal search input and the `search` state/debounce effect
+ *   • Smart search now lives ONLY in the navbar (CustomerDashboard.jsx → SearchPage.jsx)
+ *   • This page is now category filter + sort + grid + pagination, nothing else
+ *   • All recommendation rows (Similar / Bought Together / Also Bought) unchanged
  */
 
 import { useState, useEffect } from 'react';
@@ -19,7 +20,6 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
   const { isWished, toggleWish } = useWishlist();
   const [products, setProducts]   = useState([]);
   const [loading, setLoading]     = useState(true);
-  const [search, setSearch]       = useState('');
   const [category, setCategory]   = useState(initialCategory);
   const [sort, setSort]           = useState('newest');
   const [page, setPage]           = useState(1);
@@ -35,24 +35,20 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
     'Toys & Games', 'Automotive', 'Other',
   ];
 
+  // Keep category in sync if the dashboard passes a new initialCategory
+  // (e.g. clicking a Home page category tile while already on Shop tab)
+  useEffect(() => {
+    setCategory(initialCategory);
+  }, [initialCategory]);
+
   useEffect(() => {
     fetchProducts();
   }, [page, category, sort]);
-
-  // Debounce search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setPage(1);
-      fetchProducts();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [search]);
 
   const fetchProducts = async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page, limit: 12, sort });
-      if (search)   params.append('search', search);
       if (category) params.append('category', category);
 
       const { data } = await API.get(`/products?${params}`);
@@ -101,20 +97,10 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
         </div>
       )}
 
-      {/* Search and filters */}
+      {/* Filters — category + sort only, no search bar (search lives in navbar) */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-        <div className="flex gap-3 flex-wrap">
-          {/* Search */}
-          <div className="flex-1 min-w-64 relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-            <input
-              type="text"
-              placeholder="Search products..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-            />
-          </div>
+        <div className="flex gap-3 flex-wrap items-center">
+          <span className="text-sm font-medium text-gray-700 mr-1">Browse:</span>
 
           {/* Category */}
           <select
@@ -139,12 +125,12 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
           </select>
 
           {/* Clear */}
-          {(search || category) && (
+          {category && (
             <button
-              onClick={() => { setSearch(''); setCategory(''); setPage(1); }}
+              onClick={() => { setCategory(''); setPage(1); }}
               className="px-3 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:border-gray-300 transition-all"
             >
-              Clear
+              Clear filter
             </button>
           )}
         </div>
@@ -154,7 +140,6 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
           <p className="text-xs text-gray-400 mt-3">
             {total} product{total !== 1 ? 's' : ''} found
             {category && ` in "${category}"`}
-            {search && ` for "${search}"`}
           </p>
         )}
       </div>
@@ -175,9 +160,9 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
         </div>
       ) : products.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-xl p-16 text-center">
-          <div className="text-5xl mb-4">🔍</div>
+          <div className="text-5xl mb-4">📦</div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No products found</h3>
-          <p className="text-gray-500 text-sm">Try a different search or category</p>
+          <p className="text-gray-500 text-sm">Try a different category</p>
         </div>
       ) : (
         <>
@@ -609,4 +594,4 @@ const ReviewsSection = ({ productId }) => {
 
 export default ProductsPage;
 
-// Modified in feature/recommendations branch
+// Modified in feature/search branch — internal search bar removed; smart search lives in navbar

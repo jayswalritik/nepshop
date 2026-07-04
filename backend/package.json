@@ -9,6 +9,8 @@
     "seed:admin": "node seedAdmin.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "an-array-of-english-words": "^2.0.0",
     "axios": "^1.18.1",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.10.0",

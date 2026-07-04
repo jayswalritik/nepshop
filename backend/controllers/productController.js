@@ -1,9 +1,9 @@
-
 const asyncHandler = require('express-async-handler');
 const Product = require('../models/Product');
 const { cloudinary, uploadToCloudinary } = require('../config/cloudinary');
 const { sendLowStockEmail } = require('../utils/emailService');
 const User = require('../models/User');
+const { embedDocument, buildProductText } = require('../services/embeddingService'); //Phase 2
 // ─────────────────────────────────────────────────────────
 // @desc    Create a new product
 // @route   POST /api/products
@@ -29,6 +29,16 @@ const images = uploadedImages.map((result) => ({
   publicId: result.public_id,
 }));
 
+  // Phase 2: compute the semantic embedding from the product's text.
+  // Non-fatal — if embedding hiccups, the product is still created; text search
+  // still works and a later backfill can fill the vector in.
+  let embedding;
+  try {
+    embedding = await embedDocument(buildProductText({ name, description, category }));
+  } catch (err) {
+    console.warn('Embedding failed on create (product will still be saved):', err.message);
+  }
+
   const product = await Product.create({
     name,
     description,
@@ -39,12 +49,17 @@ const images = uploadedImages.map((result) => ({
     discount:     discount ? Number(discount) : 0,
     images,
     seller: req.user._id,
+    embedding,
   });
+
+  // Don't expose the raw 384-number vector in the API response.
+  const productData = product.toObject();
+  delete productData.embedding;
 
   res.status(201).json({
     success: true,
     message: 'Product created successfully',
-    product,
+    product: productData,
   });
 });
 
@@ -198,6 +213,13 @@ if (req.files && req.files.length > 0) {
   product.isActive     = isActive     !== undefined ? isActive : product.isActive;
   product.images       = images;
 
+  // Phase 2: re-embed from the updated text (non-fatal — see createProduct note).
+  try {
+    product.embedding = await embedDocument(buildProductText(product));
+  } catch (err) {
+    console.warn('Embedding failed on update (product will still be saved):', err.message);
+  }
+
   const updated = await product.save();
 
   // Low stock alert — send email if stock drops to 5 or below
@@ -206,10 +228,14 @@ if (req.files && req.files.length > 0) {
     if (seller) sendLowStockEmail(seller, updated);
   }
 
+  // Don't expose the raw 384-number vector in the API response.
+  const productData = updated.toObject();
+  delete productData.embedding;
+
   res.status(200).json({
     success: true,
     message: 'Product updated successfully',
-    product: updated,
+    product: productData,
   });
 });
 
