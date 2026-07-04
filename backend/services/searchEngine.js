@@ -359,6 +359,20 @@ const parseQuery = (rawQuery, config, catalogVocabulary) => {
   const purpose      = extractPurpose(corrected, config.purposeHints || {});
   const productTerms = extractProductTerms(tokens, expandedTokens, config.colors || []);
 
+  // ── coreProductTerms (intent-refinement) ─────────────────────────────────────
+  // Purpose keywords describe a USE-CASE ("gaming", "office", "running", "gift"),
+  // not the product itself. They should BOOST relevance but must not, on their own,
+  // pull in a product of the wrong kind (e.g. a "gaming" T-shirt for "gaming laptop").
+  // So the literal-match GATE uses productTerms with purpose words removed — UNLESS
+  // that would empty the set (the query was ONLY a purpose word, e.g. "gaming"), in
+  // which case we keep them so the query still matches something.
+  const purposeWords = new Set();
+  for (const hint of Object.values(config.purposeHints || {})) {
+    (hint.keywords || []).forEach(k => k.split(/\s+/).forEach(w => purposeWords.add(w)));
+  }
+  const strippedTerms = productTerms.filter(t => !purposeWords.has(t));
+  const coreProductTerms = strippedTerms.length > 0 ? strippedTerms : productTerms;
+
   const tokenSet = new Set(tokens);
   const matchesKeyword = (kw) => {
     if (kw.includes(' ')) {
@@ -376,7 +390,7 @@ const parseQuery = (rawQuery, config, catalogVocabulary) => {
   return {
     raw, normalized, corrected, spellingFixes,
     tokens, expandedTokens,
-    budget, color, purpose, productTerms,
+    budget, color, purpose, productTerms, coreProductTerms,
     isBudgetQuery, isPremiumQuery,
   };
 };
@@ -638,10 +652,16 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   // 2. Active, in-stock only
   const activePool = candidates.filter(p => p.isActive !== false && p.stock > 0);
 
-  const hasProductTerms = intent.productTerms.length > 0;
+  // Use coreProductTerms (purpose words stripped, unless that empties them) as
+  // the literal-match gate, so a use-case word can't solely pull in a wrong-kind
+  // product. Falls back to productTerms when only purpose words were present.
+  const gateTerms = intent.coreProductTerms && intent.coreProductTerms.length
+    ? intent.coreProductTerms
+    : intent.productTerms;
+  const hasProductTerms = gateTerms.length > 0;
 
   // 3. Literal matches (strong = name/category, weak = description; both kept)
-  const { strong, all: literalAll } = partitionMatches(activePool, intent.productTerms);
+  const { strong, all: literalAll } = partitionMatches(activePool, gateTerms);
   const literalMatches = hasProductTerms ? literalAll : [];
 
   // 4. Semantic matches — THE fix for "laptop shows only 1 product".
