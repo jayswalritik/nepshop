@@ -59,16 +59,21 @@ const resolveTarget = (msg, lastProducts) => {
 
   const tokens = lower.replace(/[^a-z0-9\s]/g, '').split(/\s+/)
     .filter((t) => t.length >= 3 && !QA_STOPWORDS.has(t));
-  // Score each product by HOW MANY meaningful tokens hit its name; best wins.
-  // (Was first-any-hit, which made "Dolce Shine Eau de" resolve to
-  // "Chanel ... Eau De" because "eau" hit the Chanel first in the list.)
-  let bestByName = null, bestHits = 0;
-  for (const p of lastProducts) {
-    const nameLower = p.name.toLowerCase();
-    const hits = tokens.filter((t) => nameLower.includes(t)).length;
-    if (hits > bestHits) { bestHits = hits; bestByName = p; }
+  // If the message refers via a bare pronoun ("does IT have..."), don't let a
+  // topic word that happens to appear in a product NAME silently select that
+  // product ("screen" → "...Dual Screen"). Pronoun + multiple products → skip
+  // name matching, fall through to focus/ask instead.
+  const usesBarePronoun = /\b(it|this)\b/i.test(lower) && lastProducts.length > 1;
+  if (!usesBarePronoun) {
+    // Score each product by HOW MANY meaningful tokens hit its name; best wins.
+    let bestByName = null, bestHits = 0;
+    for (const p of lastProducts) {
+      const nameLower = p.name.toLowerCase();
+      const hits = tokens.filter((t) => nameLower.includes(t)).length;
+      if (hits > bestHits) { bestHits = hits; bestByName = p; }
+    }
+    if (bestByName) return bestByName;
   }
-  if (bestByName) return bestByName;
 
   if (lastProducts.length === 1) return lastProducts[0];
   return null; // ambiguous — service will ask which one

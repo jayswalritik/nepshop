@@ -23,6 +23,51 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 const TIMEOUT_MS   = 40000;  // warm-model generation headroom; cold load is handled by warmUp
 const RECHECK_MS   = 60000;   // availability cache
 
+// ── Groq (free tier, no card) — priority LLM when the key is set ─────────────
+// OpenAI-compatible endpoint. 70B-class model: far more natural than local 3b
+// and ~1s responses vs 8-15s on CPU. Chain: Groq → Ollama → templates.
+const GROQ_URL   = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_KEY   = process.env.GROQ_API_KEY || null;
+
+let groqHealthy    = true;      // flips false on failure, retried after cooldown
+let groqFailedAt   = 0;
+const GROQ_RETRY_MS = 60000;
+
+const groqGenerate = async (systemPrompt, userPrompt) => {
+  if (!GROQ_KEY) return null;
+  if (!groqHealthy && Date.now() - groqFailedAt < GROQ_RETRY_MS) return null;
+
+  try {
+    const { data } = await axios.post(
+      GROQ_URL,
+      {
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 200,
+      },
+      {
+        headers: { Authorization: `Bearer ${GROQ_KEY}` },
+        timeout: 8000,   // Groq is fast; a slow response means trouble — fall through
+      }
+    );
+    groqHealthy = true;
+    const text = data?.choices?.[0]?.message?.content?.trim();
+    return text || null;
+  } catch (err) {
+    // 429 = rate limit; anything else = outage/misconfig. Either way: cool down
+    // and let the chain fall through to Ollama/templates.
+    groqHealthy  = false;
+    groqFailedAt = Date.now();
+    console.warn(`Groq failed (${err.response?.status || err.message}) — falling back to Ollama/templates`);
+    return null;
+  }
+};
+
 let availableCache = null;
 let lastCheckedAt  = 0;
 
@@ -46,7 +91,7 @@ const isAvailable = async () => {
 };
 
 // Core call. Returns the generated text, or null on ANY failure.
-const generate = async (systemPrompt, userPrompt) => {
+const ollamaGenerate = async (systemPrompt, userPrompt) => {
   if (!(await isAvailable())) return null;
   try {
     const { data } = await axios.post(
@@ -73,6 +118,14 @@ const generate = async (systemPrompt, userPrompt) => {
     availableCache = null; // force a recheck next time
     return null;
   }
+};
+
+// ── Unified LLM entry: Groq (fast, 70B) → Ollama (local 3b) → null ───────────
+// Callers unchanged: null still means "use the template fallback".
+const generate = async (systemPrompt, userPrompt) => {
+  const fromGroq = await groqGenerate(systemPrompt, userPrompt);
+  if (fromGroq) return fromGroq;
+  return ollamaGenerate(systemPrompt, userPrompt);
 };
 
 // ── Product Q&A: answer from the FULL product document ───────────────────────

@@ -149,7 +149,7 @@ const ChatWidget = ({ onGoToOrders }) => {
       setMessages([{
         from: 'bot',
         text: buildGreeting(user),
-        suggestions: ['Show trending products', 'Help'],
+        suggestions: ['Show trending products', 'Where is my order?', "What's in my cart?", 'Help'],
       }]);
     }
     if (open) setTimeout(() => inputRef.current?.focus(), 100);

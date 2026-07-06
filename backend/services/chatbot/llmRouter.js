@@ -2,7 +2,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Chatbot LLM Router  (backend/services/chatbot/llmRouter.js)
  * ─────────────────────────────────────────────────────────────────────────────
- * EXPERIMENTAL "conversational mode" router: uses the local LLM to classify a
+ * EXPERIMENTAL "conversational mode" router: uses the LLM to classify a
  * message into the SAME intent set the rule router uses, and to extract the
  * same reference fields. The action layer, grounding, templates, and context
  * system are IDENTICAL in both modes — only the classification step differs.
@@ -11,6 +11,10 @@
  *   • Output is validated against the known intent set; anything malformed,
  *     unknown, or timed out returns null → caller falls back to the rule
  *     router. Conversational mode can be slower but never broken.
+ *   • Deterministic parameter validation: the LLM proposes parameters
+ *     (followUp, isSelector, statusFilter), but the user's OWN WORDS must
+ *     confirm them — kills the observed "right intent, hallucinated params"
+ *     failure mode.
  *   • The LLM never touches facts here either — it only names an intent and
  *     extracts a reference from the user's own words.
  * ─────────────────────────────────────────────────────────────────────────────
@@ -68,21 +72,30 @@ const llmDetectIntent = async (message, context = {}) => {
     `CUSTOMER MESSAGE: ${message}`;
 
   const raw = await generate(ROUTER_SYSTEM_PROMPT, userPrompt);
-  if (!raw) return null;
+  if (!raw) {
+    console.warn('[router:llm] no LLM output at all (Groq and Ollama both null)');
+    return null;
+  }
+
 
   try {
     // Tolerate stray text/fences around the JSON
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) {
+      console.warn('[router:llm] rejected (no JSON in output):', raw.slice(0, 160));
+      return null;
+    }
     const parsed = JSON.parse(jsonMatch[0]);
 
-    if (!parsed.intent || !VALID_INTENTS.has(parsed.intent)) return null;
+    if (!parsed.intent || !VALID_INTENTS.has(parsed.intent)) {
+      console.warn('[router:llm] rejected (unknown intent):', JSON.stringify(parsed).slice(0, 160));
+      return null;
+    }
 
     const msgLower = message.toLowerCase();
 
     // ── Deterministic parameter validation ──────────────────────────────────
     // The LLM proposes parameters; the user's OWN WORDS must confirm them.
-    // This kills the observed failure mode: right intent, hallucinated params.
 
     // statusFilter only if the message actually contains that status word
     let statusFilter;
@@ -111,12 +124,18 @@ const llmDetectIntent = async (message, context = {}) => {
         if (re.test(msgLower)) { followUp = kind; break; }
       }
     }
-    if (parsed.intent === 'follow_up' && !followUp) return null; // can't confirm → rules
+    if (parsed.intent === 'follow_up' && !followUp) {
+      console.warn('[router:llm] rejected (follow_up without confirmable kind):', JSON.stringify(parsed).slice(0, 160));
+      return null;
+    }
 
     // order_follow_up needs an ordinal, "that one", or a status word in the message
     if (parsed.intent === 'order_follow_up') {
       const hasOrdinal = /\b((the\s)?(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)|(that|this)\s?one)\b/i.test(msgLower);
-      if (!hasOrdinal && !statusFilter) return null; // "where is my order" class → rules
+      if (!hasOrdinal && !statusFilter) {
+        console.warn('[router:llm] rejected (order_follow_up without ordinal/status):', JSON.stringify(parsed).slice(0, 160));
+        return null;
+      }
     }
 
     return {

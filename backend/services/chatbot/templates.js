@@ -45,10 +45,13 @@ const greetingReply = (firstName) =>
 
 const helpReply = () =>
   'Here\'s what I can do:\n' +
-  '• 🔍 Find products — try "gaming laptop under 200000" or "black shoes"\n' +
-  '• 📦 Track your orders (coming soon)\n' +
-  '• ↩️ Help with returns and refunds (coming soon)\n\n' +
-  'Just tell me what you\'re looking for!';
+  '• 🔍 Find products — "gaming laptop under 200000", "black shoes"\n' +
+  '• ❓ Answer product questions — "does it have a warranty?", "which of these has a graphics card?"\n' +
+  '• 📦 Track orders — "where is my order?", "which one is delivered?"\n' +
+  '• ↩️ Returns & refunds — "can I return my airpods?"\n' +
+  '• 🛒 Cart — "add the cheapest to my cart", "what\'s in my cart?"\n' +
+  '• 🔥 "Show trending products"\n\n' +
+  'Just ask naturally — I\'ll figure it out!';
 
 // ── Honest stubs for intents whose action layer isn't built yet ──────────────
 const comingSoonReply = (what) =>
