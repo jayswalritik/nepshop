@@ -206,7 +206,18 @@ const fuzzyCorrectToken = (token, vocabularyFreq) => {
     if (word.length < 4) continue; // never correct toward a very short word ("red", "gum")
     if (Math.abs(word.length - token.length) > maxDistance) continue;
 
-    const dist = levenshteinDistance(token, word);
+    // Adjacent transposition ("lapotp"→"laptop") counts as ONE edit — plain
+    // Levenshtein scores it 2, which put common swap-typos out of budget.
+    let dist = levenshteinDistance(token, word);
+    if (dist === 2 && word.length === token.length) {
+      let i = 0;
+      while (i < token.length && token[i] === word[i]) i++;
+      if (i < token.length - 1 &&
+          token[i] === word[i + 1] && token[i + 1] === word[i] &&
+          token.slice(i + 2) === word.slice(i + 2)) {
+        dist = 1;
+      }
+    }
     if (dist === 0 || dist > maxDistance) continue;
 
     if (dist < bestDist || (dist === bestDist && freq > bestFreq)) {
@@ -664,22 +675,42 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   const { strong, all: literalAll } = partitionMatches(activePool, gateTerms);
   const literalMatches = hasProductTerms ? literalAll : [];
 
-  // 4. Semantic matches — THE fix for "laptop shows only 1 product".
-  // Consider the whole active pool (not just literal matches). Add a product
-  // that had NO literal match only if its semantic score clears a bar:
-  //   • literal matches exist  → higher bar (rescueThreshold) to avoid noise
-  //   • no literal matches     → lower bar (threshold), full semantic rescue
-  const semThreshold = config.semanticThreshold != null ? config.semanticThreshold : 0.4;
-  const semRescue    = config.semanticRescueThreshold != null ? config.semanticRescueThreshold : 0.5;
+  // 4. Semantic matches — RELATIVE (adaptive) cutoff.
+  // Consider the whole active pool (not just literal matches). Different
+  // categories score on different scales (a "laptop" tops ~0.61, "clothes"
+  // ~0.55, "toy" ~0.67), so a single absolute threshold either drops real
+  // matches in weak categories or lets noise in for strong ones. Instead we
+  // read EACH query's own distribution: the genuinely-relevant items cluster
+  // near the top score, then there's a gap, then noise. So we keep a product
+  // only if it is BOTH:
+  //   (a) above a low absolute FLOOR (semanticFloor) — this preserves honest
+  //       zero-results for queries with no real match ("diamond ring"), and
+  //   (b) within a MARGIN of THIS query's top semantic score (semanticTopMargin)
+  //       — this finds the gap wherever it sits, per query, per category.
+  // This is category-general and future-proof: it adapts to whatever products
+  // exist, with no per-category tuning.
+  const semFloor  = config.semanticFloor      != null ? config.semanticFloor      : 0.45;
+  const semMargin = config.semanticTopMargin  != null ? config.semanticTopMargin  : 0.09;
+
+  // Highest semantic score for THIS query across the active pool.
+  let topSem = 0;
+  if (semanticScores) {
+    for (const p of activePool) {
+      const s = semanticScores[p._id?.toString()] || 0;
+      if (s > topSem) topSem = s;
+    }
+  }
+  // A product is "semantically relevant" if it clears the floor AND is within
+  // the margin of this query's best match.
+  const semCut = Math.max(semFloor, topSem - semMargin);
 
   const semanticOnly = [];
   if (semanticScores && hasProductTerms) {
     const litIds = new Set(literalMatches.map(p => p._id?.toString()));
-    const bar = literalMatches.length > 0 ? semRescue : semThreshold;
     for (const p of activePool) {
       const id = p._id?.toString();
       if (litIds.has(id)) continue;
-      if ((semanticScores[id] || 0) >= bar) semanticOnly.push(p);
+      if ((semanticScores[id] || 0) >= semCut) semanticOnly.push(p);
     }
   }
 
@@ -693,6 +724,20 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
 
   // 6. Category from STRONG literal matches only (keeps the signal clean)
   const { category: derivedCategory } = deriveCategoryFromMatches(hasProductTerms ? strong : []);
+
+  // 6b. Same-category tightening. When the query resolves to ONE dominant
+  // category (derivedCategory is set — deriveCategoryFromMatches only returns
+  // one when it's ≥60% of the strong matches), drop pool items from OTHER
+  // categories. These are cross-category stragglers that matched semantically or
+  // via a stray description word (e.g. a Toys "Fashion Doll" or an "Other"
+  // "Laundry Basket" surfacing for "clothes"). This does NOT touch:
+  //   • multi-category queries ("helmet" → Sports+Automotive) — no dominant
+  //     category, so no category is derived, so nothing is filtered; and
+  //   • pure-semantic queries with no literal match ("something to keep drinks
+  //     cold" → water bottle in "Other") — no derived category either.
+  if (derivedCategory) {
+    pool = pool.filter(p => p.category === derivedCategory);
+  }
 
   // 7. Budget filter (no fallback once the user named a product term)
   const tolerance = config.budgetOvershootTolerance || 0.1;

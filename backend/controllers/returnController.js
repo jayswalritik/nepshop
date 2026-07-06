@@ -417,4 +417,5 @@ module.exports = {
   getMyReturnPickups,
   markReturnPickedUp,
   completeReturn,
+  RETURN_WINDOW_MINUTES,
 };

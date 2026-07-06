@@ -10,6 +10,7 @@ import ProfilePage from './ProfilePage';
 import RoleSwitcher from '../../components/common/RoleSwitcher';
 import OffersPage from './OffersPage';
 import WishlistPage from './WishlistPage';
+import ChatWidget from '../../components/chatbot/ChatWidget';
 
 const MAX_HISTORY = 8;
 
@@ -296,6 +297,10 @@ const CustomerDashboard = () => {
         {activeTab === 'wishlist' && <WishlistPage onGoToShop={() => goToShop()} />}
         {activeTab === 'profile'  && <ProfilePage />}
       </div>
+
+      {/* ── Chatbot ── */}
+      <ChatWidget onGoToOrders={() => setActiveTab('orders')} />
+      
     </div>
   );
 };

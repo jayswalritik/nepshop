@@ -117,7 +117,8 @@ app.use('/api/returns', require('./routes/returnRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/wishlist', require('./routes/wishlistRoutes'));
 app.use('/api/recommendations', require('./routes/recommendationRoutes'));
-app.use('/api/search', require('./routes/searchRoutes'));  // ← add this
+app.use('/api/search', require('./routes/searchRoutes')); 
+app.use('/api/chatbot', require('./routes/chatbotRoutes'));
 
 
 // ── 404 handler (unknown routes) ─────────────────────────
