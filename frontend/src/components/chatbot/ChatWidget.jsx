@@ -140,6 +140,7 @@ const ChatWidget = ({ onGoToOrders }) => {
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
   const greetedRef = useRef(false);
+  const [mode, setMode] = useState('fast');   // 'fast' | 'conversational'
 
   // Personalized greeting the FIRST time the widget opens (feature 0)
   useEffect(() => {
@@ -168,7 +169,7 @@ const ChatWidget = ({ onGoToOrders }) => {
     setLoading(true);
 
     try {
-      const { data } = await API.post('/chatbot/message', { message: text, context });
+      const { data } = await API.post('/chatbot/message', { message: text, context, mode });
 
       // Action directives: perform cart adds through the SAME CartContext
       // flow as the + Add button — confirmation only shows if it succeeds.
@@ -206,7 +207,7 @@ const ChatWidget = ({ onGoToOrders }) => {
     } finally {
       setLoading(false);
     }
-  }, [context, loading, addToCart]);
+  }, [context, loading, addToCart, mode]);
 
   const handleSubmit = () => send(input);
 
@@ -228,10 +229,18 @@ const ChatWidget = ({ onGoToOrders }) => {
           {/* Header */}
           <div className="bg-indigo-600 text-white px-4 py-3 flex items-center gap-3 flex-shrink-0">
             <div className="w-9 h-9 bg-white/15 rounded-full flex items-center justify-center text-lg">🤖</div>
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-sm leading-tight">NepShop Assistant</p>
               <p className="text-xs text-indigo-200 leading-tight">Grounded in real store data</p>
             </div>
+            {/* Mode toggle: rules routing (instant) vs LLM routing (experimental) */}
+            <button
+              onClick={() => setMode((m) => (m === 'fast' ? 'conversational' : 'fast'))}
+              className="text-[10px] font-medium bg-white/15 hover:bg-white/25 rounded-full px-2.5 py-1 transition-all"
+              title={mode === 'fast' ? 'Instant rule-based understanding' : 'LLM understanding (slower, experimental)'}
+            >
+              {mode === 'fast' ? '⚡ Fast' : '💬 Conversational'}
+            </button>
           </div>
 
           {/* Messages */}

@@ -36,6 +36,8 @@ const { resolveTarget, extractTopicKeywords, answerFromDescription, fetchProduct
 const { answerProductQuestion, answerMultiProductQuestion } = require('./ollamaService');
 const { getCartContents } = require('./cartActions');
 
+const { llmDetectIntent } = require('./llmRouter');
+
 
 // Chat shows fewer results than the search page — it's a conversation, not a grid.
 const CHAT_SEARCH_LIMIT = 5;
@@ -67,8 +69,22 @@ const toChatProduct = (p) => ({
 // ─────────────────────────────────────────────────────────────────────────────
 // handleMessage
 // ─────────────────────────────────────────────────────────────────────────────
-const handleMessage = async (user, message, context = {}) => {
-  const { intent, query, followUp, isSelector, statusFilter } = detectIntent(message, context);
+const handleMessage = async (user, message, context = {}, mode = 'fast') => {
+  // ── Routing: rules (fast) or LLM (conversational), same downstream either way.
+  // LLM routing falls back to rules on any failure — conversational mode can
+  // be slower but never broken. Timing logged for the mode-comparison report.
+  let detection = null;
+  if (mode === 'conversational') {
+    const t0 = Date.now();
+    detection = await llmDetectIntent(message, context);
+    console.log(`[router:llm] ${Date.now() - t0}ms → ${detection ? detection.intent : 'FALLBACK to rules'}`);
+  }
+  if (!detection) {
+    const t0 = Date.now();
+    detection = detectIntent(message, context);
+    console.log(`[router:rules] ${Date.now() - t0}ms → ${detection.intent}`);
+  }
+  const { intent, query, followUp, isSelector, statusFilter } = detection;
   const firstName = user?.firstName || '';
 
   switch (intent) {
