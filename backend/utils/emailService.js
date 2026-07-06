@@ -18,6 +18,38 @@ try {
   gmailTransporter = null; // nodemailer not installed — Brevo-only mode
 }
 
+// ── Mailjet HTTP fallback ─────────────────────────────────────────────────────
+// Second link in the chain: HTTP API (works on Render, unlike SMTP), free tier,
+// single-sender verification (no domain needed). Covers deployed email while
+// Brevo activation is pending.
+const sendViaMailjet = async (to, subject, fullHtml, sender) => {
+  if (!process.env.MAILJET_API_KEY || !process.env.MAILJET_SECRET_KEY) return false;
+  try {
+    await axios.post(
+      'https://api.mailjet.com/v3.1/send',
+      {
+        Messages: [{
+          From:     { Email: sender.email, Name: sender.name },
+          To:       [{ Email: to }],
+          Subject:  subject,
+          HTMLPart: fullHtml,
+        }],
+      },
+      {
+        auth: {
+          username: process.env.MAILJET_API_KEY,
+          password: process.env.MAILJET_SECRET_KEY,
+        },
+      }
+    );
+    console.log(`✅ Email (Mailjet) → ${to} | ${subject}`);
+    return true;
+  } catch (err) {
+    console.warn(`⚠️ Mailjet failed → ${to} | ${err.response?.data?.ErrorMessage || err.response?.data?.Messages?.[0]?.Errors?.[0]?.ErrorMessage || err.message}`);
+    return false;
+  }
+};
+
 // ── Brevo HTTP API config ─────────────────────────────────
 // Sends email over HTTPS (port 443), which cloud hosts allow —
 // unlike SMTP ports (587/465) that Render's free tier blocks.
@@ -254,7 +286,10 @@ const sendEmail = async ({ to, subject, html, preheader }) => {
     console.warn(`⚠️ Brevo failed → ${to} | ${detail}${gmailTransporter ? ' — trying Gmail fallback' : ''}`);
   }
 
-  // 2) Gmail SMTP fallback (local only — Render blocks SMTP ports)
+  // 2) Mailjet HTTP (works on Render; covers deployed until Brevo activates)
+  if (await sendViaMailjet(to, subject, fullHtml, sender)) return;
+
+  // 3) Gmail SMTP fallback (local only — Render blocks SMTP ports)
   if (gmailTransporter) {
     try {
       await gmailTransporter.sendMail({
@@ -270,7 +305,7 @@ const sendEmail = async ({ to, subject, html, preheader }) => {
     }
   }
 
-  // 3) Nothing worked — log and continue; email must never crash a flow
+  // 4) Nothing worked — log and continue; email must never crash a flow
   console.error(`❌ Email undeliverable → ${to} | ${subject}`);
 };
 
