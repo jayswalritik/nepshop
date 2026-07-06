@@ -1,5 +1,23 @@
 const axios = require('axios');
 
+// ── Gmail SMTP fallback (nodemailer) ──────────────────────
+// Brevo (HTTP, works on Render) is primary; if it fails — e.g. account not
+// yet activated — fall back to the Gmail transporter that already worked
+// locally. On Render, SMTP ports are blocked, so the fallback no-ops there
+// and Brevo remains the only deployed path (as designed).
+let gmailTransporter = null;
+try {
+  const nodemailer = require('nodemailer');
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+    gmailTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+    });
+  }
+} catch (e) {
+  gmailTransporter = null; // nodemailer not installed — Brevo-only mode
+}
+
 // ── Brevo HTTP API config ─────────────────────────────────
 // Sends email over HTTPS (port 443), which cloud hosts allow —
 // unlike SMTP ports (587/465) that Render's free tier blocks.
@@ -211,19 +229,16 @@ const alertBox = (text, type = 'info') => {
 
 const divider = () => `<hr style="border:none;border-top:1px solid #f1f5f9;margin:24px 0;">`;
 
-// ── Send helper ───────────────────────────────────────────
+// ── Send helper: Brevo HTTP → Gmail SMTP → log-and-continue ──────────────────
 const sendEmail = async ({ to, subject, html, preheader }) => {
-  try {
-    const sender = parseSender(process.env.EMAIL_FROM);
+  const fullHtml = layout(html, preheader);
+  const sender   = parseSender(process.env.EMAIL_FROM);
 
+  // 1) Brevo HTTP API (primary — the only path that works on Render)
+  try {
     await axios.post(
       BREVO_API_URL,
-      {
-        sender,
-        to: [{ email: to }],
-        subject,
-        htmlContent: layout(html, preheader),
-      },
+      { sender, to: [{ email: to }], subject, htmlContent: fullHtml },
       {
         headers: {
           'api-key':      process.env.BREVO_API_KEY,
@@ -232,12 +247,31 @@ const sendEmail = async ({ to, subject, html, preheader }) => {
         },
       }
     );
-
-    console.log(`✅ Email → ${to} | ${subject}`);
+    console.log(`✅ Email (Brevo) → ${to} | ${subject}`);
+    return;
   } catch (err) {
     const detail = err.response?.data?.message || err.message;
-    console.error(`❌ Email failed → ${to} | ${detail}`);
+    console.warn(`⚠️ Brevo failed → ${to} | ${detail}${gmailTransporter ? ' — trying Gmail fallback' : ''}`);
   }
+
+  // 2) Gmail SMTP fallback (local only — Render blocks SMTP ports)
+  if (gmailTransporter) {
+    try {
+      await gmailTransporter.sendMail({
+        from: `"${sender.name}" <${process.env.EMAIL_USER}>`,
+        to,
+        subject,
+        html: fullHtml,
+      });
+      console.log(`✅ Email (Gmail fallback) → ${to} | ${subject}`);
+      return;
+    } catch (err) {
+      console.error(`❌ Gmail fallback failed → ${to} | ${err.message}`);
+    }
+  }
+
+  // 3) Nothing worked — log and continue; email must never crash a flow
+  console.error(`❌ Email undeliverable → ${to} | ${subject}`);
 };
 
 // ═════════════════════════════════════════════════════════
