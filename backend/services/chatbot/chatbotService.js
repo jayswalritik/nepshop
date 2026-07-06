@@ -326,35 +326,44 @@ const handleMessage = async (user, message, context = {}) => {
       return respond(intent, reply, [card], [], newContext);
     }
 
-    // ── Multi-product Q&A — answers ACROSS the shown list (feature 2's
-    //    cross-product case). LLM over all documents; literal fallback. ───────
+    // ── Multi-product Q&A — extraction-first: the LLM only ever sees listing
+    //    sentences that MATCHED the question, so it structurally cannot claim
+    //    a feature for a product whose listing doesn't support it. ────────────
     case INTENTS.MULTI_QA: {
-      const items = context.lastProducts || [];
+      const items    = context.lastProducts || [];
       const products = await fetchProductsForQA(items.map((p) => p._id));
 
       if (!products.length) {
         return respond(intent, templates.helpReply(), [], ['Show trending products'], context);
       }
 
-      let reply = await answerMultiProductQuestion(products, query);
-      let cards = [];
-
-      if (!reply) {
-        // Fallback: literal keyword check per description — plainer but honest.
-        const keywords = extractTopicKeywords(query, '');
-        const matches  = keywords.length
-          ? products.filter((p) =>
-              keywords.some((k) => new RegExp(`\\b${k}`, 'i').test(p.description || '')))
-          : [];
-        const topic = keywords.join(' ');
-        if (matches.length) {
-          reply = templates.multiQaReply(matches.map((m) => m.name), topic, products.length);
-          cards = matches.map(toChatProduct);
-        } else {
-          reply = templates.multiQaMissReply(topic, products.length);
-        }
+      // Per-product extraction — same literal+semantic pass as single QA
+      const keywords = extractTopicKeywords(query, '');
+      const matches  = [];
+      for (const p of products) {
+        const sentences = await answerFromDescription(p.description, keywords, query);
+        if (sentences.length) matches.push({ product: p, sentences });
       }
 
+      const topic = keywords.join(' ');
+
+      // Nothing matched anywhere → honest miss, no LLM involved at all
+      if (!matches.length) {
+        const newContext = { ...context, lastIntent: INTENTS.MULTI_QA, pendingQAQuestion: null };
+        return respond(intent, templates.multiQaMissReply(topic, products.length), [], [], newContext);
+      }
+
+      // LLM phrases ONLY the matched excerpts; template fallback lists them
+      let reply = await answerMultiProductQuestion(
+        matches.map((m) => ({ name: m.product.name, sentences: m.sentences })),
+        query,
+        products.length
+      );
+      if (!reply) {
+        reply = templates.multiQaReply(matches.map((m) => m.product.name), topic, products.length);
+      }
+
+      const cards = matches.map((m) => toChatProduct(m.product));
       const newContext = { ...context, lastIntent: INTENTS.MULTI_QA, pendingQAQuestion: null };
       return respond(intent, reply, cards, [], newContext);
     }

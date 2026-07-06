@@ -137,35 +137,34 @@ const warmUp = async () => {
 warmUp(); // fire-and-forget on module load
 
 
-// ── Multi-product Q&A: answer ACROSS the shown list ───────────────────────────
+// ── Multi-product Q&A: answer from MATCHED EXCERPTS only ─────────────────────
+// The model receives ONLY listing sentences that matched the question (found
+// by the same literal+semantic extraction as single QA). Products with no
+// matching sentence aren't shown to it at all — so it structurally cannot
+// claim they have the feature. Restriction beats instruction for small models.
 const MULTI_QA_SYSTEM_PROMPT =
-  `You are NepShop's friendly shopping assistant. The customer is asking a ` +
-  `question ACROSS several products. Answer using ONLY the PRODUCT DATA ` +
-  `provided. Rules:\n` +
-  `- Name which product(s) answer the question, from what the data states or ` +
-  `clearly implies.\n` +
-  `- If something is only IMPLIED rather than stated, say so (e.g. "the ` +
-  `listing suggests..." ) instead of stating it as fact.\n` +
-  `- If NONE of the products cover it, say none of their listings mention it.\n` +
-  `- NEVER invent specs, numbers, or features.\n` +
+  `You are NepShop's friendly shopping assistant. The customer asked a ` +
+  `question across several products. Below are the ONLY listing excerpts ` +
+  `related to their question. Rules:\n` +
+  `- Answer using ONLY these excerpts. Name the product(s) whose excerpt ` +
+  `answers the question.\n` +
+  `- If an excerpt only relates loosely, say the listing "mentions" or ` +
+  `"suggests" it — do not upgrade it to a definite fact.\n` +
+  `- NEVER add specs, numbers, or features not in the excerpts.\n` +
   `- 1-3 short sentences. No markdown, no lists.`;
 
-const answerMultiProductQuestion = async (products, question) => {
-  const blocks = products.map((p, i) => {
-    const finalPrice = p.discount > 0
-      ? Math.round(p.price * (1 - p.discount / 100))
-      : p.price;
-    return (
-      `PRODUCT ${i + 1}:\n` +
-      `Name: ${p.name}\n` +
-      `Category: ${p.category}\n` +
-      `Price: Rs ${finalPrice}\n` +
-      `Rating: ${p.rating > 0 ? `${p.rating.toFixed(1)}/5` : 'not rated yet'}\n` +
-      `Description: ${p.description || '(none)'}`
-    );
-  }).join('\n\n');
+const answerMultiProductQuestion = async (matches, question, totalShown) => {
+  // matches: [{ name, sentences: [...] }] — only products whose listing matched
+  const blocks = matches.map((m) =>
+    `${m.name}:\n"${m.sentences.join('. ')}"`
+  ).join('\n\n');
 
-  return generate(MULTI_QA_SYSTEM_PROMPT, `${blocks}\n\nCUSTOMER QUESTION: ${question}`);
+  const userPrompt =
+    `The customer is looking at ${totalShown} products. These are the only ` +
+    `listing excerpts related to their question:\n\n${blocks}\n\n` +
+    `CUSTOMER QUESTION: ${question}`;
+
+  return generate(MULTI_QA_SYSTEM_PROMPT, userPrompt);
 };
 
 module.exports = { 
