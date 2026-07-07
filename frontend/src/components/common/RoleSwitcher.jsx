@@ -55,7 +55,7 @@ const RoleSwitcher = ({ openDirection = 'down' }) => {
   const current = roleConfig[activeRole] || roleConfig.customer;
 
   return (
-    <div className="relative w-full min-w-[180px]" ref={dropdownRef}>
+    <div className="relative w-full min-w-[110px] md:min-w-[180px]" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
         disabled={loading}

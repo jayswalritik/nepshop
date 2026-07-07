@@ -85,7 +85,10 @@ const SellerDashboard = () => {
 
       {/* ── Mobile header (logo + role switcher + logout) ── */}
       <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white border-b border-gray-200 px-3 py-2.5 flex items-center justify-between gap-2">
-        <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-xs flex-shrink-0">N</div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-xs flex-shrink-0">N</div>
+          <span className="font-bold text-gray-900 text-sm">Nep<span className="text-orange-500">Shop</span></span>
+        </div>
         <div className="flex items-center gap-2 min-w-0">
           <RoleSwitcher openDirection="down" />
           <button onClick={logout} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
