@@ -189,6 +189,7 @@ const UserManagement = () => {
             <p className="text-sm mt-1">Try adjusting your search or filters</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -271,6 +272,7 @@ const UserManagement = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

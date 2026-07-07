@@ -46,8 +46,8 @@ const AdminDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex">
 
-      {/* Sidebar */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col fixed h-full">
+      {/* Sidebar (desktop) */}
+      <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col fixed h-full">
         <div className="p-5 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>
@@ -101,8 +101,42 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+      {/* ── Mobile header (logo + logout) ── */}
+      <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white border-b border-gray-200 px-4 py-2.5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-xs">N</div>
+          <span className="font-bold text-gray-900 text-sm">Nep<span className="text-orange-500">Shop</span></span>
+          <span className="text-xs text-gray-400">Admin</span>
+        </div>
+        <button onClick={logout} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
+          Logout
+        </button>
+      </div>
+
+      {/* ── Mobile bottom tab strip ── */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-100 flex overflow-x-auto">
+        {navItems.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => setActiveTab(item.key)}
+            className={`flex-1 min-w-fit flex flex-col items-center gap-0.5 py-2 px-3 text-xs font-medium transition-all relative
+              ${activeTab === item.key
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-gray-500'}`}
+          >
+            <span className="text-base">{item.icon}</span>
+            {item.label}
+            {item.key === 'users' && stats?.pendingApprovals > 0 && (
+              <span className="absolute top-1 right-2 bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                {stats.pendingApprovals}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* Main content */}
-      <div className="ml-64 flex-1 p-6">
+      <div className="ml-0 md:ml-64 flex-1 p-6 pt-16 pb-20 md:pt-6 md:pb-6">
 
         {/* Header */}
         <div className="mb-6">

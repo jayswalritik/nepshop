@@ -159,6 +159,7 @@ const ReturnsManagement = () => {
             <p className="font-medium">No return requests</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -216,6 +217,7 @@ const ReturnsManagement = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

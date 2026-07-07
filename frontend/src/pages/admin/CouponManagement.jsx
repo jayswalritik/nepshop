@@ -239,6 +239,7 @@ const CouponManagement = () => {
             <p className="text-sm mt-1">Create one to offer discounts to customers</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -300,6 +301,7 @@ const CouponManagement = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -78,8 +78,8 @@ const DeliveryDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex">
 
-      {/* Sidebar */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col fixed h-full">
+      {/* Sidebar (desktop) */}
+      <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col fixed h-full">
         <div className="p-5 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>
@@ -136,8 +136,41 @@ const DeliveryDashboard = () => {
         </div>
       </div>
 
+      {/* ── Mobile header (logo + role switcher + logout) ── */}
+      <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white border-b border-gray-200 px-3 py-2.5 flex items-center justify-between gap-2">
+        <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-xs flex-shrink-0">N</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <RoleSwitcher openDirection="down" />
+          <button onClick={logout} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* ── Mobile bottom tab strip ── */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-100 flex overflow-x-auto">
+        {navItems.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => setActiveTab(item.key)}
+            className={`flex-1 min-w-fit flex flex-col items-center gap-0.5 py-2 px-3 text-xs font-medium transition-all relative
+              ${activeTab === item.key
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-gray-500'}`}
+          >
+            <span className="text-base">{item.icon}</span>
+            {item.label}
+            {item.key === 'active' && stats.active > 0 && (
+              <span className="absolute top-1 right-2 bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+                {stats.active}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* Main content */}
-      <div className="ml-64 flex-1 p-6">
+      <div className="ml-0 md:ml-64 flex-1 p-6 pt-16 pb-20 md:pt-6 md:pb-6">
 
         {/* Header */}
         <div className="mb-6">
@@ -150,7 +183,7 @@ const DeliveryDashboard = () => {
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
           <div className="bg-white border border-gray-200 rounded-xl p-4">
             <div className="text-2xl mb-1">🚚</div>
             <div className="text-2xl font-bold text-gray-900">{stats.active}</div>
@@ -227,7 +260,7 @@ const DeliveryDashboard = () => {
                         </div>
 
                         {/* Addresses */}
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="bg-blue-50 rounded-lg p-3">
                             <p className="text-xs font-semibold text-blue-700 mb-1">📦 Pickup from</p>
                             {order.pickupAddress?.street ? (
@@ -333,7 +366,7 @@ const EarningsTab = ({ stats }) => (
   <div className="space-y-4">
     <div className="bg-white border border-gray-200 rounded-xl p-6">
       <h3 className="font-semibold text-gray-900 mb-4">Earnings Summary</h3>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="bg-green-50 rounded-xl p-4">
           <p className="text-xs text-green-600 mb-1">Total Earned</p>
           <p className="text-2xl font-bold text-green-700">Rs {stats.earnings}</p>

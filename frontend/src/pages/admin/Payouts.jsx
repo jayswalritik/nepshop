@@ -182,6 +182,7 @@ const Payouts = () => {
             <p className="text-sm">No pending seller payouts</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -216,6 +217,7 @@ const Payouts = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -231,6 +233,7 @@ const Payouts = () => {
             <p className="text-sm">No pending agent payouts</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -265,6 +268,7 @@ const Payouts = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -290,6 +294,7 @@ const Payouts = () => {
                 <p className="font-medium">No payouts yet</p>
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
@@ -323,6 +328,7 @@ const Payouts = () => {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </div>

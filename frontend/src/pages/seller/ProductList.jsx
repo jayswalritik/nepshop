@@ -146,6 +146,7 @@ const ProductList = ({ onAddProduct }) => {
           </div>
         ) : (
           <>
+            <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -220,6 +221,7 @@ const ProductList = ({ onAddProduct }) => {
                 ))}
               </tbody>
             </table>
+            </div>
 
             {/* Pagination */}
             {totalPages > 1 && (

@@ -24,8 +24,8 @@ const SellerDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex">
 
-      {/* ── Sidebar ── */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col fixed h-full">
+      {/* ── Sidebar (desktop) ── */}
+      <div className="hidden md:flex w-64 bg-white border-r border-gray-200 flex-col fixed h-full">
 
         {/* Logo */}
         <div className="p-5 border-b border-gray-100">
@@ -83,11 +83,42 @@ const SellerDashboard = () => {
         </div>
       </div>
 
+      {/* ── Mobile header (logo + role switcher + logout) ── */}
+      <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white border-b border-gray-200 px-3 py-2.5 flex items-center justify-between gap-2">
+        <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-xs flex-shrink-0">N</div>
+        <div className="flex items-center gap-2 min-w-0">
+          <RoleSwitcher openDirection="down" />
+          <button onClick={logout} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* ── Mobile bottom tab strip ── */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-100 flex overflow-x-auto">
+        {navItems.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => { setActiveTab(item.key); setShowAddProduct(false); }}
+            className={`flex-1 min-w-fit flex flex-col items-center gap-0.5 py-2 px-3 text-xs font-medium transition-all relative
+              ${activeTab === item.key
+                ? 'text-indigo-600 border-b-2 border-indigo-600'
+                : 'text-gray-500'}`}
+          >
+            <span className="text-base">{item.icon}</span>
+            {item.label}
+            {item.key === 'orders' && (
+              <span className="absolute top-1 right-2 bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">New</span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* ── Main content ── */}
-      <div className="ml-64 flex-1 p-6">
+      <div className="ml-0 md:ml-64 flex-1 p-6 pt-16 pb-20 md:pt-6 md:pb-6">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl font-bold text-gray-900">
               {showAddProduct ? 'Add New Product' : navItems.find(n => n.key === activeTab)?.label}

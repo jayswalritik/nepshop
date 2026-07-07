@@ -162,6 +162,7 @@ const SellerOrdersPage = () => {
             <p className="text-gray-500 text-sm">Orders from customers will appear here</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -256,6 +257,7 @@ const SellerOrdersPage = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

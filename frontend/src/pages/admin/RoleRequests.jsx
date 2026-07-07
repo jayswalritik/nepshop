@@ -59,6 +59,7 @@ const RoleRequests = () => {
             <p className="text-sm mt-1">When customers apply to become sellers or delivery agents, they'll appear here</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -117,6 +118,7 @@ const RoleRequests = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

@@ -217,7 +217,7 @@ const CustomerDashboard = () => {
           </nav>
 
           {/* Search bar — grows to fill space (desktop), widened */}
-          <div className="flex-1 min-w-[240px] max-w-[520px]">
+          <div className="hidden md:block flex-1 min-w-[240px] max-w-[520px]">
             <SearchBox
               value={searchQuery}
               onChange={handleSearchChange}
