@@ -1,5 +1,9 @@
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
+// Some local networks/ISPs block SRV record queries to the default resolver,
+// which breaks mongodb+srv:// lookups (querySrv ECONNREFUSED) even though
+// the network itself is fine. Public DNS resolves them without issue.
+dns.setServers(['8.8.8.8', '1.1.1.1']);
 const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
