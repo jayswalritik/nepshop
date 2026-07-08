@@ -186,21 +186,21 @@ const CustomerDashboard = () => {
 
       {/* ── Top navbar ── */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
 
           {/* Logo */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-sm">N</div>
-            <span className="font-bold text-gray-900 text-lg">Nep<span className="text-orange-500">Shop</span></span>
+            <span className="font-bold text-gray-900 text-lg whitespace-nowrap">Nep<span className="text-orange-500">Shop</span></span>
           </div>
 
           {/* Nav — desktop */}
-          <nav className="hidden md:flex items-center gap-1 flex-shrink-0">
+          <nav className="hidden md:flex items-center gap-0.5 flex-shrink-0">
             {navItems.map((item) => (
               <button
                 key={item.key}
                 onClick={() => handleNav(item.key)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all relative
+                className={`flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm font-medium transition-all relative whitespace-nowrap
                   ${activeTab === item.key
                     ? 'bg-indigo-50 text-indigo-600'
                     : 'text-gray-600 hover:bg-gray-50'}`}
@@ -216,8 +216,8 @@ const CustomerDashboard = () => {
             ))}
           </nav>
 
-          {/* Search bar — grows to fill space (desktop), widened */}
-          <div className="hidden md:block flex-1 min-w-[240px] max-w-[520px]">
+          {/* Search bar — grows to fill space (desktop), shrinks first when tight */}
+          <div className="hidden md:block flex-1 min-w-[120px] max-w-[420px]">
             <SearchBox
               value={searchQuery}
               onChange={handleSearchChange}
@@ -232,7 +232,7 @@ const CustomerDashboard = () => {
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0 whitespace-nowrap">
             <RoleSwitcher />
             <span className="hidden lg:block text-sm text-gray-500">
               Hi, {user?.firstName}

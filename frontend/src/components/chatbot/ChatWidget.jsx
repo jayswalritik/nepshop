@@ -140,7 +140,7 @@ const ChatWidget = ({ onGoToOrders }) => {
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
   const greetedRef = useRef(false);
-  const [mode, setMode] = useState('fast');   // 'fast' | 'conversational'
+  const [mode, setMode] = useState('conversational');   // 'fast' | 'conversational'
 
   // Personalized greeting the FIRST time the widget opens (feature 0)
   useEffect(() => {

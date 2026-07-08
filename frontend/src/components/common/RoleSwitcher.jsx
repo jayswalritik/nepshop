@@ -70,7 +70,7 @@ const RoleSwitcher = ({ openDirection = 'down' }) => {
       </button>
 
       {open && (
-        <div className={`absolute left-0 right-0 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50
+        <div className={`absolute left-0 right-0 min-w-[110px] bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50
           ${openDirection === 'up' ? 'bottom-full mb-2' : 'mt-2'}`}>
           <div className="px-3 py-2 border-b border-gray-100">
             <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Switch Mode</p>
@@ -85,12 +85,16 @@ const RoleSwitcher = ({ openDirection = 'down' }) => {
                 className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm transition-all text-left
                   ${isActive ? 'bg-indigo-50 text-indigo-600' : 'text-gray-700 hover:bg-gray-50'}`}
               >
-                <span className="text-lg">{cfg.icon}</span>
-                <div className="flex-1">
-                  <p className="font-medium">{cfg.label}</p>
-                  <p className="text-xs text-gray-400 capitalize">{role} mode</p>
+                <span className="text-lg flex-shrink-0">{cfg.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{cfg.label}</p>
+                  <p className="text-xs text-gray-400 capitalize truncate">{role} mode</p>
                 </div>
-                {isActive && <span className="text-indigo-600 text-xs">✓ Active</span>}
+                {isActive && (
+                  <svg className="w-4 h-4 text-indigo-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
               </button>
             );
           })}

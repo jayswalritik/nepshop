@@ -29,7 +29,10 @@ const ROUTER_SYSTEM_PROMPT =
   `You classify a customer's message in a shopping chat into exactly one intent. ` +
   `Reply with ONLY a JSON object, no other text, no markdown.\n\n` +
   `Intents:\n` +
-  `- product_search: wants to find/browse products. Set "query" to just the product words (e.g. "gaming laptop under 200000").\n` +
+  `- product_search: wants to find/browse products. Set "query" to the clearest common product words — ` +
+  `expand abbreviations, acronyms, and colloquial terms into what they most likely mean ` +
+  `(e.g. "pc" -> "computer laptop", "tv" -> "television", "kicks" -> "shoes sneakers"), ` +
+  `keeping any budget/color/brand words from the original message (e.g. "gaming laptop under 200000").\n` +
   `- trending: asks what's popular/trending/best-selling.\n` +
   `- product_qa: question about ONE specific product already shown (uses "it", a name, or an ordinal like "the second one").\n` +
   `- multi_qa: question ACROSS the shown products ("which of these has X?").\n` +

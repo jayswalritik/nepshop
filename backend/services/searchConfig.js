@@ -16,6 +16,8 @@ module.exports = {
   // thing in all common contexts.
   synonymGroups: [
     ['mobile', 'phone', 'smartphone', 'cellphone'],
+    ['pc', 'computer', 'computers', 'laptop', 'laptops', 'desktop'],
+    ['tablet', 'tablets', 'ipad'],
     ['headphone', 'headphones', 'earphone', 'earphones', 'earbud', 'earbuds', 'headset'],
     ['fridge', 'refrigerator'],
     ['shoe', 'shoes', 'sneaker', 'sneakers', 'footwear'],
