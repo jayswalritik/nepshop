@@ -80,7 +80,12 @@ const wordMatch = (haystack, term) => {
   const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
   for (const w of words) {
     if (w === term) return true;
-    if (w.startsWith(term) && (w.length - term.length) <= 2) return true;
+    // Prefix/plural tolerance (+2 extra letters) only makes sense once the
+    // term is long enough that 2 letters is a small fraction of it — for a
+    // 2-char term it would swallow unrelated words that merely start with
+    // the same 2 letters ("ac" ~ "Acer", "tv" ~ "TVs"). Short terms require
+    // an exact whole-word match instead.
+    if (term.length >= 3 && w.startsWith(term) && (w.length - term.length) <= 2) return true;
   }
   return false;
 };
@@ -688,9 +693,9 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
     : intent.productTerms;
   const hasProductTerms = gateTerms.length > 0;
 
-  // 3. Literal matches (strong = name/category, weak = description; both kept)
-  const { strong, all: literalAll } = partitionMatches(activePool, gateTerms);
-  const literalMatches = hasProductTerms ? literalAll : [];
+  // 3. Literal matches: strong = name/category (the product IS this thing —
+  // always trusted), weak = description-only (kept below, once corroborated).
+  const { strong, weak } = partitionMatches(activePool, gateTerms);
 
   // 4. Semantic matches — RELATIVE (adaptive) cutoff.
   // Consider the whole active pool (not just literal matches). Different
@@ -720,6 +725,19 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   // A product is "semantically relevant" if it clears the floor AND is within
   // the margin of this query's best match.
   const semCut = Math.max(semFloor, topSem - semMargin);
+
+  // A weak (description-only) match is corroborated only if it ALSO clears
+  // the same semantic relevance bar — a bare description mention isn't
+  // enough evidence the product IS the thing searched for (an accessory's
+  // "compatible with laptops" note produces the identical weak match as a
+  // real laptop's own description). Strong (name/category) matches need no
+  // such corroboration — the product genuinely IS that thing by name. Only
+  // applied when semantic scores are actually available; otherwise there's
+  // no signal to corroborate with, so weak matches pass through unchanged.
+  const corroboratedWeak = (hasProductTerms && semanticScores)
+    ? weak.filter(p => (semanticScores[p._id?.toString()] || 0) >= semCut)
+    : weak;
+  const literalMatches = hasProductTerms ? [...strong, ...corroboratedWeak] : [];
 
   const semanticOnly = [];
   if (semanticScores && hasProductTerms) {
