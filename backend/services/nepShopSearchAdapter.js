@@ -16,6 +16,7 @@ const { runSearch, buildCatalogVocabulary } = require('./searchEngine');
 const config        = require('./searchConfig');
 const { getTrending } = require('./nepShopAdapter');  // reuse for zero-result rescue
 const { computeSemanticScores } = require('./semanticSearchService'); // Phase 2
+const { understandQuery } = require('./queryUnderstanding'); // Phase 3: LLM rescue
 
 // ── Shared product projection ─────────────────────────────────────────────────
 // Include description for text matching; keep the rest lean.
@@ -56,6 +57,7 @@ const searchProducts = async (rawQuery, options = {}) => {
       totalFound:       0,
       isZeroResult:     true,
       zeroResultRescue: [],
+      interpretedAs:    null,
     };
   }
 
@@ -91,15 +93,55 @@ const searchProducts = async (rawQuery, options = {}) => {
     catalogVocabulary,
   });
 
+  // ── Phase 3: LLM query understanding — ONLY when the engine would
+  // otherwise be guessing: it extracted no product terms at all (query is
+  // too short/unfamiliar for literal+semantic matching to even attempt), or
+  // the attempt came back empty. Never fires on well-understood queries
+  // ("laptop", "gaming laptop under 200000") — those keep today's speed and
+  // never touch the LLM.
+  //
+  // The re-run below calls runSearch() directly (not searchProducts()), so
+  // there is no recursive path back into this block — a structural loop
+  // guard, not a flag to remember to check.
+  let finalResult = searchResult;
+  let interpretedAs = null;
+
+  const noProductTerms = !(searchResult.intent && searchResult.intent.productTerms &&
+    searchResult.intent.productTerms.length);
+  const shouldAskLLM = noProductTerms || searchResult.isZeroResult;
+
+  if (shouldAskLLM) {
+    const understood = await understandQuery(rawQuery);
+    if (understood && understood.terms.length) {
+      const rewrittenQuery = understood.terms.join(' ');
+      const rewrittenSemanticScores = await computeSemanticScores(rewrittenQuery, config);
+      const rerunResult = runSearch(candidates, rewrittenQuery, config, {
+        limit,
+        semanticScores: rewrittenSemanticScores,
+        intentOverride,
+        catalogVocabulary,
+      });
+
+      // Only adopt the LLM-assisted re-run if it actually found something —
+      // an LLM query that finds nothing can never make the response worse
+      // than the honest zero/browse result the engine already had.
+      if (rerunResult.results.length > 0) {
+        finalResult = rerunResult;
+        interpretedAs = { original: rawQuery, terms: understood.terms };
+      }
+    }
+  }
+
   // If zero results, attach a rescue list from the recommendation system
   let zeroResultRescue = [];
-  if (searchResult.isZeroResult) {
-    zeroResultRescue = await getZeroResultRescue(searchResult.intent);
+  if (finalResult.isZeroResult) {
+    zeroResultRescue = await getZeroResultRescue(finalResult.intent);
   }
 
   return {
-    ...searchResult,
+    ...finalResult,
     zeroResultRescue,
+    interpretedAs,
   };
 };
 

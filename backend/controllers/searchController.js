@@ -30,6 +30,7 @@ const search = asyncHandler(async (req, res) => {
     totalFound:    result.totalFound,
     count:         result.results.length,
     understanding: result.understanding,
+    interpretedAs: result.interpretedAs || null,
     intent:        {
       corrected:    result.intent?.corrected    || rawQuery,
       spellingFixes: result.intent?.spellingFixes || [],
