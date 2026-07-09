@@ -171,14 +171,16 @@ const SearchProductCard = ({ product, rank, onAddToCart, onOpenModal }) => {
 };
 
 // ── Main SearchPage ───────────────────────────────────────────────────────────
-const SearchPage = ({ initialQuery = '', onGoToCart }) => {
+const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) => {
   const { addToCart } = useCart();
 
   const [results, setResults]           = useState([]);
   const [rescue, setRescue]             = useState([]);
   const [understanding, setUnderstanding] = useState(null);
   const [intent, setIntent]             = useState(null);
+  const [interpretedAs, setInterpretedAs] = useState(null);
   const [loading, setLoading]           = useState(false);
+  const [loadingSlow, setLoadingSlow]   = useState(false);
   const [totalFound, setTotalFound]     = useState(0);
   const [toast, setToast]               = useState(null);
   const [removedChips, setRemovedChips] = useState([]);
@@ -186,14 +188,45 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
 
   // Tracks the most recent query we care about. Any response whose query does
   // not match this ref is stale (a slower earlier request) and is discarded.
+  // This remains the last-resort guard; AbortController (below) is the
+  // network-level guard that stops the stale request from costing anything
+  // in the first place.
   const latestQueryRef = useRef('');
 
+  // The in-flight request's controller, so a new search can abort whatever
+  // came before it (debounced fragment, or a still-running earlier fetch).
+  const abortControllerRef = useRef(null);
+
+  // The pending debounce timer, so a new keystroke can cancel a not-yet-fired
+  // search.
+  const debounceTimerRef = useRef(null);
+
+  // Last commit nonce we've already acted on — lets the effect below tell an
+  // EXPLICIT commit (Enter / history pick) apart from plain typing, since
+  // both otherwise look like an identical `initialQuery` prop change.
+  const lastCommitNonceRef = useRef(searchCommitNonce);
+
   const runSearch = useCallback(async (q) => {
+    // A new request starting always supersedes whatever was still in flight.
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     latestQueryRef.current = q;      // this is now the query we care about
     setLoading(true);
+    setLoadingSlow(false);
     setRemovedChips([]);
+
+    // Cold-start / slow-backend escalation: upgrade the loading copy after
+    // 3s without swapping the whole loading UI out from under the user.
+    const slowTimer = setTimeout(() => {
+      if (latestQueryRef.current === q) setLoadingSlow(true);
+    }, 3000);
+
     try {
-      const { data } = await API.get(`/search?q=${encodeURIComponent(q)}&limit=20`);
+      const { data } = await API.get(`/search?q=${encodeURIComponent(q)}&limit=20`, {
+        signal: controller.signal,
+      });
       // Ignore this response if a newer query has since been issued.
       if (latestQueryRef.current !== q) return;
       setResults(data.products || []);
@@ -201,33 +234,94 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
       setTotalFound(data.totalFound || 0);
       setUnderstanding(data.understanding);
       setIntent(data.intent);
+      setInterpretedAs(data.interpretedAs || null);
     } catch (err) {
+      // Aborted requests are expected traffic control, not an error state —
+      // axios (1.x) rejects an aborted request with name 'CanceledError' /
+      // code 'ERR_CANCELED'; guard the native fetch-style name too.
+      if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED' || err.name === 'AbortError') {
+        return;
+      }
       if (latestQueryRef.current !== q) return; // stale error, ignore
       console.error('Search failed:', err);
       setResults([]);
     } finally {
+      clearTimeout(slowTimer);
       // Only clear loading if this is still the active query.
-      if (latestQueryRef.current === q) setLoading(false);
+      if (latestQueryRef.current === q) {
+        setLoading(false);
+        setLoadingSlow(false);
+      }
     }
   }, []);
 
-  // ── Search whenever the navbar query changes (debounced) ──────────────────
+  // ── Decide WHEN to search: length gate + debounce, or immediate commit ────
   useEffect(() => {
     const q = initialQuery.trim();
+
+    // A new decision is being made: cancel any not-yet-fired debounce AND
+    // abort any still-running previous request immediately — a fragment the
+    // user has already typed past stops costing backend time right away,
+    // rather than waiting for the next debounce to fire before superseding
+    // it (runSearch also aborts defensively when a request actually starts,
+    // but this is what stops an in-flight request the MOMENT it goes stale).
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
     if (!q) {
+      // Cleared: reset to browse/default, never fire a search.
       latestQueryRef.current = '';
       setResults([]);
+      setRescue([]);
       setUnderstanding(null);
       setIntent(null);
+      setInterpretedAs(null);
+      setTotalFound(0);
+      setLoading(false);
+      setLoadingSlow(false);
       return;
     }
 
-    const timer = setTimeout(() => {
-      runSearch(q);
-    }, 350);
+    const isExplicitCommit = searchCommitNonce !== lastCommitNonceRef.current;
+    lastCommitNonceRef.current = searchCommitNonce;
 
-    return () => clearTimeout(timer);
-  }, [initialQuery, runSearch]);
+    if (isExplicitCommit) {
+      // Enter / history pick — fire now at any length >= 1, bypass debounce.
+      runSearch(q);
+      return;
+    }
+
+    // Plain typing: 0-1 chars never auto-search (this is what let 1-char
+    // fragments like "t" trigger a full LLM rescue); 2+ chars debounce.
+    if (q.length < 2) return;
+
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      runSearch(q);
+    }, 700);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    };
+  }, [initialQuery, searchCommitNonce, runSearch]);
+
+  // Abort any in-flight request if the page itself unmounts (e.g. the user
+  // switches tabs mid-search) — prevents a late response from calling
+  // setState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+    };
+  }, []);
 
   const handleAddToCart = async (product) => {
     const result = await addToCart(product._id, 1);
@@ -266,11 +360,24 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
 
   const showRescue = !loading && results.length === 0 && rescue.length > 0;
 
+  // The label shown for "results/no results for X" — NEVER the internal
+  // rewritten query the LLM rescue re-searched with. When interpretedAs is
+  // set, only the user's ORIGINAL query is ever shown.
+  const displayQueryLabel = interpretedAs ? interpretedAs.original : (intent?.corrected || initialQuery);
+
   // ── Loading skeleton ───────────────────────────────────────────────────────
+  // Replaces results entirely while a request is in flight (never shown
+  // during the debounce wait itself) — same grid shape as real results so
+  // nothing jumps when the response lands.
   if (loading) {
     return (
       <div>
-        <div className="h-20 bg-indigo-50 border border-indigo-100 rounded-xl mb-5 animate-pulse" />
+        <div className="h-20 bg-indigo-50 border border-indigo-100 rounded-xl mb-5 flex items-center justify-center gap-2 animate-pulse">
+          <span className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm font-medium text-indigo-600">
+            {loadingSlow ? 'Still searching — first search can take a moment…' : 'Searching…'}
+          </span>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {[...Array(8)].map((_, i) => (
             <div key={i} className="bg-white border border-gray-200 rounded-xl overflow-hidden animate-pulse">
@@ -299,19 +406,42 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
         </div>
       )}
 
-      {/* Understanding card */}
-      <UnderstandingCard
-        understanding={understanding}
-        removedChips={removedChips}
-        onRemoveChip={handleRemoveChip}
-      />
+      {/* Understanding card — genuinely-understood queries only. Never shown
+          for interpretedAs results: that banner explaining budget/color/
+          category chips would be describing the LLM's REWRITTEN query, not
+          what the user typed, which reads as broken rather than helpful. */}
+      {!interpretedAs && (
+        <UnderstandingCard
+          understanding={understanding}
+          removedChips={removedChips}
+          onRemoveChip={handleRemoveChip}
+        />
+      )}
 
-      {/* Result count */}
+      {/* Result count / rescued-query headline */}
       {displayResults.length > 0 && (
-        <p className="text-sm text-gray-500 mb-4">
-          <span className="font-semibold text-gray-800">{displayResults.length}</span> result{displayResults.length !== 1 ? 's' : ''} for{' '}
-          <span className="text-indigo-600 font-medium">"{intent?.corrected || initialQuery}"</span>
-        </p>
+        interpretedAs ? (
+          <div className="mb-4">
+            <p className="text-sm text-gray-600">
+              No exact matches for <span className="font-medium text-gray-800">"{interpretedAs.original}"</span> — showing related products instead
+            </p>
+            {interpretedAs.terms?.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-xs text-gray-400">Related:</span>
+                {interpretedAs.terms.map((term, i) => (
+                  <span key={i} className="text-xs text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full">
+                    {term}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 mb-4">
+            <span className="font-semibold text-gray-800">{displayResults.length}</span> result{displayResults.length !== 1 ? 's' : ''} for{' '}
+            <span className="text-indigo-600 font-medium">"{displayQueryLabel}"</span>
+          </p>
+        )
       )}
 
       {/* Results grid */}
@@ -333,7 +463,7 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
           <div className="text-5xl mb-4">🔍</div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No products found</h3>
           <p className="text-gray-500 text-sm">
-            No results for <span className="font-medium">"{intent?.corrected || initialQuery}"</span>
+            No results for <span className="font-medium">"{displayQueryLabel}"</span>
           </p>
           <p className="text-gray-400 text-xs mt-2">Try different keywords or clear the search to browse all products</p>
         </div>
@@ -346,7 +476,7 @@ const SearchPage = ({ initialQuery = '', onGoToCart }) => {
             <div className="text-4xl mb-3">🔍</div>
             <h3 className="text-base font-semibold text-gray-900 mb-1">No exact matches</h3>
             <p className="text-gray-500 text-sm">
-              No results for <span className="font-medium">"{intent?.corrected || initialQuery}"</span>
+              No results for <span className="font-medium">"{displayQueryLabel}"</span>
             </p>
             <p className="text-gray-400 text-xs mt-1">Clear the search bar to browse all products</p>
           </div>

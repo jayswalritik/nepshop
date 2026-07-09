@@ -114,6 +114,12 @@ const CustomerDashboard = () => {
   const [shopCategory, setShopCategory] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Bumped only on an EXPLICIT full-query commit (Enter, or picking a
+  // history suggestion) — never on plain typing. SearchPage watches this to
+  // tell "user explicitly submitted this query" apart from "query text
+  // changed while typing", since both look identical as a prop otherwise.
+  const [searchCommitNonce, setSearchCommitNonce] = useState(0);
+
   // Session-only search history (most recent first). Not persisted — clears on
   // tab/browser close (no localStorage), exactly as scoped.
   const [searchHistory, setSearchHistory] = useState([]);
@@ -167,17 +173,19 @@ const CustomerDashboard = () => {
     setActiveTab('shop');
   };
 
-  // Commit (Enter) → remember in history. Live results already show.
+  // Commit (Enter) → remember in history, fire immediately (bypass debounce).
   const handleSearchCommit = (q) => {
     setSearchQuery(q);
     setActiveTab('search');
+    setSearchCommitNonce(n => n + 1);
     rememberSearch(q);
   };
 
-  // Pick a past search from the dropdown → fill, search, remember.
+  // Pick a past search from the dropdown → fill, search immediately, remember.
   const handlePickSuggestion = (q) => {
     setSearchQuery(q);
     setActiveTab('search');
+    setSearchCommitNonce(n => n + 1);
     rememberSearch(q); // moves it back to the top
   };
 
@@ -288,7 +296,7 @@ const CustomerDashboard = () => {
       <div className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'home'     && <HomePage onGoToProducts={goToShop} onGoToCart={() => setActiveTab('cart')} />}
         {activeTab === 'shop'     && <ProductsPage initialCategory={shopCategory} onGoToCart={() => setActiveTab('cart')} />}
-        {activeTab === 'search'   && <SearchPage initialQuery={searchQuery} onGoToCart={() => setActiveTab('cart')} />}
+        {activeTab === 'search'   && <SearchPage initialQuery={searchQuery} searchCommitNonce={searchCommitNonce} onGoToCart={() => setActiveTab('cart')} />}
         {activeTab === 'cart'     && <CartPage onCheckoutSuccess={() => setActiveTab('orders')} />}
         {activeTab === 'orders'   && <OrdersPage />}
         {activeTab === 'offers'   && <OffersPage />}
