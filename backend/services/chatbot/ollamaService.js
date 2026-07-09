@@ -35,9 +35,16 @@ let groqFailedAt   = 0;
 const GROQ_RETRY_MS = 60000;
 
 const groqGenerate = async (systemPrompt, userPrompt) => {
-  if (!GROQ_KEY) return null;
-  if (!groqHealthy && Date.now() - groqFailedAt < GROQ_RETRY_MS) return null;
+  if (!GROQ_KEY) {
+    console.log('[llm] groq skipped (no API key) -> trying ollama');
+    return null;
+  }
+  if (!groqHealthy && Date.now() - groqFailedAt < GROQ_RETRY_MS) {
+    console.log(`[llm] groq skipped (cooldown, ${GROQ_RETRY_MS - (Date.now() - groqFailedAt)}ms remaining) -> trying ollama`);
+    return null;
+  }
 
+  const t0 = Date.now();
   try {
     const { data } = await axios.post(
       GROQ_URL,
@@ -63,7 +70,9 @@ const groqGenerate = async (systemPrompt, userPrompt) => {
     // and let the chain fall through to Ollama/templates.
     groqHealthy  = false;
     groqFailedAt = Date.now();
-    console.warn(`Groq failed (${err.response?.status || err.message}) — falling back to Ollama/templates`);
+    const reason = err.response?.status || err.message;
+    console.warn(`Groq failed (${reason}) — falling back to Ollama/templates`);
+    console.warn(`[llm] groq failed (${reason}) after ${Date.now() - t0}ms -> falling back to ollama`);
     return null;
   }
 };
@@ -92,7 +101,11 @@ const isAvailable = async () => {
 
 // Core call. Returns the generated text, or null on ANY failure.
 const ollamaGenerate = async (systemPrompt, userPrompt) => {
-  if (!(await isAvailable())) return null;
+  const t0 = Date.now();
+  if (!(await isAvailable())) {
+    console.log(`[llm] ollama unavailable (skipped) after ${Date.now() - t0}ms -> falling back to none`);
+    return null;
+  }
   try {
     const { data } = await axios.post(
       `${OLLAMA_URL}/api/chat`,
@@ -114,18 +127,38 @@ const ollamaGenerate = async (systemPrompt, userPrompt) => {
     const text = data?.message?.content?.trim();
     return text || null;
   } catch (err) {
-    console.warn('Ollama generate failed (falling back to templates):', err.message || 'empty/invalid response');
+    const reason = err.message || 'empty/invalid response';
+    console.warn('Ollama generate failed (falling back to templates):', reason);
+    console.warn(`[llm] ollama failed (${reason}) after ${Date.now() - t0}ms -> falling back to none`);
     availableCache = null; // force a recheck next time
     return null;
   }
 };
 
 // ── Unified LLM entry: Groq (fast, 70B) → Ollama (local 3b) → null ───────────
-// Callers unchanged: null still means "use the template fallback".
+// Callers unchanged: null still means "use the template fallback". Each call
+// logs exactly one [llm] provider=... summary line showing which link in the
+// chain actually served (or "none" if both failed) — logging only, the chain
+// order/timeouts/retries/models/prompts below are unchanged.
 const generate = async (systemPrompt, userPrompt) => {
+  const tStart = Date.now();
+
+  const tGroq0 = Date.now();
   const fromGroq = await groqGenerate(systemPrompt, userPrompt);
-  if (fromGroq) return fromGroq;
-  return ollamaGenerate(systemPrompt, userPrompt);
+  if (fromGroq) {
+    console.log(`[llm] provider=groq model=${GROQ_MODEL} latency=${Date.now() - tGroq0}ms`);
+    return fromGroq;
+  }
+
+  const tOllama0 = Date.now();
+  const fromOllama = await ollamaGenerate(systemPrompt, userPrompt);
+  if (fromOllama) {
+    console.log(`[llm] provider=ollama model=${OLLAMA_MODEL} latency=${Date.now() - tOllama0}ms`);
+    return fromOllama;
+  }
+
+  console.log(`[llm] provider=none latency=${Date.now() - tStart}ms`);
+  return null;
 };
 
 // ── Product Q&A: answer from the FULL product document ───────────────────────

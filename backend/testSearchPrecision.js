@@ -188,6 +188,47 @@ const run = async () => {
   console.log(`  INFO  "ac" (expanded "air conditioner") catalog results: ${JSON.stringify(acE2E.results.map(p => p.name))}` +
     (acE2E.isZeroResult ? ' (honest zero)' : ' (NOT zero — see summary)'));
 
+  // ── [Candidate cache] Two consecutive searches: 2nd must be a fast cache HIT
+  // NOTE: by this point in the script the candidate cache is already warm
+  // (every query above already populated it), so BOTH calls here report
+  // cache=HIT — that's expected, not a bug, and is itself evidence the cache
+  // is shared across DIFFERENT query strings, not just repeats of one query.
+  // The actual cold MISS -> HIT transition is already visible in the very
+  // first two [E2E] timing lines above ("laptop" -> cache=MISS, immediately
+  // followed by "pc" -> cache=HIT).
+  console.log('\n[Cache] Candidate + rescue cache (60s TTL)');
+  const capturedLines = [];
+  const realLog = console.log;
+  console.log = (...args) => { capturedLines.push(args.join(' ')); realLog(...args); };
+
+  const cacheQuery = 'lenovo yoga'; // arbitrary real query, not used elsewhere above
+  const first  = await searchProducts(cacheQuery, { limit: 20 });
+  const t0 = Date.now();
+  const second = await searchProducts(cacheQuery, { limit: 20 });
+  const secondWallMs = Date.now() - t0;
+
+  console.log = realLog;
+
+  const timingLines = capturedLines.filter(l => l.startsWith('[search:timing]'));
+  const firstLine  = timingLines[timingLines.length - 2] || '';
+  const secondLine = timingLines[timingLines.length - 1] || '';
+
+  check('1st call in this section is cache=HIT (cache already warm from earlier tests)',
+    firstLine.includes('cache=HIT'), firstLine);
+  check('2nd call reports cache=HIT', secondLine.includes('cache=HIT'), secondLine);
+
+  const fetchMatch = secondLine.match(/fetch=(\d+)ms/);
+  const fetchMs = fetchMatch ? parseInt(fetchMatch[1], 10) : null;
+  check('2nd call fetch stage is ~0ms (cache hit)', fetchMs !== null && fetchMs <= 5, secondLine);
+
+  check('cache does not change RESULTS (same products, same order)',
+    JSON.stringify(first.results.map(p => p._id)) === JSON.stringify(second.results.map(p => p._id)),
+    `first=${JSON.stringify(first.results.map(p => p.name))} second=${JSON.stringify(second.results.map(p => p.name))}`);
+
+  console.log(`  INFO  2nd call wall time: ${secondWallMs}ms (embed/vector stages still run — only the Mongo fetch is skipped)`);
+  console.log(`  INFO  the cold MISS -> HIT transition for the candidate cache is visible in the ` +
+    `first two [E2E] "laptop"/"pc" timing lines earlier in this output`);
+
   console.log(`\n${pass} passed, ${fail} failed.`);
   process.exit(fail > 0 ? 1 : 0);
 };

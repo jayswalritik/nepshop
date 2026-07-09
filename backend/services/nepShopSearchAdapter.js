@@ -23,11 +23,41 @@ const { understandQuery } = require('./queryUnderstanding'); // Phase 3: LLM res
 const SEARCH_PRODUCT_SELECT =
   'name description price comparePrice discount category images rating numReviews seller stock isActive createdAt';
 
-// ── Helper: fetch all active, in-stock products ───────────────────────────────
-const getAllSearchCandidates = async () =>
-  Product.find({ isActive: true, stock: { $gt: 0 } })
+// ── Candidate cache (60s TTL) ──────────────────────────────────────────────
+// Re-fetching the whole active catalog from Mongo is the single most
+// expensive step in a search (900-1300ms measured on Atlas). The catalog
+// doesn't change fast enough to justify hitting Mongo on every search, so we
+// cache it for a short, fixed window — plain variable + Date.now(), no new
+// dependency, no invalidation hooks (60s staleness is the accepted trade-off).
+//
+// MUTATION AUDIT (why a shallow array copy is enough, not a deep copy): traced
+// every consumer of this array — runSearch, partitionMatches, wordMatch,
+// scoreProduct (recommendationEngine.js), scoreSearchResult, buildSearchReason
+// — and all of them build NEW arrays/objects via .filter(), .map(), or object
+// spread ({ ...product, ... }). None call .sort() on the candidates array
+// itself (only on separately-.map()'d arrays) and none assign a property onto
+// a product object in place. So today, nothing mutates either the array or
+// the product objects. We still return a fresh shallow array copy on every
+// read anyway (negligible cost for a ~100-200 item catalog) so a future
+// in-place .sort()/.push() added without re-reading this comment can't corrupt
+// the shared cache — the PRODUCT OBJECTS remain shared references (not deep-
+// copied), consistent with nothing today mutating them.
+let candidateCache = null; // { data: Product[], fetchedAt: number } | null
+const CANDIDATE_CACHE_TTL_MS = 60 * 1000;
+
+// ── Helper: fetch all active, in-stock products (cached) ─────────────────────
+const getAllSearchCandidates = async () => {
+  const now = Date.now();
+  if (candidateCache && (now - candidateCache.fetchedAt) < CANDIDATE_CACHE_TTL_MS) {
+    return { data: [...candidateCache.data], cacheStatus: 'HIT' };
+  }
+
+  const data = await Product.find({ isActive: true, stock: { $gt: 0 } })
     .select(SEARCH_PRODUCT_SELECT)
     .lean();
+  candidateCache = { data, fetchedAt: now };
+  return { data: [...data], cacheStatus: 'MISS' };
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // searchProducts
@@ -63,9 +93,10 @@ const searchProducts = async (rawQuery, options = {}) => {
     };
   }
 
-  // Fetch all candidates from MongoDB — this is the live, current inventory.
+  // Fetch all candidates from MongoDB — this is the live, current inventory
+  // (or a <=60s-old cached copy — see getAllSearchCandidates above).
   const tFetch0 = Date.now();
-  const candidates = await getAllSearchCandidates();
+  const { data: candidates, cacheStatus: fetchCacheStatus } = await getAllSearchCandidates();
   const fetchMs = Date.now() - tFetch0;
 
   // Build the spell-correction / relevance vocabulary directly from this
@@ -169,10 +200,13 @@ const searchProducts = async (rawQuery, options = {}) => {
 
   // If zero results, attach a rescue list from the recommendation system
   let trendingMs = null;
+  let trendingCacheStatus = null;
   let zeroResultRescue = [];
   if (finalResult.isZeroResult) {
     const tTrend0 = Date.now();
-    zeroResultRescue = await getZeroResultRescue(finalResult.intent);
+    const rescueResult = await getZeroResultRescue(finalResult.intent);
+    zeroResultRescue = rescueResult.data;
+    trendingCacheStatus = rescueResult.cacheStatus;
     trendingMs = Date.now() - tTrend0;
   }
 
@@ -180,6 +214,7 @@ const searchProducts = async (rawQuery, options = {}) => {
   const timingParts = [
     `q="${rawQuery}"`,
     `fetch=${fetchMs}ms`,
+    `cache=${fetchCacheStatus}`,
     `embed=${mainTiming.embedMs || 0}ms`,
     `vector=${mainTiming.vectorMs || 0}ms`,
     `run=${runMs}ms`,
@@ -187,7 +222,7 @@ const searchProducts = async (rawQuery, options = {}) => {
   if (rescueLLMMs   != null) timingParts.push(`rescueLLM=${rescueLLMMs}ms`);
   if (rescueEmbedMs != null) timingParts.push(`rescueEmbed=${rescueEmbedMs}ms`);
   if (rescueRunMs   != null) timingParts.push(`rescueRun=${rescueRunMs}ms`);
-  if (trendingMs    != null) timingParts.push(`trending=${trendingMs}ms`);
+  if (trendingMs    != null) timingParts.push(`trending=${trendingMs}ms trendingCache=${trendingCacheStatus}`);
   timingParts.push(`total=${totalMs}ms`);
   console.log(`[search:timing] ${timingParts.join(' ')}`);
 
@@ -198,6 +233,18 @@ const searchProducts = async (rawQuery, options = {}) => {
   };
 };
 
+// ── Zero-result rescue cache (60s TTL, keyed by category) ────────────────────
+// The rescue's own DB round trips (category-filtered find, or getTrending's
+// order aggregation) measured ~1500ms — the same "same query hits again and
+// again" cost as the candidate fetch, so it gets the same TTL treatment.
+// Keyed by category (or a sentinel for "no category / overall trending")
+// since that's the only input that varies the result — `limit` is always
+// config.zeroResultLimit internally, never caller-supplied. A FAILED fetch is
+// deliberately NOT cached — a transient DB hiccup shouldn't keep returning an
+// empty rescue for 60s after the DB recovers.
+const rescueCache = new Map(); // categoryKey -> { data, fetchedAt }
+const RESCUE_CACHE_TTL_MS = 60 * 1000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // getZeroResultRescue
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,10 +252,20 @@ const searchProducts = async (rawQuery, options = {}) => {
 //   1. If we extracted a category → trending in that category
 //   2. Otherwise → overall trending
 // Reuses the recommendation engine's getTrending — no duplication.
+// Returns { data, cacheStatus: 'HIT'|'MISS' }.
 // ─────────────────────────────────────────────────────────────────────────────
 const getZeroResultRescue = async (intent) => {
+  const categoryKey = (intent && intent.category) || '__overall__';
+  const now = Date.now();
+
+  const cached = rescueCache.get(categoryKey);
+  if (cached && (now - cached.fetchedAt) < RESCUE_CACHE_TTL_MS) {
+    return { data: [...cached.data], cacheStatus: 'HIT' };
+  }
+
   try {
     const limit = config.zeroResultLimit || 8;
+    let data = null;
 
     if (intent && intent.category) {
       // Category-filtered trending
@@ -223,19 +280,24 @@ const getZeroResultRescue = async (intent) => {
         .lean();
 
       if (products.length > 0) {
-        return products.map(p => ({
+        data = products.map(p => ({
           ...p,
           _reason: `Popular in ${intent.category}`,
         }));
       }
     }
 
-    // Fallback: overall trending
-    const trending = await getTrending({ limit, windowDays: 30 });
-    return trending.map(p => ({ ...p, _reason: 'Trending now' }));
+    if (!data) {
+      // Fallback: overall trending
+      const trending = await getTrending({ limit, windowDays: 30 });
+      data = trending.map(p => ({ ...p, _reason: 'Trending now' }));
+    }
+
+    rescueCache.set(categoryKey, { data, fetchedAt: now });
+    return { data: [...data], cacheStatus: 'MISS' };
   } catch (err) {
     console.error('Zero-result rescue failed:', err.message);
-    return [];
+    return { data: [], cacheStatus: 'MISS' }; // not cached — see comment above
   }
 };
 
