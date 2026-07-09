@@ -145,6 +145,12 @@ const buildCatalogVocabulary = (candidates) => {
     const words = text.split(/\s+/).filter(Boolean);
     const uniqueWords = new Set(words);
     for (const w of uniqueWords) {
+      // Fine to skip <3-char words here: this vocabulary only feeds
+      // fuzzyCorrectToken, which already refuses targets under 4 chars, so a
+      // short word could never be picked as a correction target anyway.
+      // Literal product-term matching (wordMatch) reads product text
+      // directly and doesn't go through this map, so short terms like "pc"/
+      // "tv" still match real product names/categories fine.
       if (w.length < 3) continue;
       if (STOPWORDS.has(w)) continue;
       freq.set(w, (freq.get(w) || 0) + 1);
@@ -339,14 +345,25 @@ const extractPurpose = (text, purposeHints) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // extractProductTerms — meaningful product nouns (post stopword/color/number).
+//
+// A 2-char token the user actually TYPED ("pc", "tv", "ac") is a real product
+// term and must survive (1-char tokens still don't). But a 2-char token that
+// only appears because SYNONYM EXPANSION pulled in its group siblings must
+// keep the old >=3 floor — otherwise querying "laptop" would quietly gain
+// "pc" as an extra product term too (they share a synonym group), matching
+// stray products a plain "laptop" search never used to and breaking today's
+// results. So the floor is 2 for tokens present in the raw query, 3 for
+// tokens that only exist because of expansion.
 // ─────────────────────────────────────────────────────────────────────────────
 const extractProductTerms = (tokens, expandedTokens, colorList) => {
-  const meaningful = expandedTokens.filter(t =>
-    t.length >= 3 &&
-    !STOPWORDS.has(t) &&
-    !colorList.includes(t) &&
-    !/^\d+$/.test(t)
-  );
+  const rawTokenSet = new Set(tokens);
+  const meaningful = expandedTokens.filter(t => {
+    const minLength = rawTokenSet.has(t) ? 2 : 3;
+    return t.length >= minLength &&
+      !STOPWORDS.has(t) &&
+      !colorList.includes(t) &&
+      !/^\d+$/.test(t);
+  });
   return meaningful;
 };
 
