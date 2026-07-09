@@ -136,14 +136,22 @@ async function bruteForceScores(queryVector, threshold) {
 
 // ---------- the function the adapter calls ----------
 
-async function computeSemanticScores(query, config = {}) {
+// `timing`, if passed, is filled in with { embedMs, vectorMs } — used by the
+// adapter for the per-stage [search:timing] log. Optional and additive: every
+// existing 2-arg call site is unaffected.
+async function computeSemanticScores(query, config = {}, timing = null) {
+  const tEmbed0 = Date.now();
   const queryVector = await getQueryVector(query);
+  if (timing) timing.embedMs = Date.now() - tEmbed0;
   if (!queryVector) return {};
 
   const threshold = config.semanticThreshold != null ? config.semanticThreshold : 0.4;
 
+  const tVector0 = Date.now();
   try {
-    return await atlasVectorScores(queryVector, threshold);
+    const scores = await atlasVectorScores(queryVector, threshold);
+    if (timing) timing.vectorMs = Date.now() - tVector0;
+    return scores;
   } catch (err) {
     if (!warnedAtlasFallback) {
       console.warn(
@@ -153,7 +161,9 @@ async function computeSemanticScores(query, config = {}) {
       );
       warnedAtlasFallback = true;
     }
-    return await bruteForceScores(queryVector, threshold);
+    const scores = await bruteForceScores(queryVector, threshold);
+    if (timing) timing.vectorMs = Date.now() - tVector0;
+    return scores;
   }
 }
 

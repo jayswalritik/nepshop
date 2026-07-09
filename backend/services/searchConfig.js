@@ -32,6 +32,19 @@ module.exports = {
     ['waterproof', 'water resistant', 'water-resistant'],
   ],
 
+  // ── Abbreviation expansion (linguistic facts only) ──────────────────────────
+  // ENGLISH-LANGUAGE equivalences only — an abbreviation standing for its full
+  // phrase, never a product/category mapping (that lives in the catalog, not
+  // here). Unlike synonymGroups (a symmetric set of interchangeable words),
+  // each entry here is ONE-DIRECTIONAL: "ac" expands to "air conditioner", but
+  // searching "air conditioner" does not rewrite itself back to "ac".
+  abbreviations: {
+    pc:  'computer',
+    tv:  'television',
+    ac:  'air conditioner',
+    cam: 'camera',
+  },
+
   // ── Spell corrections (brand-name overrides only) ───────────────────────────
   spellCorrections: {
     'samsng':   'samsung',

@@ -12,7 +12,7 @@
  */
 
 const Product     = require('../models/Product');
-const { runSearch, buildCatalogVocabulary } = require('./searchEngine');
+const { runSearch, buildCatalogVocabulary, parseQuery } = require('./searchEngine');
 const config        = require('./searchConfig');
 const { getTrending } = require('./nepShopAdapter');  // reuse for zero-result rescue
 const { computeSemanticScores } = require('./semanticSearchService'); // Phase 2
@@ -43,6 +43,7 @@ const getAllSearchCandidates = async () =>
 // Returns the same shape as runSearch() plus a zeroResultRescue array if needed.
 // ─────────────────────────────────────────────────────────────────────────────
 const searchProducts = async (rawQuery, options = {}) => {
+  const tTotal0 = Date.now();
   const {
     limit          = config.defaultLimit,
     semanticScores = null,
@@ -50,6 +51,7 @@ const searchProducts = async (rawQuery, options = {}) => {
   } = options;
 
   if (!rawQuery || !rawQuery.trim()) {
+    console.log(`[search:timing] q="${rawQuery || ''}" total=${Date.now() - tTotal0}ms`);
     return {
       results:          [],
       understanding:    null,
@@ -62,7 +64,9 @@ const searchProducts = async (rawQuery, options = {}) => {
   }
 
   // Fetch all candidates from MongoDB — this is the live, current inventory.
+  const tFetch0 = Date.now();
   const candidates = await getAllSearchCandidates();
+  const fetchMs = Date.now() - tFetch0;
 
   // Build the spell-correction / relevance vocabulary directly from this
   // same live candidate set. Whatever products exist right now — including
@@ -71,6 +75,15 @@ const searchProducts = async (rawQuery, options = {}) => {
   // (e.g. one a teacher adds live during a demo) searchable and
   // typo-correctable instantly.
   const catalogVocabulary = buildCatalogVocabulary(candidates);
+
+  // ── Phase 3: abbreviation expansion ("ac" -> "air conditioner") ───────────
+  // Parsed once, early, purely to get the query text to embed/rescue with —
+  // runSearch() below re-parses internally (same deterministic inputs, so
+  // identical result) to build the full intent. When no abbreviation fires,
+  // expandedQuery is the untouched original text, so every other query's
+  // embedding input is byte-for-byte what it was before this existed.
+  const earlyIntent = parseQuery(rawQuery, config, catalogVocabulary);
+  const embedQuery   = earlyIntent.expandedQuery;
 
   // ── Phase 2: semantic scores ──────────────────────────────────────────────
   // Meaning-based similarity between the query and each product's stored
@@ -82,16 +95,19 @@ const searchProducts = async (rawQuery, options = {}) => {
   // If a caller supplied semanticScores (e.g. a test, or a future Phase 3 path),
   // we use those; otherwise we compute them here. The query is embedded via the
   // HF Space if HF_SPACE_URL is set, else in-Node — so this works right now.
+  const mainTiming = {};
   const effectiveSemanticScores =
-    semanticScores || (await computeSemanticScores(rawQuery, config));
+    semanticScores || (await computeSemanticScores(embedQuery, config, mainTiming));
 
   // Run the generic search pipeline
+  const tRun0 = Date.now();
   const searchResult = runSearch(candidates, rawQuery, config, {
     limit,
     semanticScores: effectiveSemanticScores,
     intentOverride,
     catalogVocabulary,
   });
+  const runMs = Date.now() - tRun0;
 
   // ── Phase 3: LLM query understanding — ONLY when the engine would
   // otherwise be guessing: it extracted no product terms at all (query is
@@ -105,22 +121,36 @@ const searchProducts = async (rawQuery, options = {}) => {
   // guard, not a flag to remember to check.
   let finalResult = searchResult;
   let interpretedAs = null;
+  let rescueLLMMs = null, rescueEmbedMs = null, rescueRunMs = null;
 
   const noProductTerms = !(searchResult.intent && searchResult.intent.productTerms &&
     searchResult.intent.productTerms.length);
   const shouldAskLLM = noProductTerms || searchResult.isZeroResult;
 
   if (shouldAskLLM) {
-    const understood = await understandQuery(rawQuery);
+    const reason = noProductTerms ? 'noProductTerms' : 'isZeroResult';
+    console.log(`[search:rescue] fired reason=${reason} query="${rawQuery}"${embedQuery !== rawQuery ? ` expandedQuery="${embedQuery}"` : ''}`);
+
+    const tLLM0 = Date.now();
+    const understood = await understandQuery(embedQuery); // CRITICAL: expanded, not raw — see Task 3
+    rescueLLMMs = Date.now() - tLLM0;
+
     if (understood && understood.terms.length) {
+      console.log(`[search:rescue] understandQuery -> terms=${JSON.stringify(understood.terms)}`);
+
       const rewrittenQuery = understood.terms.join(' ');
+      const tRescueEmbed0 = Date.now();
       const rewrittenSemanticScores = await computeSemanticScores(rewrittenQuery, config);
+      rescueEmbedMs = Date.now() - tRescueEmbed0;
+
+      const tRescueRun0 = Date.now();
       const rerunResult = runSearch(candidates, rewrittenQuery, config, {
         limit,
         semanticScores: rewrittenSemanticScores,
         intentOverride,
         catalogVocabulary,
       });
+      rescueRunMs = Date.now() - tRescueRun0;
 
       // Only adopt the LLM-assisted re-run if it actually found something —
       // an LLM query that finds nothing can never make the response worse
@@ -128,15 +158,38 @@ const searchProducts = async (rawQuery, options = {}) => {
       if (rerunResult.results.length > 0) {
         finalResult = rerunResult;
         interpretedAs = { original: rawQuery, terms: understood.terms };
+        console.log(`[search:rescue] rerun found ${rerunResult.results.length} result(s) -> ADOPTED`);
+      } else {
+        console.log(`[search:rescue] rerun found 0 results -> kept original result`);
       }
+    } else {
+      console.log(`[search:rescue] understandQuery -> ${understood === null ? 'null (unavailable/rejected)' : 'empty terms'}`);
     }
   }
 
   // If zero results, attach a rescue list from the recommendation system
+  let trendingMs = null;
   let zeroResultRescue = [];
   if (finalResult.isZeroResult) {
+    const tTrend0 = Date.now();
     zeroResultRescue = await getZeroResultRescue(finalResult.intent);
+    trendingMs = Date.now() - tTrend0;
   }
+
+  const totalMs = Date.now() - tTotal0;
+  const timingParts = [
+    `q="${rawQuery}"`,
+    `fetch=${fetchMs}ms`,
+    `embed=${mainTiming.embedMs || 0}ms`,
+    `vector=${mainTiming.vectorMs || 0}ms`,
+    `run=${runMs}ms`,
+  ];
+  if (rescueLLMMs   != null) timingParts.push(`rescueLLM=${rescueLLMMs}ms`);
+  if (rescueEmbedMs != null) timingParts.push(`rescueEmbed=${rescueEmbedMs}ms`);
+  if (rescueRunMs   != null) timingParts.push(`rescueRun=${rescueRunMs}ms`);
+  if (trendingMs    != null) timingParts.push(`trending=${trendingMs}ms`);
+  timingParts.push(`total=${totalMs}ms`);
+  console.log(`[search:timing] ${timingParts.join(' ')}`);
 
   return {
     ...finalResult,

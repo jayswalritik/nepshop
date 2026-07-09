@@ -17,21 +17,16 @@
  * (no config numbers changed — the existing semanticFloor/semanticTopMargin
  * are now just applied to weak matches too) is auditable against real data.
  *
- * NOTE ON SCOPE: two LLM-rescue behaviors observed during testing are NOT
- * addressed here because they are unrelated to these two fixes and
- * queryUnderstanding.js/its trigger must stay untouched per this task's
- * constraints:
- *   - "ac" now correctly finds ZERO literal/semantic catalog matches (the
- *     substring bug is gone), which legitimately triggers the existing LLM
- *     rescue. The LLM's own interpretation of the ambiguous abbreviation
- *     "ac" is imperfect (guesses "accessory"/"adapter" rather than "air
- *     conditioner"), so the end result is an LLM-assisted set rather than a
- *     hard zero. Verified this is a NEW EXPOSURE of existing, unmodified LLM
- *     behavior, not something these fixes get wrong.
- *   - "asdfgh" occasionally gets mis-interpreted by the LLM as tech terms
- *     instead of {"terms":[]}. Verified via git stash that this ALSO happens
- *     on the pre-fix code — pre-existing Groq response drift, not caused by
- *     this change.
+ * NOTE ON SCOPE (historical): an earlier version of this file noted that
+ * "ac" used to trigger the LLM rescue (which sometimes guessed "accessory"/
+ * "adapter" rather than "air conditioner") because the engine found zero
+ * matches on the bare 2-char token. That's superseded by the deterministic
+ * abbreviation expansion added in searchConfig.js (see the [Task: Abbreviation
+ * expansion] section below) — "ac" now resolves to "air conditioner" before
+ * either the literal matcher or the embedder ever sees it, so the LLM
+ * shouldn't need to guess at it anymore. The "asdfgh" LLM mis-interpretation
+ * note still applies — verified via git stash that it pre-dates all of this
+ * file's fixes; Groq response drift, not caused by this code.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -43,7 +38,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 // wordMatch itself isn't exported, so its short-token behavior is exercised
 // indirectly through partitionMatches (which IS exported and calls it).
-const { partitionMatches } = require('./services/searchEngine');
+const { partitionMatches, parseQuery, buildCatalogVocabulary } = require('./services/searchEngine');
 
 let pass = 0, fail = 0;
 const check = (label, condition, detail = '') => {
@@ -128,13 +123,70 @@ const run = async () => {
     }), JSON.stringify(budget.results.map(p => p.price)));
 
   // The LLM call has inherent network/model variance, so retry once before
-  // failing — a single transient miss here isn't a code regression.
+  // failing — a single transient miss here isn't a code regression. (With
+  // abbreviation expansion, "cam" now usually resolves directly without ever
+  // reaching the LLM — retried here only to absorb rare embedding hiccups.)
   let cam = await searchProducts('cam', { limit: 20 });
   if (!cam.results.some(p => /camera/i.test(p.name))) {
     cam = await searchProducts('cam', { limit: 20 });
   }
-  check('"cam" → LLM path still finds real cameras',
+  check('"cam" → still finds real cameras',
     cam.results.some(p => /camera/i.test(p.name)), JSON.stringify(cam.results.map(p => p.name)));
+
+  // ── [Task: Abbreviation expansion] ──────────────────────────────────────
+  console.log('\n[Abbreviations] Deterministic expansion (searchConfig.abbreviations)');
+
+  // Unit-level: parseQuery produces the expected expandedQuery, and a query
+  // with NO abbreviation is byte-for-byte unchanged (expandedQuery === raw).
+  const vocab = buildCatalogVocabulary(await Product.find({ isActive: true, stock: { $gt: 0 } }).select('name category').lean());
+  const pcIntent  = parseQuery('pc', config, vocab);
+  const tvIntent  = parseQuery('tv', config, vocab);
+  const acIntent  = parseQuery('ac', config, vocab);
+  const camIntent = parseQuery('cam', config, vocab);
+  const laptopIntent = parseQuery('laptop', config, vocab);
+  check('"pc" expands to "computer"',  pcIntent.expandedQuery === 'computer',  pcIntent.expandedQuery);
+  check('"tv" expands to "television"', tvIntent.expandedQuery === 'television', tvIntent.expandedQuery);
+  check('"ac" expands to "air conditioner"', acIntent.expandedQuery === 'air conditioner', acIntent.expandedQuery);
+  check('"cam" expands to "camera"', camIntent.expandedQuery === 'camera', camIntent.expandedQuery);
+  check('non-abbreviation query unchanged (expandedQuery === raw)',
+    laptopIntent.expandedQuery === 'laptop' && laptopIntent.abbreviationsApplied.length === 0,
+    laptopIntent.expandedQuery);
+
+  // E2E: "tv" → honest zero (no catalog TV, and the expansion must not
+  // reintroduce a leak of its own).
+  const tvE2E = await searchProducts('tv', { limit: 20 });
+  check('"tv" (expanded "television") → honest zero-result',
+    tvE2E.isZeroResult === true, JSON.stringify(tvE2E.results.map(p => p.name)));
+
+  // E2E: "pc" → expect MORE than the previous single-result baseline now
+  // that the embedder sees "computer" instead of the compressed-score
+  // abbreviation "pc" (see summary for the actual before/after numbers).
+  const pcE2E = await searchProducts('pc', { limit: 20 });
+  check('"pc" (expanded "computer") → more than 1 result, still laptops/computers only',
+    pcE2E.results.length > 1 && pcE2E.results.every(n => !/ssd|headphone|speaker/i.test(n.name)),
+    JSON.stringify(pcE2E.results.map(p => p.name)));
+
+  // E2E: "cam" → report what the catalog actually returns (informational,
+  // not a strict allow-list — see summary for discussion).
+  const camE2E = await searchProducts('cam', { limit: 20 });
+  console.log(`  INFO  "cam" (expanded "camera") catalog results: ${JSON.stringify(camE2E.results.map(p => p.name))}`);
+  check('"cam" (expanded "camera") → at least one real camera, no non-electronics leak',
+    camE2E.results.some(p => /camera/i.test(p.name)) &&
+    camE2E.results.every(p => p.category === 'Electronics'),
+    JSON.stringify(camE2E.results.map(p => `${p.name} [${p.category}]`)));
+
+  // E2E: "ac" → substring-to-"Acer" regression check (hard requirement, must
+  // pass) plus an INFORMATIONAL report of whatever else surfaces. The
+  // catalog has no air conditioners, so the honest-zero target can only be
+  // reached if nothing else in the catalog clears the (untouched, per this
+  // task's constraints) semantic floor for the phrase "air conditioner" —
+  // see summary for a real case where that floor is not tight enough.
+  const acE2E = await searchProducts('ac', { limit: 20 });
+  check('"ac" (expanded "air conditioner") → no substring match to "Acer"',
+    !acE2E.results.some(p => p.name === 'Acer Nitro V15'),
+    JSON.stringify(acE2E.results.map(p => p.name)));
+  console.log(`  INFO  "ac" (expanded "air conditioner") catalog results: ${JSON.stringify(acE2E.results.map(p => p.name))}` +
+    (acE2E.isZeroResult ? ' (honest zero)' : ' (NOT zero — see summary)'));
 
   console.log(`\n${pass} passed, ${fail} failed.`);
   process.exit(fail > 0 ? 1 : 0);

@@ -77,6 +77,18 @@ const normalizeText = (text) =>
 // ─────────────────────────────────────────────────────────────────────────────
 const wordMatch = (haystack, term) => {
   if (!term) return false;
+
+  // A multi-word term ("air conditioner") needs the WHOLE PHRASE present,
+  // not just one of its words independently — otherwise a generic word that
+  // happens to be part of the phrase ("air") would strong-match completely
+  // unrelated products using it in another sense ("Nike Air Jordan"). Phrase-
+  // boundary match, same technique already used by extractPurpose/
+  // matchesKeyword below for phrase keywords.
+  if (term.includes(' ')) {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(haystack);
+  }
+
   const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
   for (const w of words) {
     if (w === term) return true;
@@ -299,6 +311,38 @@ const expandSynonyms = (tokens, synonymGroups) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// expandAbbreviations — config-driven (linguistic), ONE-DIRECTIONAL: each
+// abbreviation token is REPLACED by its full phrase (kept as a single
+// element even when multi-word — see wordMatch's phrase-boundary handling),
+// never appended alongside the original short form. Replacing (not
+// appending) avoids two problems appending would cause: (a) the short
+// form's own literal-match quirks ("ac" still floating around as its own
+// 2-char term), and (b) an expansion that happens to also be a purpose-hint
+// keyword (e.g. "camera" is both cam's expansion AND a photography purpose
+// keyword) confusing parseQuery's purpose-word-stripping step, which only
+// keeps a purpose word in the literal-match gate when stripping it would
+// otherwise empty the set — a second surviving term (the short form) would
+// wrongly let it be stripped.
+//
+// Returns the replaced token list (used for BOTH literal-match expansion via
+// expandSynonyms below AND the embedding/rescue query string — see
+// parseQuery) plus which abbreviations actually fired, so the caller can
+// tell whether the query changed at all.
+// ─────────────────────────────────────────────────────────────────────────────
+const expandAbbreviations = (tokens, abbreviations) => {
+  const applied = []; // [{ from, to }] — only abbreviations that actually fired
+  const replacedTokens = tokens.map(token => {
+    const full = abbreviations[token];
+    if (full) {
+      applied.push({ from: token, to: full });
+      return full;
+    }
+    return token;
+  });
+  return { replacedTokens, applied };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // extractBudget — parses a price ceiling. Runs on ORIGINAL text (numbers and
 // words like "under" must not have been touched by spell-correction).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -382,8 +426,22 @@ const parseQuery = (rawQuery, config, catalogVocabulary) => {
   const { corrected, corrections: spellingFixes } =
     spellCorrect(normalized, config, catalogVocabulary);
 
-  const tokens         = corrected.split(/\s+/).filter(Boolean);
-  const expandedTokens = expandSynonyms(tokens, config.synonymGroups || []);
+  const tokens = corrected.split(/\s+/).filter(Boolean);
+
+  // Abbreviation expansion runs BEFORE synonym expansion (a replaced word
+  // could in principle also be caught by a synonym group). Tracks which
+  // abbreviations actually fired so the caller (the adapter) knows whether
+  // to embed/rescue with the raw text or the expanded one.
+  const { replacedTokens, applied: abbreviationsApplied } =
+    expandAbbreviations(tokens, config.abbreviations || {});
+  const expandedTokens = expandSynonyms(replacedTokens, config.synonymGroups || []);
+
+  // The query STRING to embed / hand to the LLM rescue: the same
+  // replacement, joined back into natural language ("ac" -> "air
+  // conditioner"). Falls back to the untouched original text when nothing
+  // was expanded, so every other query's embedding input is byte-for-byte
+  // unchanged.
+  const expandedQuery = abbreviationsApplied.length > 0 ? replacedTokens.join(' ') : raw;
 
   // Budget is parsed from the ORIGINAL text so a number like "2000" or a word
   // like "under" can never have been altered by spell-correction.
@@ -422,7 +480,7 @@ const parseQuery = (rawQuery, config, catalogVocabulary) => {
 
   return {
     raw, normalized, corrected, spellingFixes,
-    tokens, expandedTokens,
+    tokens, expandedTokens, expandedQuery, abbreviationsApplied,
     budget, color, purpose, productTerms, coreProductTerms,
     isBudgetQuery, isPremiumQuery,
   };
@@ -832,6 +890,7 @@ module.exports = {
   normalizeText,
   spellCorrect,
   expandSynonyms,
+  expandAbbreviations,
   extractBudget,
   extractColor,
   extractProductTerms,
