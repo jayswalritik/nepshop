@@ -330,65 +330,130 @@ const run = async () => {
     singleWordUnaffected.strong.length === 1, JSON.stringify(singleWordUnaffected.all.map(p => p.name)));
 
   // E2E: "tv" — single-word rescue terms ("monitor", "screen") must still
-  // find the real monitors. The Zenbook LAPTOP may or may not remain (it has
-  // a genuine literal "screen" match in its own name — a strong-but-wrong
-  // anchor, explicitly out of scope for the atomic-phrase fix and for the
-  // result filter alike) — so this asserts the monitors are present without
-  // asserting the Zenbook either way.
+  // find the real monitors.
+  //
+  // BONUS FINDING (positive, not a regression): the previous task explicitly
+  // left "Asus Zenbook Pro Dual Screen" as an accepted, out-of-scope
+  // survivor here (it has a genuine literal "screen" match — a strong-but-
+  // wrong anchor). This task's fix incidentally resolves it too: the
+  // rerun's gate is ["tv","monitor","display","screen"] — 4 independent
+  // single-word buckets (none share a synonym group) — so Zenbook's lone
+  // "screen" match is now correctly a PARTIAL match, demoted to weak. Its
+  // semantic score (0.559) clears corroboration, so it re-enters the pool —
+  // but strongMatchCount is now honestly 0 for this rerun (previously it was
+  // wrongly >0), so the EXISTING LLM result filter (built in an earlier,
+  // separate task) finally gets a chance to judge it and correctly vetoes
+  // it: "[search:filter] rescueRerun fired kept=2 dropped=1". Two previously
+  // separate, independently-built mechanisms now compose correctly because
+  // strongMatchCount is accurate. Documented, not asserted as a strict
+  // requirement (still depends on the LLM judge's call), so this checks the
+  // monitors are present and simply reports what happened to the Zenbook.
   const tvAtomic = await searchProducts('tv', { limit: 20 });
+  const tvNames = tvAtomic.results.map(p => p.name);
   check('"tv" rescue still finds the real monitors (single-word terms unaffected)',
-    tvAtomic.results.some(p => /monitor/i.test(p.name)),
-    JSON.stringify(tvAtomic.results.map(p => p.name)));
+    tvNames.some(p => /monitor/i.test(p)), JSON.stringify(tvNames));
+  console.log(`  INFO  "tv" full result: ${JSON.stringify(tvNames)} ` +
+    `(Zenbook ${tvNames.some(n => /zenbook/i.test(n)) ? 'PRESENT — LLM judged it relevant this time' : 'ABSENT — demoted + LLM-vetoed, see comment above'})`);
 
-  // E2E: "ac" — the flagship anchor-less bug. Confirms the MAIN filter
-  // itself does what it's supposed to (vetoes the wireless charger) via the
-  // captured log line — the actual deliverable of this task.
-  const acFilterLines = [];
-  const realLog3 = console.log;
-  console.log = (...args) => { acFilterLines.push(args.join(' ')); realLog3(...args); };
+  // ── [Task: Partial-match demotion] ───────────────────────────────────────
+  console.log('\n[PartialMatchDemotion] Group-based trigger (synonym-aware)');
+
+  // Unit-level: groupTermsBySynonym is the load-bearing distinction this
+  // task's fix depends on. A synonym-expanded single-concept gate ("shoes")
+  // must collapse to ONE bucket (demotion mathematically unreachable,
+  // regardless of how many literal terms it has); a directly-typed
+  // multi-word query ("air conditioner", neither word in any synonym group)
+  // must produce ONE bucket PER independent word.
+  const { groupTermsBySynonym } = require('./services/searchEngine');
+  const shoesBuckets = groupTermsBySynonym(['shoes', 'shoe', 'sneaker', 'sneakers', 'footwear'], config.synonymGroups);
+  check('"shoes" (5 synonym-expanded terms) collapses to exactly 1 bucket -> demotion unreachable',
+    shoesBuckets.length === 1, JSON.stringify(shoesBuckets));
+  const acBuckets = groupTermsBySynonym(['air', 'conditioner'], config.synonymGroups);
+  check('"air conditioner" (2 independent words, no shared synonym group) -> 2 buckets -> demotion applies',
+    acBuckets.length === 2, JSON.stringify(acBuckets));
+
+  // E2E: multi-token probes across categories, verifying the task's explicit
+  // requirement — legitimately-related partial matches SURVIVE corroboration
+  // (their semantic scores documented below) while absurd cross-category
+  // partial matches DROP. All three queries have 2+ independent buckets (no
+  // synonym-group overlap between their words).
+
+  // Probe 1 — Beauty & Health (weak-scoring category, per the task's
+  // explicit ask). No product literally has BOTH "lipstick" and "shade" in
+  // its name (strong=[]); "Red Lipstick" (matches "lipstick" only) is a
+  // demoted partial match that SURVIVES corroboration — a legitimately
+  // related product, correctly rescued by semantic similarity.
+  const lipstickResult = await searchProducts('lipstick shade', { limit: 20 });
+  const lipstickNames = lipstickResult.results.map(p => p.name);
+  console.log(`  INFO  "lipstick shade" (Beauty & Health) -> ${JSON.stringify(lipstickNames)}`);
+  check('"lipstick shade": demoted partial match "Red Lipstick" SURVIVES corroboration (legitimately related)',
+    lipstickNames.some(n => /red lipstick/i.test(n)), JSON.stringify(lipstickNames));
+
+  // Probe 2 — Sports & Outdoors, with a genuine ABSURD cross-category
+  // collision: "Cello Butterflow Ball Pen Pack of 10" [Books & Stationery]
+  // matches the "ball" bucket alone (via "Ball Pen"), same mechanism class
+  // as the original Nike Air Jordan bug. Must never appear for "cricket ball".
+  const cricketBallResult = await searchProducts('cricket ball', { limit: 20 });
+  const cricketBallNames = cricketBallResult.results.map(p => p.name);
+  console.log(`  INFO  "cricket ball" (Sports & Outdoors) -> ${JSON.stringify(cricketBallNames)}`);
+  check('"cricket ball": absurd cross-category partial match ("...Ball Pen...", Books & Stationery) DROPS',
+    !cricketBallNames.some(n => /ball pen/i.test(n)), JSON.stringify(cricketBallNames));
+  check('"cricket ball": the real Cricket Ball is present',
+    cricketBallNames.some(n => /^cricket ball$/i.test(n)), JSON.stringify(cricketBallNames));
+
+  // Probe 3 — Sports & Outdoors, no literal "football helmet" product exists
+  // (strong=[]). "Cricket Helmet" (matches "helmet" only) is a demoted
+  // partial match that SURVIVES corroboration here (0.696 vs cut 0.606,
+  // measured directly against the live catalog) — a second, contrasting
+  // "legitimate partial match survives" case, showing the outcome is driven
+  // by genuine semantic relatedness per query, not a fixed rule (probe 2's
+  // "cricket ball" had a much tighter cut and excluded its own cricket
+  // siblings; this one's looser cut, because no literal full match exists to
+  // inflate topSem, lets a related item through).
+  const footballHelmetResult = await searchProducts('football helmet', { limit: 20 });
+  const footballHelmetNames = footballHelmetResult.results.map(p => p.name);
+  console.log(`  INFO  "football helmet" (Sports & Outdoors) -> ${JSON.stringify(footballHelmetNames)}`);
+  check('"football helmet": demoted partial match "Cricket Helmet" SURVIVES corroboration (legitimately related)',
+    footballHelmetNames.some(n => /cricket helmet/i.test(n)), JSON.stringify(footballHelmetNames));
+
+  // E2E: "ac" — the flagship PARTIAL-MATCH bug (this task's actual subject).
+  // CATALOG NOTE: since the earlier diagnosis task, the catalog now has 2
+  // real air conditioners (LG, with the keyword in its name; Daikin,
+  // without). This SUPERSEDES the older "wireless charger" scenario tested
+  // in the previous (feature/llm-result-filter) task — "ac" now resolves
+  // directly to a genuine strong anchor (the LG AC), so the result filter
+  // correctly SKIPS rather than needing to fire, and the rescue never
+  // triggers at all (results aren't zero). The charger doesn't even compete.
   const acResult = await searchProducts('ac', { limit: 20 });
-  console.log = realLog3;
-
-  const acMainFilterLine = acFilterLines.find(l => l.startsWith('[search:filter] main'));
-  check('"ac": main filter FIRES and drops the wireless charger (the flagship bug)',
-    !!acMainFilterLine && acMainFilterLine.includes('fired') && / dropped=[1-9]/.test(acMainFilterLine),
-    acMainFilterLine || '(no [search:filter] line captured)');
-
-  // FIXED by fix/rescue-atomic-terms (was: informational-only, since the
-  // rescue used to surface "Nike Air Jordan 1 Red And Black"). Root cause:
-  // once the charger was dropped, this cascaded into the LLM rescue, whose
-  // rewrittenQuery construction (`understood.terms.join(' ')`) re-split the
-  // multi-word LLM term "air conditioner" back into independent single-word
-  // tokens — "air" alone then literal-matched "Nike Air Jordan" by name,
-  // a FAKE strong match that also wrongly exempted the rerun from the
-  // result filter. Fixed by feeding understood.terms straight through as
-  // intentOverride.productTerms/coreProductTerms for the rerun, so wordMatch's
-  // existing phrase-boundary handling (already used for abbreviation
-  // expansion) treats "air conditioner" as one atomic phrase instead of two
-  // independent words. Now a hard assertion, not just an INFO line.
-  check('"ac": end-to-end is an honest zero — no Nike Air Jordan or other literal-split leak',
-    acResult.results.length === 0 && acResult.isZeroResult === true && !acResult.interpretedAs,
-    JSON.stringify({ names: acResult.results.map(p => p.name), interpretedAs: acResult.interpretedAs }));
+  const acNames = acResult.results.map(p => p.name);
+  check('"ac" (expanded "air conditioner") -> both real ACs present, Nike Air Jordan GONE',
+    acNames.some(n => /LG.*Air Conditioner/i.test(n)) &&
+    acNames.some(n => /Daikin/i.test(n)) &&
+    !acNames.some(n => /Nike Air Jordan/i.test(n)),
+    JSON.stringify(acNames));
+  check('"ac" strongMatchCount=1 (only the LG AC, name-matches BOTH gate terms) -> filter correctly skips, no LLM needed',
+    acResult.strongMatchCount === 1, `strongMatchCount=${acResult.strongMatchCount}`);
 
   // ── Simulated LLM failure — filter must fail OPEN (Task 3 requirement) ──
-  // Same pattern as testQueryUnderstanding.js's Groq-unavailable test: a
-  // fresh child process (module-level consts read process.env at require
-  // time) with a typo'd Groq key AND an unreachable Ollama URL, so the WHOLE
-  // ollamaService.generate() chain returns null. With no LLM available at
-  // all, filterResults must fail open: "ac" must show the SAME unfiltered
-  // result as the pre-fix code (the wireless charger, KEPT).
+  // Self-contained/synthetic (not dependent on live catalog state, which has
+  // already shifted once this session): a fake anchor-less pool with one
+  // legitimate match and one junk item, run through filterResults directly
+  // in a FRESH child process (module-level consts in ollamaService read
+  // process.env once at require time) with a typo'd Groq key AND an
+  // unreachable Ollama URL, so the WHOLE generate() chain returns null.
+  // With no LLM available at all, filterResults must fail open: everything
+  // kept, nothing dropped.
   console.log('\n[ResultFilter] Simulated LLM failure -> filter fails open');
   const failOpenScript = `
-    const dns = require('dns');
-    dns.setDefaultResultOrder('ipv4first');
-    dns.setServers(['8.8.8.8', '1.1.1.1']);
     require('dotenv').config();
-    const mongoose = require('mongoose');
     (async () => {
-      await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI);
-      const { searchProducts } = require('./services/nepShopSearchAdapter');
-      const r = await searchProducts('ac', { limit: 20 });
-      console.log(JSON.stringify({ names: r.results.map(p => p.name), strongMatchCount: r.strongMatchCount }));
+      const { filterResults } = require('./services/resultFilter');
+      const pool = [
+        { _id: 'legit1', name: 'Test Product One', category: 'Electronics', description: 'A real match' },
+        { _id: 'junk1',  name: 'Test Product Two', category: 'Other',       description: 'Unrelated junk' },
+      ];
+      const result = await filterResults('test query', pool);
+      console.log(JSON.stringify(result));
       process.exit(0);
     })().catch(e => { console.error('CHILD_ERROR:', e.message); process.exit(1); });
   `;
@@ -406,8 +471,8 @@ const run = async () => {
     const lastLine = out.trim().split('\n').pop();
     const parsed = JSON.parse(lastLine);
     check('no crash, valid JSON back', true);
-    check('"ac" with NO LLM available: filter fails open, wireless charger is KEPT (identical to unfiltered)',
-      parsed.names.includes('Apple Airpower Wireless Charger'),
+    check('with NO LLM available: filter fails open (fired=false, both items kept, nothing dropped)',
+      parsed.fired === false && parsed.keptIds.length === 2 && parsed.droppedCount === 0,
       JSON.stringify(parsed));
     console.log(`  child result: ${lastLine}\n`);
   } catch (e) {

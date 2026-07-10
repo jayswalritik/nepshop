@@ -499,20 +499,74 @@ const parseQuery = (rawQuery, config, catalogVocabulary) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// groupTermsBySynonym — partitions gate terms into "concept buckets".
+// ─────────────────────────────────────────────────────────────────────────────
+// Terms that are mutual synonyms of ONE word (members of the same
+// config.synonymGroups entry) collapse into a single bucket — a product only
+// ever needs to match ANY ONE phrasing to genuinely BE that thing (e.g.
+// "shoes" expands to shoe/shoes/sneaker/sneakers/footwear: still one concept,
+// one bucket). A term with no group membership — including a multi-word
+// ATOMIC phrase from abbreviation expansion ("air conditioner"), which is
+// never itself registered as a synonym-group member — is its own singleton
+// bucket, because it represents an INDEPENDENT concept the query named on its
+// own (e.g. a directly-typed "air conditioner" tokenizes to ["air",
+// "conditioner"], neither of which shares a synonym group with the other:
+// 2 buckets).
+//
+// This distinction is what partitionMatches below uses to demote a PARTIAL
+// match without breaking every synonym-expanded single-concept query: a gate
+// with only ONE bucket (however many literal terms it contains) can never
+// trigger demotion — the same "mathematically unreachable" guarantee the
+// single-TERM case had, generalized to single-BUCKET.
+// ─────────────────────────────────────────────────────────────────────────────
+const groupTermsBySynonym = (terms, synonymGroups) => {
+  const buckets = [];
+  const assigned = new Set();
+
+  for (const term of terms) {
+    if (assigned.has(term)) continue;
+    const group = (synonymGroups || []).find(g => g.includes(term));
+    const bucket = group ? terms.filter(t => group.includes(t)) : [term];
+    bucket.forEach(t => assigned.add(t));
+    buckets.push(bucket);
+  }
+
+  return buckets;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // partitionMatches
 // ─────────────────────────────────────────────────────────────────────────────
-// Splits the pool by WHERE a product term was found:
-//   • strong = name or category match (the product IS this thing)
-//   • weak   = description-only match (the word merely appears in prose)
-// Returns { strong, weak, all }. Unlike the old version, weak matches are NOT
-// discarded when strong ones exist — they're kept (ranked lower via scoring),
-// so a laptop that says "laptop" only in its description still appears.
-// `strong` alone is used for category derivation to keep that signal clean.
+// Splits the pool by WHERE a product term was found, with PARTIAL-MATCH
+// DEMOTION for multi-BUCKET gates (see groupTermsBySynonym just above):
+//   • strong = the product's name/category wordMatches at least one term from
+//     EVERY bucket (for a single-bucket gate — including an ordinary
+//     single-term gate — this is just "matches that concept", via any of its
+//     synonym phrasings: today's exact behavior). The product IS this thing,
+//     always trusted, no corroboration.
+//   • weak   = description-only match, OR — only possible when there are 2+
+//     INDEPENDENT buckets — a name/category match on a PROPER SUBSET of the
+//     buckets. A single shared word is not enough evidence the product IS
+//     the multi-concept thing searched for (e.g. "air" alone in "Nike Air
+//     Jordan" for the query "air conditioner" — bucket ["air"] matched,
+//     bucket ["conditioner"] didn't), so a partial match is demoted into the
+//     weak pool and must clear the SAME semantic corroboration (semCut) as a
+//     bare description mention — no new/different threshold.
+//     For a single-bucket gate this branch is mathematically unreachable
+//     (a product can match at most all 1 bucket, never a "proper subset" of
+//     1), so single-concept queries — including every synonym-expanded one
+//     ("shoes", "pc", "gaming laptop under 200000") — are byte-identical to
+//     before by construction, not just single literal-term ones.
+// Returns { strong, weak, all }. `strong` alone is used for category
+// derivation (deriveCategoryFromMatches), so demoting a partial match also
+// means it no longer dilutes category dominance.
 // ─────────────────────────────────────────────────────────────────────────────
-const partitionMatches = (pool, productTerms) => {
+const partitionMatches = (pool, productTerms, synonymGroups = []) => {
   if (!productTerms || productTerms.length === 0) {
     return { strong: [], weak: [], all: pool };
   }
+
+  const buckets = groupTermsBySynonym(productTerms, synonymGroups);
 
   const strong = [];
   const weak = [];
@@ -522,12 +576,15 @@ const partitionMatches = (pool, productTerms) => {
     const category = normalizeText(p.category);
     const desc     = normalizeText(p.description || '');
 
-    const inName     = productTerms.some(t => wordMatch(name, t));
-    const inCategory = productTerms.some(t => wordMatch(category, t));
-    const inDesc     = productTerms.some(t => wordMatch(desc, t));
+    const matchesBucket = (bucket) => bucket.some(t => wordMatch(name, t) || wordMatch(category, t));
+    const matchedBucketCount = buckets.filter(matchesBucket).length;
+    const inDesc = productTerms.some(t => wordMatch(desc, t));
 
-    if (inName || inCategory) strong.push(p);
-    else if (inDesc)          weak.push(p);
+    if (matchedBucketCount === buckets.length) {
+      strong.push(p);
+    } else if (matchedBucketCount > 0 || inDesc) {
+      weak.push(p);
+    }
   }
 
   return { strong, weak, all: [...strong, ...weak] };
@@ -764,8 +821,11 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   const hasProductTerms = gateTerms.length > 0;
 
   // 3. Literal matches: strong = name/category (the product IS this thing —
-  // always trusted), weak = description-only (kept below, once corroborated).
-  const { strong, weak } = partitionMatches(activePool, gateTerms);
+  // always trusted), weak = description-only or a partial multi-concept
+  // match (kept below, once corroborated). synonymGroups lets partitionMatches
+  // tell "independent concepts" (demotable) apart from "one concept, several
+  // synonym phrasings" (never demoted) — see groupTermsBySynonym.
+  const { strong, weak } = partitionMatches(activePool, gateTerms, config.synonymGroups || []);
   const strongIds = new Set(strong.map(p => p._id?.toString()));
 
   // 4. Semantic matches — RELATIVE (adaptive) cutoff.
@@ -907,6 +967,7 @@ module.exports = {
   parseQuery,
   findMatchingCandidates,
   partitionMatches,
+  groupTermsBySynonym,
   deriveCategoryFromMatches,
   scoreSearchResult,
   buildSearchReason,
