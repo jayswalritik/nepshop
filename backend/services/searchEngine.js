@@ -429,19 +429,31 @@ const parseQuery = (rawQuery, config, catalogVocabulary) => {
   const tokens = corrected.split(/\s+/).filter(Boolean);
 
   // Abbreviation expansion runs BEFORE synonym expansion (a replaced word
-  // could in principle also be caught by a synonym group). Tracks which
-  // abbreviations actually fired so the caller (the adapter) knows whether
-  // to embed/rescue with the raw text or the expanded one.
+  // could in principle also be caught by a synonym group), and — critically —
+  // on `tokens`, which is already spell-corrected. Tracks which abbreviations
+  // actually fired so callers can tell whether the query changed at all.
   const { replacedTokens, applied: abbreviationsApplied } =
     expandAbbreviations(tokens, config.abbreviations || {});
   const expandedTokens = expandSynonyms(replacedTokens, config.synonymGroups || []);
 
-  // The query STRING to embed / hand to the LLM rescue: the same
-  // replacement, joined back into natural language ("ac" -> "air
-  // conditioner"). Falls back to the untouched original text when nothing
-  // was expanded, so every other query's embedding input is byte-for-byte
-  // unchanged.
-  const expandedQuery = abbreviationsApplied.length > 0 ? replacedTokens.join(' ') : raw;
+  // The single canonical query STRING for every stage that leaves this
+  // parser: the main semantic embedding, the LLM rescue's understandQuery
+  // call, and (transitively, since it's the rescue's own input) whatever the
+  // rescue re-embeds. Spell-corrected THEN abbreviation-expanded —
+  // `replacedTokens` is built from `tokens` (post spell-correction), so this
+  // is always both, in that order, never just one.
+  //
+  // This used to fall back to the untouched RAW text whenever no
+  // abbreviation fired, which silently discarded spell-correction for
+  // everything downstream of the parser: "laptopp" corrected fine for
+  // literal matching (intent.corrected = "laptop", shown correctly in the
+  // UI's correction banner), but got EMBEDDED as "laptopp" — compressing its
+  // semantic scores enough to fail the semCut corroboration gate for weak
+  // (description-only) matches and silently drop real laptops. Always using
+  // replacedTokens fixes this: when nothing was corrected or expanded,
+  // replacedTokens is element-wise identical to the original tokens, so
+  // untouched queries embed exactly as before (byte-for-byte unchanged).
+  const expandedQuery = replacedTokens.join(' ');
 
   // Budget is parsed from the ORIGINAL text so a number like "2000" or a word
   // like "under" can never have been altered by spell-correction.

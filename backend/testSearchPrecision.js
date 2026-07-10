@@ -97,12 +97,22 @@ const run = async () => {
     pcNames.length > 0 && pcNames.every(n => !/ssd|headphone|speaker/i.test(n)),
     JSON.stringify(pcNames));
 
+  // "tv" has two legitimate outcomes, and WHICH one occurs depends on LLM
+  // availability (outside this codebase's control), not on a code path we
+  // own: (a) the LLM rescue is unavailable/unhelpful -> honest zero + trending
+  // rescue, or (b) the LLM rescue succeeds (e.g. Groq suggests "monitor" /
+  // "screen") -> real, clearly-labeled results with interpretedAs set. Either
+  // is correct; what must NEVER happen is the OLD bug — a substring/plural
+  // leak (Acer, a speaker) with NO interpretedAs explaining it.
   const tv = await searchProducts('tv', { limit: 20 });
-  check('"tv" → honest zero-result (no catalog TV, no speaker leak)',
-    tv.isZeroResult === true, JSON.stringify(tv.results.map(p => p.name)));
-  check('"tv" → trending rescue attached',
-    Array.isArray(tv.zeroResultRescue) && tv.zeroResultRescue.length > 0,
-    `rescue.length=${tv.zeroResultRescue.length}`);
+  if (tv.isZeroResult) {
+    check('"tv" → honest zero-result + trending rescue (LLM rescue unavailable/unhelpful)',
+      Array.isArray(tv.zeroResultRescue) && tv.zeroResultRescue.length > 0,
+      `rescue.length=${tv.zeroResultRescue.length}`);
+  } else {
+    check('"tv" → LLM-assisted results are honestly labeled (interpretedAs present), no bare leak',
+      !!tv.interpretedAs, JSON.stringify({ names: tv.results.map(p => p.name), interpretedAs: tv.interpretedAs }));
+  }
 
   const ac = await searchProducts('ac', { limit: 20 });
   check('"ac" → no substring match to "Acer" (Acer Nitro V15 absent, or present only via a separate legitimate path)',
@@ -148,15 +158,21 @@ const run = async () => {
   check('"tv" expands to "television"', tvIntent.expandedQuery === 'television', tvIntent.expandedQuery);
   check('"ac" expands to "air conditioner"', acIntent.expandedQuery === 'air conditioner', acIntent.expandedQuery);
   check('"cam" expands to "camera"', camIntent.expandedQuery === 'camera', camIntent.expandedQuery);
-  check('non-abbreviation query unchanged (expandedQuery === raw)',
+  check('unaffected query unchanged (no correction, no abbreviation -> expandedQuery === raw)',
     laptopIntent.expandedQuery === 'laptop' && laptopIntent.abbreviationsApplied.length === 0,
     laptopIntent.expandedQuery);
 
-  // E2E: "tv" → honest zero (no catalog TV, and the expansion must not
-  // reintroduce a leak of its own).
+  // E2E: "tv" (expanded "television") — same two-legitimate-outcomes case as
+  // the [E2E] section above; the expansion itself must not introduce a NEW
+  // leak (an un-labeled result with no interpretedAs).
   const tvE2E = await searchProducts('tv', { limit: 20 });
-  check('"tv" (expanded "television") → honest zero-result',
-    tvE2E.isZeroResult === true, JSON.stringify(tvE2E.results.map(p => p.name)));
+  if (tvE2E.isZeroResult) {
+    check('"tv" (expanded "television") → honest zero-result',
+      true, JSON.stringify(tvE2E.results.map(p => p.name)));
+  } else {
+    check('"tv" (expanded "television") → LLM-assisted results honestly labeled',
+      !!tvE2E.interpretedAs, JSON.stringify({ names: tvE2E.results.map(p => p.name), interpretedAs: tvE2E.interpretedAs }));
+  }
 
   // E2E: "pc" → expect MORE than the previous single-result baseline now
   // that the embedder sees "computer" instead of the compressed-score
@@ -187,6 +203,43 @@ const run = async () => {
     JSON.stringify(acE2E.results.map(p => p.name)));
   console.log(`  INFO  "ac" (expanded "air conditioner") catalog results: ${JSON.stringify(acE2E.results.map(p => p.name))}` +
     (acE2E.isZeroResult ? ' (honest zero)' : ' (NOT zero — see summary)'));
+
+  // ── [Task: corrected-then-abbreviation-expanded canonical embedding] ────
+  // BUG: intent.expandedQuery (the string every downstream stage embeds/
+  // rescues with) used to fall back to the RAW, uncorrected text whenever no
+  // abbreviation fired — so "laptopp" corrected fine for literal matching
+  // (intent.corrected, the UI banner) but got EMBEDDED as "laptopp",
+  // compressing its semantic scores enough to fail the semCut corroboration
+  // gate for weak matches and silently drop/swap real laptops.
+  console.log('\n[Correction+Embedding] Spell-corrected query must reach the embedder');
+
+  const laptoppIntent = parseQuery('laptopp', config, vocab);
+  check('"laptopp" still spell-corrects to "laptop" (UI correction banner unaffected)',
+    laptoppIntent.corrected === 'laptop', laptoppIntent.corrected);
+  check('"laptopp" now EMBEDS as "laptop", not the raw misspelling',
+    laptoppIntent.expandedQuery === 'laptop', laptoppIntent.expandedQuery);
+
+  const laptoppE2E = await searchProducts('laptopp', { limit: 20 });
+  const laptopE2E  = await searchProducts('laptop', { limit: 20 });
+  check('"laptopp" returns the SAME products as "laptop" (same IDs, same order)',
+    JSON.stringify(laptoppE2E.results.map(p => p._id)) === JSON.stringify(laptopE2E.results.map(p => p._id)),
+    `laptopp=${JSON.stringify(laptoppE2E.results.map(p => p.name))} laptop=${JSON.stringify(laptopE2E.results.map(p => p.name))}`);
+
+  // Ordering: correction must run BEFORE abbreviation expansion. No word in
+  // the real searchConfig.spellCorrections currently corrects INTO an
+  // abbreviation key, so this is verified with a small synthetic config: if
+  // abbreviation expansion ran on the RAW (uncorrected) text, "pcc" would
+  // never match the "pc" abbreviation key at all and expandedQuery would
+  // stay "pcc" — only correct ordering produces "computer".
+  const syntheticConfig = {
+    ...config,
+    spellCorrections: { pcc: 'pc' },
+    abbreviations: { pc: 'computer' },
+  };
+  const orderingIntent = parseQuery('pcc', syntheticConfig, new Map());
+  check('correction runs BEFORE abbreviation expansion ("pcc" -> corrected "pc" -> expanded "computer")',
+    orderingIntent.corrected === 'pc' && orderingIntent.expandedQuery === 'computer',
+    JSON.stringify({ corrected: orderingIntent.corrected, expandedQuery: orderingIntent.expandedQuery }));
 
   // ── [Candidate cache] Two consecutive searches: 2nd must be a fast cache HIT
   // NOTE: by this point in the script the candidate cache is already warm
