@@ -36,9 +36,11 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 
 require('dotenv').config();
 const mongoose = require('mongoose');
+const { execFileSync } = require('child_process');
 // wordMatch itself isn't exported, so its short-token behavior is exercised
 // indirectly through partitionMatches (which IS exported and calls it).
 const { partitionMatches, parseQuery, buildCatalogVocabulary } = require('./services/searchEngine');
+const { filterResults } = require('./services/resultFilter');
 
 let pass = 0, fail = 0;
 const check = (label, condition, detail = '') => {
@@ -240,6 +242,144 @@ const run = async () => {
   check('correction runs BEFORE abbreviation expansion ("pcc" -> corrected "pc" -> expanded "computer")',
     orderingIntent.corrected === 'pc' && orderingIntent.expandedQuery === 'computer',
     JSON.stringify({ corrected: orderingIntent.corrected, expandedQuery: orderingIntent.expandedQuery }));
+
+  // ── [Task: LLM result filter] ────────────────────────────────────────────
+  // Path B: an LLM veto over result pools with NO strong (name/category)
+  // literal anchor, where the relative semantic cutoff has nothing real to
+  // calibrate against and near-floor noise leaks through.
+  console.log('\n[ResultFilter] LLM veto for anchor-less result pools');
+
+  // Unit-level: exercise filterResults directly against the RAW anchor-less
+  // candidate pool for "shampoo" (bypassing runSearch's own category-
+  // tightening/strong-anchor pipeline, which on THIS catalog already masks
+  // the bug via a keyword match on "Pantene ... Shampoo" — see the E2E check
+  // below). This proves the filter itself does what the task describes,
+  // independent of whether today's catalog happens to have a keyword match.
+  const allProductsForFilterTest = await Product.find({ isActive: true, stock: { $gt: 0 } })
+    .select('name description category').lean();
+  const shampooScores = await computeSemanticScores('shampoo', config);
+  const shampooCandidates = allProductsForFilterTest
+    .map(p => ({ p, score: shampooScores[p._id.toString()] || 0 }))
+    .filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(r => r.p);
+  const shampooFilterResult = await filterResults('shampoo', shampooCandidates);
+  const shampooKeptSet = new Set(shampooFilterResult.keptIds);
+  const shampooKeptNames = shampooCandidates.filter(p => shampooKeptSet.has(p._id.toString())).map(p => p.name);
+  check('[unit] "shampoo" anchor-less pool: filter fires', shampooFilterResult.fired,
+    JSON.stringify(shampooFilterResult));
+  check('[unit] "shampoo": both real shampoo products survive (one with the keyword, one without)',
+    shampooKeptNames.some(n => /shampoo/i.test(n)) && shampooKeptNames.some(n => /hair cleanser/i.test(n)),
+    JSON.stringify(shampooKeptNames));
+  check('[unit] "shampoo": no junk survives (laundry basket / cucumber / perfumes / cosmetics / etc.)',
+    !shampooKeptNames.some(n => /laundry|cucumber|nail polish|dolce|sink|eyeshadow|calvin klein|gucci|dior|mascara|pillow|egg|powder/i.test(n)),
+    JSON.stringify(shampooKeptNames));
+
+  // E2E byte-identical: queries that DO have a strong literal anchor must be
+  // completely unaffected — the filter must SKIP (not fire), zero added
+  // latency, same products, same order. Expected IDs verified via git stash
+  // against the pre-filter code.
+  const capturedFilterLines = [];
+  const realLog2 = console.log;
+  console.log = (...args) => { capturedFilterLines.push(args.join(' ')); realLog2(...args); };
+
+  const byteIdenticalCases = {
+    laptop:  ['6a46680b23d151d45d96a0ce', '6a46680b23d151d45d96a0d6', '6a46680b23d151d45d96a0c6', '6a46680b23d151d45d96a0d2', '6a46680b23d151d45d96a0ca', '6a492258102567e87577bdcb'],
+    pc:      ['6a46680b23d151d45d96a0ce', '6a46680b23d151d45d96a0d6', '6a46680b23d151d45d96a0c6', '6a46680b23d151d45d96a0ca', '6a46680b23d151d45d96a0d2', '6a492258102567e87577bdcb'],
+    shoes:   ['6a46680b23d151d45d96a0bc', '6a46680b23d151d45d96a0c1', '6a46680b23d151d45d96a0ad', '6a46680b23d151d45d96a0b2'],
+    watch:   ['6a4e69bd09440a87fa5f1992'],
+    shampoo: ['6a5048b56c171852d979a251', '6a5046cf6c171852d979a21f'],
+  };
+
+  for (const [q, expectedIds] of Object.entries(byteIdenticalCases)) {
+    capturedFilterLines.length = 0;
+    const r = await searchProducts(q, { limit: 20 });
+    const actualIds = r.results.map(p => p._id.toString());
+    check(`"${q}" byte-identical to pre-filter baseline (git-stash verified)`,
+      JSON.stringify(actualIds) === JSON.stringify(expectedIds),
+      `got=${JSON.stringify(r.results.map(p => p.name))}`);
+    const filterLine = capturedFilterLines.find(l => l.startsWith('[search:filter] main'));
+    check(`"${q}" filter skipped due to a strong literal anchor (strongMatchCount=${r.strongMatchCount}), zero LLM calls`,
+      !!filterLine && filterLine.includes('skipped(hasStrongMatch)'),
+      filterLine || '(no [search:filter] line captured)');
+  }
+
+  console.log = realLog2;
+
+  // E2E: "ac" — the flagship anchor-less bug. Confirms the MAIN filter
+  // itself does what it's supposed to (vetoes the wireless charger) via the
+  // captured log line — the actual deliverable of this task.
+  const acFilterLines = [];
+  const realLog3 = console.log;
+  console.log = (...args) => { acFilterLines.push(args.join(' ')); realLog3(...args); };
+  const acResult = await searchProducts('ac', { limit: 20 });
+  console.log = realLog3;
+
+  const acMainFilterLine = acFilterLines.find(l => l.startsWith('[search:filter] main'));
+  check('"ac": main filter FIRES and drops the wireless charger (the flagship bug)',
+    !!acMainFilterLine && acMainFilterLine.includes('fired') && / dropped=[1-9]/.test(acMainFilterLine),
+    acMainFilterLine || '(no [search:filter] line captured)');
+
+  // IMPORTANT, SEPARATE FINDING (not fixed here — see summary): once the
+  // charger is correctly dropped, this cascades into the PRE-EXISTING LLM
+  // query-understanding rescue, which never used to fire for "ac" at all
+  // (1 non-zero result was previously "good enough" to skip it). That
+  // rescue's rewrittenQuery construction (`understood.terms.join(' ')`)
+  // re-splits a multi-word LLM term like "air conditioner" back into
+  // independent single-word tokens ("air", "conditioner"), and "air" alone
+  // literal-matches unrelated products by name (e.g. "Nike Air Jordan").
+  // That bug pre-dates this task and lives in nepShopSearchAdapter.js's
+  // rescue wiring / wordMatch's phrase handling — both explicitly off-limits
+  // for this task's constraints — so it's reported here, not fixed. This
+  // line is informational, not a pass/fail assertion.
+  console.log(`  INFO  "ac" full end-to-end result: ${JSON.stringify(acResult.results.map(p => p.name))} ` +
+    `interpretedAs=${JSON.stringify(acResult.interpretedAs)}`);
+  console.log(`  INFO  if the above is not an honest zero + trending rescue, see the summary for a` +
+    ` separate, pre-existing rescue-rewrite bug this newly exposes (not fixed here, out of scope)`);
+
+  // ── Simulated LLM failure — filter must fail OPEN (Task 3 requirement) ──
+  // Same pattern as testQueryUnderstanding.js's Groq-unavailable test: a
+  // fresh child process (module-level consts read process.env at require
+  // time) with a typo'd Groq key AND an unreachable Ollama URL, so the WHOLE
+  // ollamaService.generate() chain returns null. With no LLM available at
+  // all, filterResults must fail open: "ac" must show the SAME unfiltered
+  // result as the pre-fix code (the wireless charger, KEPT).
+  console.log('\n[ResultFilter] Simulated LLM failure -> filter fails open');
+  const failOpenScript = `
+    const dns = require('dns');
+    dns.setDefaultResultOrder('ipv4first');
+    dns.setServers(['8.8.8.8', '1.1.1.1']);
+    require('dotenv').config();
+    const mongoose = require('mongoose');
+    (async () => {
+      await mongoose.connect(process.env.MONGO_URI || process.env.MONGODB_URI);
+      const { searchProducts } = require('./services/nepShopSearchAdapter');
+      const r = await searchProducts('ac', { limit: 20 });
+      console.log(JSON.stringify({ names: r.results.map(p => p.name), strongMatchCount: r.strongMatchCount }));
+      process.exit(0);
+    })().catch(e => { console.error('CHILD_ERROR:', e.message); process.exit(1); });
+  `;
+  try {
+    const out = execFileSync(
+      process.execPath,
+      ['-e', failOpenScript],
+      {
+        cwd: __dirname,
+        env: { ...process.env, GROQ_API_KEY: 'gsk_typo_broken_key_xxx', OLLAMA_URL: 'http://127.0.0.1:19999' },
+        timeout: 60000,
+        encoding: 'utf8',
+      }
+    );
+    const lastLine = out.trim().split('\n').pop();
+    const parsed = JSON.parse(lastLine);
+    check('no crash, valid JSON back', true);
+    check('"ac" with NO LLM available: filter fails open, wireless charger is KEPT (identical to unfiltered)',
+      parsed.names.includes('Apple Airpower Wireless Charger'),
+      JSON.stringify(parsed));
+    console.log(`  child result: ${lastLine}\n`);
+  } catch (e) {
+    check('no crash, valid JSON back', false, e.message);
+  }
 
   // ── [Candidate cache] Two consecutive searches: 2nd must be a fast cache HIT
   // NOTE: by this point in the script the candidate cache is already warm

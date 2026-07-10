@@ -17,6 +17,7 @@ const config        = require('./searchConfig');
 const { getTrending } = require('./nepShopAdapter');  // reuse for zero-result rescue
 const { computeSemanticScores } = require('./semanticSearchService'); // Phase 2
 const { understandQuery } = require('./queryUnderstanding'); // Phase 3: LLM rescue
+const { filterResults } = require('./resultFilter'); // Phase 4: anchor-less noise veto
 
 // ── Shared product projection ─────────────────────────────────────────────────
 // Include description for text matching; keep the rest lean.
@@ -57,6 +58,46 @@ const getAllSearchCandidates = async () => {
     .lean();
   candidateCache = { data, fetchedAt: now };
   return { data: [...data], cacheStatus: 'MISS' };
+};
+
+// ── LLM result filter — applied to a runSearch()-shaped result ───────────────
+// Fires ONLY when the result pool has ZERO strong (name/category) literal
+// matches — strongMatchCount is null for browse-style queries (no product
+// term at all; there's nothing for the LLM to judge relevance against) and a
+// real number otherwise, so `=== 0` alone already excludes both "has an
+// anchor" and "not a product-term query" cases. Any query with a strong
+// match: this function returns immediately, no LLM call, no added latency.
+//
+// `stage` is only used for the [search:filter] log line (main vs rescue
+// rerun) — decided independently each time it's called, per this task's
+// explicit rule that a rerun's exemption depends on ITS OWN strong matches,
+// never inherited from the original query's run.
+const applyResultFilter = async (stage, query, searchResult) => {
+  if (searchResult.strongMatchCount !== 0 || searchResult.results.length === 0) {
+    console.log(`[search:filter] ${stage} skipped(hasStrongMatch) kept=${searchResult.results.length} dropped=0`);
+    return { result: searchResult, filterMs: null };
+  }
+
+  const tFilter0 = Date.now();
+  const filterInfo = await filterResults(query, searchResult.results);
+  const filterMs = Date.now() - tFilter0;
+
+  if (!filterInfo.fired) {
+    const label = filterInfo.failedOpen ? `failedOpen(${filterInfo.skipReason})` : `skipped(${filterInfo.skipReason})`;
+    console.log(`[search:filter] ${stage} ${label} kept=${searchResult.results.length} dropped=0`);
+    return { result: searchResult, filterMs };
+  }
+
+  const keptSet = new Set(filterInfo.keptIds);
+  const filteredResults = searchResult.results.filter(p => keptSet.has(p._id?.toString()));
+  const filtered = {
+    ...searchResult,
+    results: filteredResults,
+    totalFound: Math.max(0, searchResult.totalFound - filterInfo.droppedCount),
+    isZeroResult: filteredResults.length === 0,
+  };
+  console.log(`[search:filter] ${stage} fired kept=${filteredResults.length} dropped=${filterInfo.droppedCount}`);
+  return { result: filtered, filterMs };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -132,13 +173,22 @@ const searchProducts = async (rawQuery, options = {}) => {
 
   // Run the generic search pipeline
   const tRun0 = Date.now();
-  const searchResult = runSearch(candidates, rawQuery, config, {
+  const rawSearchResult = runSearch(candidates, rawQuery, config, {
     limit,
     semanticScores: effectiveSemanticScores,
     intentOverride,
     catalogVocabulary,
   });
   const runMs = Date.now() - tRun0;
+
+  // ── Phase 4: LLM result filter — main path ────────────────────────────────
+  // Only ever consulted when this response has NO strong (name/category)
+  // anchor to trust; a query with any strong match costs nothing here (see
+  // applyResultFilter). Applied BEFORE the rescue-trigger check below, so a
+  // pool the filter empties out correctly cascades into the SAME rescue path
+  // an honest zero-literal-match would have — no separate handling needed.
+  const { result: searchResult, filterMs: mainFilterMs } =
+    await applyResultFilter('main', embedQuery, rawSearchResult);
 
   // ── Phase 3: LLM query understanding — ONLY when the engine would
   // otherwise be guessing: it extracted no product terms at all (query is
@@ -152,7 +202,7 @@ const searchProducts = async (rawQuery, options = {}) => {
   // guard, not a flag to remember to check.
   let finalResult = searchResult;
   let interpretedAs = null;
-  let rescueLLMMs = null, rescueEmbedMs = null, rescueRunMs = null;
+  let rescueLLMMs = null, rescueEmbedMs = null, rescueRunMs = null, rescueFilterMs = null;
 
   const noProductTerms = !(searchResult.intent && searchResult.intent.productTerms &&
     searchResult.intent.productTerms.length);
@@ -175,7 +225,7 @@ const searchProducts = async (rawQuery, options = {}) => {
       rescueEmbedMs = Date.now() - tRescueEmbed0;
 
       const tRescueRun0 = Date.now();
-      const rerunResult = runSearch(candidates, rewrittenQuery, config, {
+      const rawRerunResult = runSearch(candidates, rewrittenQuery, config, {
         limit,
         semanticScores: rewrittenSemanticScores,
         intentOverride,
@@ -183,9 +233,21 @@ const searchProducts = async (rawQuery, options = {}) => {
       });
       rescueRunMs = Date.now() - tRescueRun0;
 
-      // Only adopt the LLM-assisted re-run if it actually found something —
-      // an LLM query that finds nothing can never make the response worse
-      // than the honest zero/browse result the engine already had.
+      // ── Phase 4: LLM result filter — rescue rerun path ────────────────────
+      // Decided independently of the main path's outcome: whether THIS rerun
+      // is exempt depends on ITS OWN strong-match count, never inherited (a
+      // rerun that resolves to a strong literal anchor — e.g. "tv" rewritten
+      // to "television monitor screen" landing squarely in Electronics with a
+      // name match — costs nothing here; one that stays semantic-only, like
+      // the "tv" rerun mixing in a bare laptop, gets judged).
+      const { result: rerunResult, filterMs: rerunFilterMs } =
+        await applyResultFilter('rescueRerun', rewrittenQuery, rawRerunResult);
+      rescueFilterMs = rerunFilterMs;
+
+      // Only adopt the LLM-assisted re-run if it actually found something
+      // AFTER filtering — an LLM query (or filter) that finds nothing can
+      // never make the response worse than the honest zero/browse result the
+      // engine already had.
       if (rerunResult.results.length > 0) {
         finalResult = rerunResult;
         interpretedAs = { original: rawQuery, terms: understood.terms };
@@ -219,9 +281,11 @@ const searchProducts = async (rawQuery, options = {}) => {
     `vector=${mainTiming.vectorMs || 0}ms`,
     `run=${runMs}ms`,
   ];
+  if (mainFilterMs  != null) timingParts.push(`filterLLM=${mainFilterMs}ms`);
   if (rescueLLMMs   != null) timingParts.push(`rescueLLM=${rescueLLMMs}ms`);
   if (rescueEmbedMs != null) timingParts.push(`rescueEmbed=${rescueEmbedMs}ms`);
   if (rescueRunMs   != null) timingParts.push(`rescueRun=${rescueRunMs}ms`);
+  if (rescueFilterMs != null) timingParts.push(`rescueFilterLLM=${rescueFilterMs}ms`);
   if (trendingMs    != null) timingParts.push(`trending=${trendingMs}ms trendingCache=${trendingCacheStatus}`);
   timingParts.push(`total=${totalMs}ms`);
   console.log(`[search:timing] ${timingParts.join(' ')}`);

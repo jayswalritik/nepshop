@@ -766,6 +766,7 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   // 3. Literal matches: strong = name/category (the product IS this thing —
   // always trusted), weak = description-only (kept below, once corroborated).
   const { strong, weak } = partitionMatches(activePool, gateTerms);
+  const strongIds = new Set(strong.map(p => p._id?.toString()));
 
   // 4. Semantic matches — RELATIVE (adaptive) cutoff.
   // Consider the whole active pool (not just literal matches). Different
@@ -877,6 +878,18 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   const results    = withReasons.slice(0, limit);
   const totalFound = scored.length;
 
+  // How many of the RETURNED results have a real name/category anchor — i.e.
+  // does this response have anything trustworthy to calibrate against, or is
+  // it semantic-only noise-risk territory (see resultFilter.js, which uses
+  // this to decide whether an LLM relevance pass is warranted). null (not 0)
+  // for browse-style queries (no product term at all, e.g. budget/color-only)
+  // — `strong` is ALWAYS empty when hasProductTerms is false (partitionMatches
+  // short-circuits), so a numeric 0 there would be misread as "semantic-only,
+  // needs judging" when really there's no product concept to judge against.
+  const strongMatchCount = hasProductTerms
+    ? results.filter(p => strongIds.has(p._id?.toString())).length
+    : null;
+
   const understanding = buildUnderstanding(intent, derivedCategory);
 
   return {
@@ -885,6 +898,7 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
     intent: { ...intent, category: derivedCategory },
     totalFound,
     isZeroResult: results.length === 0,
+    strongMatchCount,
   };
 };
 
