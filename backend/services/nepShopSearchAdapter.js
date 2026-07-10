@@ -73,7 +73,11 @@ const getAllSearchCandidates = async () => {
 // explicit rule that a rerun's exemption depends on ITS OWN strong matches,
 // never inherited from the original query's run.
 const applyResultFilter = async (stage, query, searchResult) => {
-  if (searchResult.strongMatchCount !== 0 || searchResult.results.length === 0) {
+  if (searchResult.results.length === 0) {
+    console.log(`[search:filter] ${stage} skipped(emptyPool) kept=0 dropped=0`);
+    return { result: searchResult, filterMs: null };
+  }
+  if (searchResult.strongMatchCount !== 0) {
     console.log(`[search:filter] ${stage} skipped(hasStrongMatch) kept=${searchResult.results.length} dropped=0`);
     return { result: searchResult, filterMs: null };
   }
@@ -224,11 +228,32 @@ const searchProducts = async (rawQuery, options = {}) => {
       const rewrittenSemanticScores = await computeSemanticScores(rewrittenQuery, config);
       rescueEmbedMs = Date.now() - tRescueEmbed0;
 
+      // Literal matching for the rerun must NOT re-tokenize the joined
+      // string — that would split a multi-word LLM term ("air conditioner")
+      // back into independent single words, and "air" alone literal-matches
+      // unrelated products by name ("Nike Air Jordan 1 Red And Black"),
+      // producing a FAKE strong match that also wrongly exempts the rerun
+      // from the result filter (a strong-but-wrong anchor). wordMatch already
+      // treats any term containing a space as one atomic contiguous phrase —
+      // the same mechanism that already protects abbreviation expansion
+      // ("ac" -> "air conditioner") — so the fix is simply to feed
+      // understood.terms straight through AS the literal-match terms via
+      // intentOverride, instead of letting runSearch's own parseQuery
+      // re-derive productTerms by re-tokenizing rewrittenQuery. The semantic
+      // EMBEDDING above still uses the joined string on purpose — embedding
+      // a phrase list as text is fine; only literal matching needs to stop
+      // splitting phrases.
+      const rescueIntentOverride = {
+        ...(intentOverride || {}),
+        productTerms: understood.terms,
+        coreProductTerms: understood.terms,
+      };
+
       const tRescueRun0 = Date.now();
       const rawRerunResult = runSearch(candidates, rewrittenQuery, config, {
         limit,
         semanticScores: rewrittenSemanticScores,
-        intentOverride,
+        intentOverride: rescueIntentOverride,
         catalogVocabulary,
       });
       rescueRunMs = Date.now() - tRescueRun0;

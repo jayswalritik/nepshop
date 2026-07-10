@@ -306,6 +306,40 @@ const run = async () => {
 
   console.log = realLog2;
 
+  // ── [Task: Rescue atomic phrase terms] ───────────────────────────────────
+  // Unit-level: partitionMatches with a multi-word term must require the
+  // WHOLE PHRASE contiguously — never match a product whose name contains
+  // only ONE of the phrase's words. This is the exact mechanism the rescue
+  // rerun now relies on (via intentOverride.productTerms = understood.terms)
+  // instead of re-tokenizing the LLM's joined terms string.
+  console.log('\n[RescueAtomicTerms] Multi-word phrase terms match atomically');
+
+  const fakeNikeAir = [{ _id: 'n1', name: 'Nike Air Jordan 1 Red And Black', category: 'Clothing', description: '' }];
+  const phraseVsOneWord = partitionMatches(fakeNikeAir, ['air conditioner']);
+  check('multi-word term "air conditioner" does NOT match a name containing only "Air"',
+    phraseVsOneWord.all.length === 0, JSON.stringify(phraseVsOneWord.all.map(p => p.name)));
+
+  const fakeRealAc = [{ _id: 'a1', name: 'LG Dual Inverter Air Conditioner 1.5 Ton', category: 'Electronics', description: '' }];
+  const phraseVsContiguous = partitionMatches(fakeRealAc, ['air conditioner']);
+  check('multi-word term "air conditioner" DOES match a name containing the whole contiguous phrase',
+    phraseVsContiguous.strong.length === 1, JSON.stringify(phraseVsContiguous.all.map(p => p.name)));
+
+  const fakeFan = [{ _id: 'f1', name: 'Havells Ceiling Fan', category: 'Home & Kitchen', description: '' }];
+  const singleWordUnaffected = partitionMatches(fakeFan, ['fan']);
+  check('single-word rescue term ("fan") still matches exactly as before (unaffected by the phrase fix)',
+    singleWordUnaffected.strong.length === 1, JSON.stringify(singleWordUnaffected.all.map(p => p.name)));
+
+  // E2E: "tv" — single-word rescue terms ("monitor", "screen") must still
+  // find the real monitors. The Zenbook LAPTOP may or may not remain (it has
+  // a genuine literal "screen" match in its own name — a strong-but-wrong
+  // anchor, explicitly out of scope for the atomic-phrase fix and for the
+  // result filter alike) — so this asserts the monitors are present without
+  // asserting the Zenbook either way.
+  const tvAtomic = await searchProducts('tv', { limit: 20 });
+  check('"tv" rescue still finds the real monitors (single-word terms unaffected)',
+    tvAtomic.results.some(p => /monitor/i.test(p.name)),
+    JSON.stringify(tvAtomic.results.map(p => p.name)));
+
   // E2E: "ac" — the flagship anchor-less bug. Confirms the MAIN filter
   // itself does what it's supposed to (vetoes the wireless charger) via the
   // captured log line — the actual deliverable of this task.
@@ -320,22 +354,21 @@ const run = async () => {
     !!acMainFilterLine && acMainFilterLine.includes('fired') && / dropped=[1-9]/.test(acMainFilterLine),
     acMainFilterLine || '(no [search:filter] line captured)');
 
-  // IMPORTANT, SEPARATE FINDING (not fixed here — see summary): once the
-  // charger is correctly dropped, this cascades into the PRE-EXISTING LLM
-  // query-understanding rescue, which never used to fire for "ac" at all
-  // (1 non-zero result was previously "good enough" to skip it). That
-  // rescue's rewrittenQuery construction (`understood.terms.join(' ')`)
-  // re-splits a multi-word LLM term like "air conditioner" back into
-  // independent single-word tokens ("air", "conditioner"), and "air" alone
-  // literal-matches unrelated products by name (e.g. "Nike Air Jordan").
-  // That bug pre-dates this task and lives in nepShopSearchAdapter.js's
-  // rescue wiring / wordMatch's phrase handling — both explicitly off-limits
-  // for this task's constraints — so it's reported here, not fixed. This
-  // line is informational, not a pass/fail assertion.
-  console.log(`  INFO  "ac" full end-to-end result: ${JSON.stringify(acResult.results.map(p => p.name))} ` +
-    `interpretedAs=${JSON.stringify(acResult.interpretedAs)}`);
-  console.log(`  INFO  if the above is not an honest zero + trending rescue, see the summary for a` +
-    ` separate, pre-existing rescue-rewrite bug this newly exposes (not fixed here, out of scope)`);
+  // FIXED by fix/rescue-atomic-terms (was: informational-only, since the
+  // rescue used to surface "Nike Air Jordan 1 Red And Black"). Root cause:
+  // once the charger was dropped, this cascaded into the LLM rescue, whose
+  // rewrittenQuery construction (`understood.terms.join(' ')`) re-split the
+  // multi-word LLM term "air conditioner" back into independent single-word
+  // tokens — "air" alone then literal-matched "Nike Air Jordan" by name,
+  // a FAKE strong match that also wrongly exempted the rerun from the
+  // result filter. Fixed by feeding understood.terms straight through as
+  // intentOverride.productTerms/coreProductTerms for the rerun, so wordMatch's
+  // existing phrase-boundary handling (already used for abbreviation
+  // expansion) treats "air conditioner" as one atomic phrase instead of two
+  // independent words. Now a hard assertion, not just an INFO line.
+  check('"ac": end-to-end is an honest zero — no Nike Air Jordan or other literal-split leak',
+    acResult.results.length === 0 && acResult.isZeroResult === true && !acResult.interpretedAs,
+    JSON.stringify({ names: acResult.results.map(p => p.name), interpretedAs: acResult.interpretedAs }));
 
   // ── Simulated LLM failure — filter must fail OPEN (Task 3 requirement) ──
   // Same pattern as testQueryUnderstanding.js's Groq-unavailable test: a
