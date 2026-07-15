@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" width="420" height="120" role="img" aria-labelledby="nepshopLogoTitle nepshopLogoDesc">
+  <title id="nepshopLogoTitle">NepShop</title>
+  <desc id="nepshopLogoDesc">Horizontal NepShop lockup for light backgrounds.</desc>
+  <defs>
+    <linearGradient id="bgGrad2" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#1E1B4B"/>
+      <stop offset="100%" stop-color="#3730A3"/>
+    </linearGradient>
+    <radialGradient id="sunGrad2" cx="35%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#FDBA74"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </radialGradient>
+  </defs>
+  <rect x="10" y="10" width="100" height="100" rx="23" fill="url(#bgGrad2)"/>
+  <circle cx="90.5" cy="27.5" r="5.5" fill="url(#sunGrad2)"/>
+  <polyline points="40,85 40,35 56,65 64,56 80,85 80,35"
+            fill="none" stroke="#FFFFFF" stroke-width="11"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="134" y="78" font-family="Poppins, 'Segoe UI Semibold', 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="52" letter-spacing="-0.5">
+    <tspan fill="#1E1B4B">Nep</tspan><tspan fill="#F97316">Shop</tspan>
+  </text>
+</svg>

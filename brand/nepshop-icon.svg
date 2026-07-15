@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-labelledby="nepshopIconTitle nepshopIconDesc">
+  <title id="nepshopIconTitle">NepShop</title>
+  <desc id="nepshopIconDesc">NepShop monogram: a bold N whose diagonal stroke breaks into a mountain ridge, with a rising-sun accent at its shoulder.</desc>
+  <defs>
+    <linearGradient id="bgGrad" x1="15%" y1="0%" x2="85%" y2="100%">
+      <stop offset="0%" stop-color="#1E1B4B"/>
+      <stop offset="100%" stop-color="#3730A3"/>
+    </linearGradient>
+    <radialGradient id="sunGrad" cx="35%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#FDBA74"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </radialGradient>
+  </defs>
+  <rect width="200" height="200" rx="46" fill="url(#bgGrad)"/>
+  <circle cx="161" cy="35" r="11" fill="url(#sunGrad)"/>
+  <polyline points="60,150 60,50 92,110 108,92 140,150 140,50"
+            fill="none" stroke="#FFFFFF" stroke-width="22"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

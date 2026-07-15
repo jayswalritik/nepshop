@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" width="420" height="120" role="img" aria-labelledby="nepshopLogoDarkTitle nepshopLogoDarkDesc">
+  <title id="nepshopLogoDarkTitle">NepShop</title>
+  <desc id="nepshopLogoDarkDesc">Horizontal NepShop lockup for dark backgrounds.</desc>
+  <defs>
+    <radialGradient id="sunGrad3" cx="35%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#FDBA74"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </radialGradient>
+  </defs>
+  <circle cx="90.5" cy="27.5" r="5.5" fill="url(#sunGrad3)"/>
+  <polyline points="40,85 40,35 56,65 64,56 80,85 80,35"
+            fill="none" stroke="#FFFFFF" stroke-width="11"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="134" y="78" font-family="Poppins, 'Segoe UI Semibold', 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="52" letter-spacing="-0.5">
+    <tspan fill="#FFFFFF">Nep</tspan><tspan fill="#F97316">Shop</tspan>
+  </text>
+</svg>

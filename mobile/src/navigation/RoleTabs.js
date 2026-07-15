@@ -1,0 +1,26 @@
+import { Tabs } from 'expo-router';
+import { ROLE_NAV_CONFIG } from './roleNavConfig';
+import { COLORS } from '../constants/colors';
+
+// Shared tab-bar shell for every role. A role's app/(<role>)/_layout.js is
+// just `<RoleTabs role="..." />` — the tab list itself comes from the
+// registry, so it stays in one place.
+export default function RoleTabs({ role }) {
+  const config = ROLE_NAV_CONFIG[role];
+
+  return (
+    <Tabs
+      screenOptions={{
+        headerStyle: { backgroundColor: COLORS.primary },
+        headerTintColor: '#fff',
+        tabBarActiveTintColor: COLORS.accent,
+        tabBarInactiveTintColor: COLORS.tabInactive,
+        tabBarStyle: { backgroundColor: COLORS.background, borderTopColor: COLORS.border },
+      }}
+    >
+      {config.tabs.map((tab) => (
+        <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.title }} />
+      ))}
+    </Tabs>
+  );
+}
