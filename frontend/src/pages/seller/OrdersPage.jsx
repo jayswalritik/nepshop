@@ -18,7 +18,7 @@ const nextStatus = {
 };
 
 const SellerOrdersPage = () => {
-  const [orders, setOrders]     = useState([]);
+  const [orders, setOrders]     = useState([]); // actually shipments — kept name for minimal diff below
   const [loading, setLoading]   = useState(true);
   const [filter, setFilter]     = useState('');
   const [selected, setSelected] = useState(null);
@@ -41,11 +41,11 @@ const SellerOrdersPage = () => {
       const params = new URLSearchParams({ limit: 20 });
       if (filter) params.append('status', filter);
       const { data } = await API.get(`/orders/seller?${params}`);
-      setOrders(data.orders);
+      setOrders(data.shipments);
 
-      // Calculate stats from all orders (fetch without filter for stats)
+      // Calculate stats from all shipments (fetch without filter for stats)
       const allData = await API.get('/orders/seller?limit=100');
-      const all = allData.data.orders;
+      const all = allData.data.shipments;
       setStats({
         pending:    all.filter(o => o.status === 'pending').length,
         confirmed:  all.filter(o => o.status === 'confirmed').length,
@@ -179,16 +179,16 @@ const SellerOrdersPage = () => {
                   {/* Order ID */}
                   <td className="px-4 py-4">
                     <span className="font-mono text-sm font-medium text-gray-700">
-                      #{order._id.slice(-8).toUpperCase()}
+                      #{(order.order?._id || order._id).slice(-8).toUpperCase()}
                     </span>
                   </td>
 
                   {/* Customer */}
                   <td className="px-4 py-4">
                     <p className="text-sm font-medium text-gray-900">
-                      {order.customer?.firstName} {order.customer?.lastName}
+                      {order.order?.customer?.firstName} {order.order?.customer?.lastName}
                     </p>
-                    <p className="text-xs text-gray-400">{order.customer?.phone}</p>
+                    <p className="text-xs text-gray-400">{order.order?.customer?.phone}</p>
                   </td>
 
                   {/* Items */}
@@ -216,7 +216,7 @@ const SellerOrdersPage = () => {
                   {/* Total */}
                   <td className="px-4 py-4">
                     <p className="text-sm font-semibold text-gray-900">
-                      Rs {order.total.toLocaleString()}
+                      Rs {(order.sellerSubtotal + order.deliveryCharge).toLocaleString()}
                     </p>
                     <p className="text-xs text-gray-400">
                       Commission: Rs {order.commissionAmount}
@@ -226,7 +226,7 @@ const SellerOrdersPage = () => {
                   {/* Payment */}
                   <td className="px-4 py-4">
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                      {order.paymentMethod.replace(/_/g, ' ')}
+                      {order.order?.paymentMethod?.replace(/_/g, ' ')}
                     </span>
                   </td>
 
@@ -270,7 +270,7 @@ const SellerOrdersPage = () => {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="font-bold text-gray-900">
-                  Order #{selected._id.slice(-8).toUpperCase()}
+                  Order #{(selected.order?._id || selected._id).slice(-8).toUpperCase()}
                 </h3>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {new Date(selected.createdAt).toLocaleDateString('en-NP', {
@@ -286,21 +286,21 @@ const SellerOrdersPage = () => {
             <div className="bg-gray-50 rounded-xl p-4 mb-4">
               <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Customer</p>
               <p className="text-sm font-medium text-gray-900">
-                {selected.customer?.firstName} {selected.customer?.lastName}
+                {selected.order?.customer?.firstName} {selected.order?.customer?.lastName}
               </p>
-              <p className="text-sm text-gray-500">{selected.customer?.phone}</p>
+              <p className="text-sm text-gray-500">{selected.order?.customer?.phone}</p>
             </div>
 
             {/* Delivery address */}
             <div className="bg-gray-50 rounded-xl p-4 mb-4">
               <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Delivery Address</p>
-              <p className="text-sm text-gray-700">{selected.deliveryAddress.fullName}</p>
-              <p className="text-sm text-gray-500">{selected.deliveryAddress.phone}</p>
+              <p className="text-sm text-gray-700">{selected.order?.deliveryAddress?.fullName}</p>
+              <p className="text-sm text-gray-500">{selected.order?.deliveryAddress?.phone}</p>
               <p className="text-sm text-gray-500">
-                {selected.deliveryAddress.street}, {selected.deliveryAddress.city}, {selected.deliveryAddress.district}
+                {selected.order?.deliveryAddress?.street}, {selected.order?.deliveryAddress?.city}, {selected.order?.deliveryAddress?.district}
               </p>
-              {selected.deliveryAddress.landmark && (
-                <p className="text-xs text-gray-400 mt-1">Near: {selected.deliveryAddress.landmark}</p>
+              {selected.order?.deliveryAddress?.landmark && (
+                <p className="text-xs text-gray-400 mt-1">Near: {selected.order.deliveryAddress.landmark}</p>
               )}
             </div>
 
@@ -328,7 +328,7 @@ const SellerOrdersPage = () => {
             <div className="bg-indigo-50 rounded-xl p-4 mb-4">
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-gray-500">Product subtotal</span>
-                <span>Rs {selected.subtotal.toLocaleString()}</span>
+                <span>Rs {selected.sellerSubtotal.toLocaleString()}</span>
               </div>
               <div className="flex justify-between text-sm mb-2">
                 <span className="text-gray-500">Commission ({selected.commissionRate}%)</span>
@@ -337,7 +337,7 @@ const SellerOrdersPage = () => {
               <div className="flex justify-between font-bold border-t border-indigo-100 pt-2 mb-3">
                 <span>Your earnings</span>
                 <span className="text-green-600">
-                  Rs {(selected.subtotal - selected.commissionAmount).toLocaleString()}
+                  Rs {(selected.sellerSubtotal - selected.commissionAmount).toLocaleString()}
                 </span>
               </div>
 
@@ -354,10 +354,10 @@ const SellerOrdersPage = () => {
             </div>
 
             {/* Customer note */}
-            {selected.customerNote && (
+            {selected.order?.customerNote && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4">
                 <p className="text-xs font-semibold text-yellow-700 mb-1">Customer Note</p>
-                <p className="text-sm text-yellow-800 italic">{selected.customerNote}</p>
+                <p className="text-sm text-yellow-800 italic">{selected.order.customerNote}</p>
               </div>
             )}
 
@@ -382,8 +382,13 @@ const SellerOrdersPage = () => {
                 >
                   <option value="">Select agent</option>
                   {agents.map((agent) => (
-                    <option key={agent._id} value={agent._id}>
-                      {agent.firstName} {agent.lastName} — {agent.vehicleType}
+                    <option
+                      key={agent._id}
+                      value={agent._id}
+                      style={{ color: agent.isAvailable ? '#111827' : '#9ca3af' }}
+                    >
+                      {agent.isAvailable ? '🟢' : '⚪'} {agent.firstName} {agent.lastName} — {agent.vehicleType}
+                      {agent.isAvailable ? ' (Available)' : ' (Offline)'}
                     </option>
                   ))}
                 </select>

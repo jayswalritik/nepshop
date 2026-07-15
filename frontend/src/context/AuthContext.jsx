@@ -39,7 +39,28 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('nepshop_user', JSON.stringify(userData));
   };
 
+  // Merges partial fields into the cached user (state + localStorage) —
+  // used for optimistic updates (e.g. delivery agent availability) without
+  // a full re-login.
+  const updateUser = (partial) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...partial };
+      localStorage.setItem('nepshop_user', JSON.stringify(next));
+      return next;
+    });
+  };
+
   const logout = () => {
+    // No backend session/logout endpoint exists — JWTs are stateless and
+    // logout is purely client-side token-clearing. Best-effort: for a
+    // delivery agent, flip them offline server-side BEFORE the token is
+    // removed (the request needs it to authenticate). Fire-and-forget —
+    // never blocks logout on network latency.
+    if (user?.activeRole === 'delivery' || (!user?.activeRole && user?.role === 'delivery')) {
+      API.put('/delivery/availability', { isAvailable: false }).catch(() => {});
+    }
+
     setUser(null);
     setToken(null);
     localStorage.removeItem('nepshop_token');
@@ -47,7 +68,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, logout, updateUser, loading }}>
       {children}
     </AuthContext.Provider>
   );

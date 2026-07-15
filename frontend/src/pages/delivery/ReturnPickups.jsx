@@ -130,14 +130,14 @@ const ReturnPickups = () => {
                 </div>
                 <div className="bg-green-50 rounded-lg p-3">
                   <p className="text-xs font-semibold text-green-700 mb-1">🏪 Deliver TO (Seller)</p>
-                  {r.order?.pickupAddress?.shopName ? (
+                  {r.shipment?.pickupAddress?.shopName ? (
                     <>
-                      <p className="text-xs font-medium text-green-800">{r.order.pickupAddress.shopName}</p>
+                      <p className="text-xs font-medium text-green-800">{r.shipment.pickupAddress.shopName}</p>
                       <p className="text-xs text-green-600">
-                        {r.order.pickupAddress.street}, {r.order.pickupAddress.city}
+                        {r.shipment.pickupAddress.street}, {r.shipment.pickupAddress.city}
                       </p>
-                      {r.order.pickupAddress.phone && (
-                        <p className="text-xs text-green-600">📞 {r.order.pickupAddress.phone}</p>
+                      {r.shipment.pickupAddress.phone && (
+                        <p className="text-xs text-green-600">📞 {r.shipment.pickupAddress.phone}</p>
                       )}
                     </>
                   ) : (

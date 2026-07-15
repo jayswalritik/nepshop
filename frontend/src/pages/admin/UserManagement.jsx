@@ -25,6 +25,8 @@ const UserManagement = () => {
   const [actionLoading, setActionLoading] = useState(null);
   const [activeSubTab, setActiveSubTab]   = useState('all');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deactivatePreview, setDeactivatePreview] = useState(null); // { seller, inFlightCount, byStatus }
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -60,6 +62,34 @@ const UserManagement = () => {
       setActionLoading(null);
     }
   };
+
+  // Seller deactivation — two-step: precheck in-flight shipments, show the
+  // warning dialog, and only then hit the (existing) suspend endpoint — it's
+  // already been extended server-side to also hide the seller's products.
+  const openDeactivateFlow = async (user) => {
+    setPreviewLoading(true);
+    try {
+      const { data } = await API.get(`/admin/users/${user._id}/deactivation-preview`);
+      setDeactivatePreview({ seller: user, inFlightCount: data.inFlightCount, byStatus: data.byStatus });
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to check seller status');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const confirmDeactivate = async () => {
+    if (!deactivatePreview) return;
+    await handleAction(deactivatePreview.seller._id, 'suspend');
+    setDeactivatePreview(null);
+  };
+
+  // Seller rows show "Deactivated" instead of the generic "Suspended" label
+  // (same underlying status value — just clearer for this specific action).
+  const statusLabel = (u) =>
+    (u.role === 'seller' && u.status === 'suspended')
+      ? 'Deactivated'
+      : u.status.charAt(0).toUpperCase() + u.status.slice(1);
 
   // Filter logic
   const filtered = users.filter(u => {
@@ -97,6 +127,20 @@ const UserManagement = () => {
     if (user.status === 'rejected') {
       buttons.push({ label: '↩ Move to Pending', action: 'undoreject', style: 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600' });
     }
+
+    // Sellers: no hard delete, no plain one-click suspend — deactivation
+    // goes through the precheck + warning flow instead. Every other role
+    // keeps today's exact Suspend/Reactivate/Delete behavior, unchanged.
+    if (user.role === 'seller') {
+      if (user.status === 'active') {
+        buttons.push({ label: '🚫 Deactivate', action: 'deactivate-seller', style: 'bg-red-50 hover:bg-red-100 text-red-600' });
+      }
+      if (user.status === 'suspended') {
+        buttons.push({ label: '✓ Reactivate',  action: 'reactivate', style: 'bg-green-50 hover:bg-green-100 text-green-600' });
+      }
+      return buttons;
+    }
+
     if (user.status === 'active') {
       buttons.push({ label: '🚫 Suspend',     action: 'suspend',    style: 'bg-orange-50 hover:bg-orange-100 text-orange-600' });
     }
@@ -202,7 +246,12 @@ const UserManagement = () => {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map((u) => (
-                <tr key={u._id} className="hover:bg-gray-50 transition-colors">
+                <tr
+                  key={u._id}
+                  className={`hover:bg-gray-50 transition-colors ${
+                    u.role === 'seller' && u.status === 'suspended' ? 'bg-gray-50 opacity-70' : ''
+                  }`}
+                >
                   {/* User */}
                   <td className="px-4 py-4">
                     <div className="flex items-center gap-3">
@@ -229,7 +278,7 @@ const UserManagement = () => {
                   {/* Status */}
                   <td className="px-4 py-4">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[u.status]}`}>
-                      {u.status.charAt(0).toUpperCase() + u.status.slice(1)}
+                      {statusLabel(u)}
                     </span>
                   </td>
 
@@ -299,7 +348,7 @@ const UserManagement = () => {
                     {selected.role}
                   </span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[selected.status]}`}>
-                    {selected.status}
+                    {statusLabel(selected)}
                   </span>
                 </div>
               </div>
@@ -405,14 +454,21 @@ const UserManagement = () => {
                   onClick={() => {
                     if (btn.action === 'delete') {
                       setConfirmDelete(selected);
+                    } else if (btn.action === 'deactivate-seller') {
+                      openDeactivateFlow(selected);
                     } else {
                       handleAction(selected._id, btn.action);
                     }
                   }}
-                  disabled={actionLoading === selected._id + '_' + btn.action}
+                  disabled={
+                    actionLoading === selected._id + '_' + btn.action ||
+                    (btn.action === 'deactivate-seller' && previewLoading)
+                  }
                   className={`w-full py-2.5 rounded-xl text-sm font-medium transition-all disabled:opacity-60 ${btn.style}`}
                 >
-                  {actionLoading === selected._id + '_' + btn.action
+                  {btn.action === 'deactivate-seller' && previewLoading
+                    ? 'Checking...'
+                    : actionLoading === selected._id + '_' + btn.action
                     ? 'Processing...'
                     : btn.label}
                 </button>
@@ -455,6 +511,61 @@ const UserManagement = () => {
                 className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium py-2.5 transition-all"
               >
                 {actionLoading === confirmDelete._id + '_delete' ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Seller deactivation warning dialog — shows in-flight shipment counts
+          from the precheck before the admin can confirm */}
+      {deactivatePreview && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl">
+            <div className="text-3xl text-center mb-3">🚫</div>
+            <h3 className="text-lg font-bold text-gray-900 text-center mb-2">Deactivate Seller?</h3>
+            <p className="text-sm font-semibold text-gray-900 text-center mb-1">
+              {deactivatePreview.seller.shopName || `${deactivatePreview.seller.firstName} ${deactivatePreview.seller.lastName}`}
+            </p>
+            <p className="text-xs text-gray-400 text-center mb-4">{deactivatePreview.seller.email}</p>
+
+            {deactivatePreview.inFlightCount > 0 ? (
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-4">
+                <p className="text-sm text-orange-800 text-center">
+                  ⚠️ This seller has <strong>{deactivatePreview.inFlightCount}</strong> shipment
+                  {deactivatePreview.inFlightCount > 1 ? 's' : ''} in progress (
+                  {Object.entries(deactivatePreview.byStatus)
+                    .filter(([, count]) => count > 0)
+                    .map(([status, count]) => `${count} ${status}`)
+                    .join(', ')}
+                  ). Deactivating blocks their login — these orders may be stranded.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 text-center mb-4">
+                No shipments currently in progress for this seller.
+              </p>
+            )}
+
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-5">
+              <p className="text-xs text-red-700 text-center">
+                Their products will be hidden platform-wide and their login blocked. This can be reversed anytime with Reactivate.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeactivatePreview(null)}
+                className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:border-gray-300 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeactivate}
+                disabled={actionLoading === deactivatePreview.seller._id + '_suspend'}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded-xl text-sm font-medium py-2.5 transition-all"
+              >
+                {actionLoading === deactivatePreview.seller._id + '_suspend' ? 'Deactivating...' : 'Deactivate anyway'}
               </button>
             </div>
           </div>

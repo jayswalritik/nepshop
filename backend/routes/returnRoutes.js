@@ -3,6 +3,8 @@ const {
   requestReturn,
   getMyReturns,
   getAllReturns,
+  previewReturn,
+  getReturnPreview,
   processReturn,
   getMyReturnPickups,
   markReturnPickedUp,
@@ -16,8 +18,9 @@ router.use(protect);
 router.use(requireActive);
 
 // Customer
-router.post('/',  authorizeRoles('customer'), requestReturn);
-router.get('/my', authorizeRoles('customer'), getMyReturns);
+router.post('/',        authorizeRoles('customer'), requestReturn);
+router.post('/preview', authorizeRoles('customer'), previewReturn);
+router.get('/my',       authorizeRoles('customer'), getMyReturns);
 
 // Delivery agent — specific routes BEFORE any /:id routes
 router.get('/pickups', authorizeRoles('delivery'), getMyReturnPickups);
@@ -26,6 +29,7 @@ router.get('/pickups', authorizeRoles('delivery'), getMyReturnPickups);
 router.get('/', authorizeRoles('admin'), getAllReturns);
 
 // Parameterized routes (must come after specific paths above)
+router.get('/:id/preview',  authorizeRoles('admin'),    getReturnPreview);
 router.put('/:id/process',  authorizeRoles('admin'),    processReturn);
 router.put('/:id/pickup',   authorizeRoles('delivery'), markReturnPickedUp);
 router.put('/:id/complete', authorizeRoles('delivery'), completeReturn);

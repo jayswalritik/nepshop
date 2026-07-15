@@ -1,7 +1,14 @@
 const asyncHandler = require('express-async-handler');
-const Order = require('../models/Order');
-const Cart = require('../models/Cart');
-const Product = require('../models/Product');
+const Order    = require('../models/Order');
+const Shipment = require('../models/Shipment');
+const Cart     = require('../models/Cart');
+const Product  = require('../models/Product');
+const User     = require('../models/User');
+
+const { groupItemsBySeller, allocateCouponDiscount, round2 } = require('../utils/orderPricing');
+const { recomputeOrder, buildShipmentEmailView } = require('../utils/orderAggregate');
+const { isSelected } = require('../utils/cartSelection');
+const { cancelShipment, finalizeOrderCancellation } = require('../utils/shipmentCancellation');
 
 const {
   sendOrderPlacedEmail,
@@ -11,7 +18,6 @@ const {
   sendDeliveryAssignedEmail,
   sendLowStockEmail,
 } = require('../utils/emailService');
-const User = require('../models/User');
 
 
 
@@ -39,9 +45,18 @@ const placeOrder = asyncHandler(async (req, res) => {
     throw new Error('Your cart is empty');
   }
 
+  // Selective checkout — only SELECTED items flow into the order. Everything
+  // else (pricing, coupon, stock, cart-clearing) below is scoped to this
+  // subset; unselected items are left untouched in the cart.
+  const selectedItems = cart.items.filter(isSelected);
+  if (selectedItems.length === 0) {
+    res.status(400);
+    throw new Error('Select at least one item to check out');
+  }
+
   // Validate stock and build order items
   const orderItems = [];
-  for (const item of cart.items) {
+  for (const item of selectedItems) {
     const product = item.product;
     if (!product || !product.isActive) {
       res.status(400);
@@ -61,33 +76,34 @@ const placeOrder = asyncHandler(async (req, res) => {
     });
   }
 
-  // Calculate pricing
-  const subtotal       = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const deliveryCharge = subtotal >= 2000 ? 0 : 100; // Free delivery above Rs 2000
+  // Calculate pricing — grouped per seller (Daraz-style per-seller-group delivery)
   const commissionRate = 5;
-  // Commission is ALWAYS on the real product subtotal — coupon never reduces it
-  const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2);
+  const { groups, subtotal, deliveryCharge, commissionAmount } = groupItemsBySeller(orderItems, commissionRate);
 
   // ── Apply coupon (platform-funded) ──────────────────────
+  // Atomic redeem: checks + consumes global usageLimit AND this customer's
+  // perUserLimit in one race-safe update (Coupon.redeemFor). Fails the
+  // coupon step cleanly (no discount applied) if the limits no longer hold
+  // — never fails order creation itself, matching prior behavior for any
+  // other invalid-coupon reason.
   let couponDiscount = 0;
   let couponCode     = null;
   if (req.body.couponCode) {
     const Coupon = require('../models/Coupon');
-    const coupon = await Coupon.findOne({ code: req.body.couponCode.toUpperCase().trim() });
-    if (coupon) {
-      const result = coupon.validateFor(subtotal);
-      if (result.valid) {
-        couponDiscount = result.discount;
-        couponCode     = coupon.code;
-        // Increment usage
-        coupon.usedCount += 1;
-        await coupon.save();
-      }
+    const redemption = await Coupon.redeemFor(req.body.couponCode, req.user._id, subtotal);
+    if (redemption.ok) {
+      couponDiscount = redemption.discount;
+      couponCode     = redemption.coupon.code;
     }
   }
 
   // Total = subtotal + delivery − coupon. Coupon comes out of NepShop's margin.
-  const total = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
+  const total = round2(subtotal + deliveryCharge - couponDiscount);
+
+  // Allocate the discount across items proportionally (mutates orderItems —
+  // and, since groups[].items reference the same objects, this is visible
+  // to the Shipment creation below too). 0/absent on orders without a coupon.
+  allocateCouponDiscount(orderItems, couponDiscount);
 
   // Create order
   const order = await Order.create({
@@ -105,9 +121,25 @@ const placeOrder = asyncHandler(async (req, res) => {
     commissionAmount,
   });
 
-  // Deduct stock for each product
-  // Deduct stock and check for low stock
-for (const item of cart.items) {
+  // One Shipment per distinct seller in the order
+  const shipments = await Shipment.insertMany(groups.map(g => ({
+    order:  order._id,
+    seller: g.seller,
+    items: g.items.map(i => ({
+      product: i.product, name: i.name, image: i.image, price: i.price, quantity: i.quantity,
+      couponAllocation: i.couponAllocation || 0,
+    })),
+    sellerSubtotal:   g.sellerSubtotal,
+    deliveryCharge:   g.deliveryCharge,
+    commissionRate:   g.commissionRate,
+    commissionAmount: g.commissionAmount,
+    deliveryEarning:  g.deliveryEarning,
+    couponAllocation: round2(g.items.reduce((s, i) => s + (i.couponAllocation || 0), 0)),
+  })));
+
+  // Deduct stock — SELECTED items only; unselected items' stock is untouched
+  // and their products are checked for low stock.
+for (const item of selectedItems) {
   const updatedProduct = await Product.findByIdAndUpdate(
     item.product._id,
     { $inc: { stock: -item.quantity } },
@@ -125,18 +157,21 @@ for (const item of cart.items) {
   const customer = await User.findById(req.user._id);
   sendOrderPlacedEmail(customer, order);
 
-  // Notify each unique seller
-  const sellerIds = [...new Set(orderItems.map(i => i.seller.toString()))];
-  for (const sellerId of sellerIds) {
-    const seller = await User.findById(sellerId);
-    if (seller) sendNewOrderToSeller(seller, order);
+  // Notify each seller — their own shipment (items/amounts) only, not the whole order
+  for (const shipment of shipments) {
+    const seller = await User.findById(shipment.seller);
+    if (seller) sendNewOrderToSeller(seller, buildShipmentEmailView(order, shipment));
   }
 
-  // For COD — clear cart immediately
-  // For online payments — cart cleared after payment verification
+  // For COD — clear ONLY the ordered (selected) items immediately; unselected
+  // items remain in the cart, untouched. For online payments — the same
+  // scoped removal happens after payment verification (createOrderFromCart).
   if (req.body.paymentMethod === 'cash_on_delivery') {
-    cart.items = [];
-    await cart.save();
+    const orderedProductIds = selectedItems.map((item) => item.product._id);
+    await Cart.updateOne(
+      { customer: req.user._id },
+      { $pull: { items: { product: { $in: orderedProductIds } } } }
+    );
   }
 
   res.status(201).json({
@@ -163,19 +198,37 @@ const getMyOrders = asyncHandler(async (req, res) => {
     .limit(Number(limit))
     .populate('deliveryAgent', 'firstName lastName phone');
 
+  // Attach each order's shipments (per-package status/tracking)
+  const orderIds = orders.map(o => o._id);
+  const shipments = await Shipment.find({ order: { $in: orderIds } })
+    .populate('seller', 'firstName lastName shopName')
+    .populate('deliveryAgent', 'firstName lastName phone');
+
+  const byOrder = {};
+  for (const s of shipments) {
+    const key = s.order.toString();
+    if (!byOrder[key]) byOrder[key] = [];
+    byOrder[key].push(s);
+  }
+
+  const ordersWithShipments = orders.map(o => ({
+    ...o.toObject(),
+    shipments: byOrder[o._id.toString()] || [],
+  }));
+
   res.status(200).json({
     success: true,
     total,
     page:       Number(page),
     totalPages: Math.ceil(total / limit),
-    orders,
+    orders: ordersWithShipments,
   });
 });
 
 // ─────────────────────────────────────────────────────────
 // @desc    Get single order by ID
 // @route   GET /api/orders/:id
-// @access  Customer (own) / Seller (their items) / Admin
+// @access  Customer (own) / Seller (their items) / Admin / Delivery agent
 // ─────────────────────────────────────────────────────────
 const getOrderById = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id)
@@ -187,18 +240,47 @@ const getOrderById = asyncHandler(async (req, res) => {
     throw new Error('Order not found');
   }
 
-  // Allow access to customer, seller, admin, or delivery agent
-  const isCustomer      = order.customer._id.toString() === req.user._id.toString();
-  const isSellerInOrder = order.items.some(i => i.seller.toString() === req.user._id.toString());
-  const isAdmin         = req.user.role === 'admin';
-  const isAgent         = order.deliveryAgent?.toString() === req.user._id.toString();
+  const shipments = await Shipment.find({ order: order._id })
+    .populate('seller',        'firstName lastName shopName')
+    .populate('deliveryAgent', 'firstName lastName phone');
+
+  const userId = req.user._id.toString();
+  const isCustomer = order.customer._id.toString() === userId;
+  const isAdmin    = req.user.role === 'admin';
+
+  const myShipments = shipments.filter(s => s.seller._id.toString() === userId);
+  const isSellerInOrder = myShipments.length > 0;
+
+  const myAgentShipments = shipments.filter(
+    s => s.deliveryAgent && s.deliveryAgent._id.toString() === userId
+  );
+  const isAgent = myAgentShipments.length > 0;
 
   if (!isCustomer && !isSellerInOrder && !isAdmin && !isAgent) {
     res.status(403);
     throw new Error('Not authorized to view this order');
   }
 
-  res.status(200).json({ success: true, order });
+  // Customer and admin see the whole order, with all shipments for per-package display
+  if (isCustomer || isAdmin) {
+    return res.status(200).json({ success: true, order, shipments });
+  }
+
+  // Seller / delivery agent: only their own shipment(s) — never co-sellers' items
+  const scoped = isSellerInOrder ? myShipments : myAgentShipments;
+
+  res.status(200).json({
+    success: true,
+    order: {
+      _id:             order._id,
+      deliveryAddress: order.deliveryAddress,
+      paymentMethod:   order.paymentMethod,
+      paymentStatus:   order.paymentStatus,
+      customerNote:    order.customerNote,
+      createdAt:       order.createdAt,
+    },
+    shipments: scoped,
+  });
 });
 
 // ─────────────────────────────────────────────────────────
@@ -219,91 +301,76 @@ const cancelOrder = asyncHandler(async (req, res) => {
     throw new Error('Not authorized');
   }
 
-  if (['dispatched', 'delivered', 'cancelled', 'returned'].includes(order.status)) {
+  const shipments   = await Shipment.find({ order: order._id });
+  const cancellable = shipments.filter(s => ['pending', 'confirmed'].includes(s.status));
+
+  if (cancellable.length === 0) {
     res.status(400);
+    const anyDispatched = shipments.some(s => s.status === 'dispatched');
     throw new Error(
-      order.status === 'dispatched'
+      anyDispatched
         ? 'Cannot cancel order that is already out for delivery'
         : `Cannot cancel order that is already ${order.status}`
     );
   }
 
-  // Restore stock
-  for (const item of order.items) {
-    await Product.findByIdAndUpdate(item.product, {
-      $inc: { stock: item.quantity },
-    });
+  // Cancel each eligible shipment independently — restore stock + refund
+  // contribution (backend/utils/shipmentCancellation.js — shared with the
+  // seller per-shipment path and the customer per-shipment path below).
+  for (const shipment of cancellable) {
+    await cancelShipment(shipment, order);
   }
 
-  order.status      = 'cancelled';
-  order.cancelledAt = new Date();
-
-  // If the customer already paid online, refund them (no delivery happened)
-  let refunded = false;
-  if (order.paymentStatus === 'paid') {
-    order.paymentStatus = 'refunded';
-    refunded = true;
-    if (order.settlement) {
-      order.settlement.status           = 'refunded';
-      order.settlement.refundToCustomer = order.total;
-      order.settlement.settledAt        = new Date();
-    }
-  }
-
-  // Restore coupon usage — the order never completed, so free up the use
-  if (order.couponCode) {
-    const Coupon = require('../models/Coupon');
-    await Coupon.findOneAndUpdate(
-      { code: order.couponCode },
-      { $inc: { usedCount: -1 } }
-    );
-  }
-
-  await order.save();
+  const { updatedOrder, orderFullyCancelled, refunded } = await finalizeOrderCancellation(order._id);
 
   // Send emails
   const customer = await User.findById(req.user._id);
-  if (customer) sendOrderStatusEmail(customer, order, 'cancelled');
-
-  // If a refund was processed (paid online), send a refund confirmation
-  if (refunded && customer) {
-    const { sendCancelRefundToCustomer } = require('../utils/emailService');
-    sendCancelRefundToCustomer(customer, order);
+  if (orderFullyCancelled) {
+    if (customer) sendOrderStatusEmail(customer, updatedOrder, 'cancelled');
+    if (refunded && customer) {
+      const { sendCancelRefundToCustomer } = require('../utils/emailService');
+      sendCancelRefundToCustomer(customer, updatedOrder);
+    }
   }
 
-  // Notify seller
-  const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
-  for (const sellerId of sellerIds) {
-    const seller = await User.findById(sellerId);
-    if (seller) sendOrderCancelledToSeller(seller, order);
+  // Notify only the seller(s) whose shipment was actually cancelled
+  for (const shipment of cancellable) {
+    const seller = await User.findById(shipment.seller);
+    if (seller) sendOrderCancelledToSeller(seller, buildShipmentEmailView(updatedOrder, shipment));
   }
 
   res.status(200).json({
     success: true,
-    message: refunded
-      ? 'Order cancelled. A full refund has been processed to your original payment method.'
-      : 'Order cancelled successfully',
-    order,
+    message: orderFullyCancelled
+      ? (refunded
+          ? 'Order cancelled. A full refund has been processed to your original payment method.'
+          : 'Order cancelled successfully')
+      : 'Cancelled the part(s) of your order that were still eligible. Item(s) already in progress could not be cancelled.',
+    order: updatedOrder,
   });
 });
 
 // ─────────────────────────────────────────────────────────
-// @desc    Get all orders for seller (their products only)
+// @desc    Get all shipments for seller (their products only)
 // @route   GET /api/orders/seller
 // @access  Seller only
 // ─────────────────────────────────────────────────────────
 const getSellerOrders = asyncHandler(async (req, res) => {
   const { page = 1, limit = 10, status } = req.query;
 
-  const query = { 'items.seller': req.user._id };
+  const query = { seller: req.user._id };
   if (status) query.status = status;
 
-  const total  = await Order.countDocuments(query);
-  const orders = await Order.find(query)
+  const total     = await Shipment.countDocuments(query);
+  const shipments = await Shipment.find(query)
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(Number(limit))
-    .populate('customer',      'firstName lastName phone')
+    .populate({
+      path:     'order',
+      select:   'customer deliveryAddress paymentMethod paymentStatus customerNote createdAt',
+      populate: { path: 'customer', select: 'firstName lastName phone' },
+    })
     .populate('deliveryAgent', 'firstName lastName phone');
 
   res.status(200).json({
@@ -311,13 +378,13 @@ const getSellerOrders = asyncHandler(async (req, res) => {
     total,
     page:       Number(page),
     totalPages: Math.ceil(total / limit),
-    orders,
+    shipments,
   });
 });
 
 // ─────────────────────────────────────────────────────────
-// @desc    Update order status (seller)
-// @route   PUT /api/orders/:id/status
+// @desc    Update shipment status (seller)
+// @route   PUT /api/orders/:id/status   (:id = shipmentId)
 // @access  Seller only
 // ─────────────────────────────────────────────────────────
 const updateOrderStatus = asyncHandler(async (req, res) => {
@@ -330,107 +397,159 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
     dispatched: ['delivered'],
   };
 
-  const order = await Order.findById(req.params.id);
-  if (!order) {
+  const shipment = await Shipment.findById(req.params.id);
+  if (!shipment) {
     res.status(404);
-    throw new Error('Order not found');
+    throw new Error('Shipment not found');
   }
 
-  // Verify seller owns items in this order
-  const isSellerInOrder = order.items.some(
-    i => i.seller.toString() === req.user._id.toString()
-  );
-  if (!isSellerInOrder) {
+  // Authorization: owning this shipment, full stop — owning an item elsewhere
+  // in the order grants nothing.
+  if (shipment.seller.toString() !== req.user._id.toString()) {
     res.status(403);
     throw new Error('Not authorized');
   }
 
   // Validate transition
-  const allowed = validTransitions[order.status];
+  const allowed = validTransitions[shipment.status];
   if (!allowed || !allowed.includes(status)) {
     res.status(400);
-    throw new Error(`Cannot change status from "${order.status}" to "${status}"`);
+    throw new Error(`Cannot change status from "${shipment.status}" to "${status}"`);
   }
 
-  order.status = status;
+  const order = await Order.findById(shipment.order);
 
-  // Set timestamps
-  if (status === 'confirmed')  order.confirmedAt  = new Date();
-  if (status === 'packed')     order.packedAt     = new Date();
-  if (status === 'dispatched') {
-    if (!deliveryAgentId) {
-      res.status(400);
-      throw new Error('Please assign a delivery agent before dispatching the order');
-    }
-    order.dispatchedAt  = new Date();
-    order.deliveryAgent = deliveryAgentId;
+  let updatedOrder;
+  let orderFullyCancelled = false;
+  let refunded = false;
 
-    // Save seller's shop address as pickup address
-    const seller = await require('../models/User').findById(req.user._id)
-      .select('shopName shopAddress');
-    if (seller) {
-      order.pickupAddress = {
-        shopName: seller.shopName,
-        street:   seller.shopAddress?.street,
-        city:     seller.shopAddress?.city,
-        district: seller.shopAddress?.district,
-        phone:    seller.shopAddress?.phone,
-      };
-    }
-  }
-  if (status === 'delivered')  order.deliveredAt  = new Date();
   if (status === 'cancelled') {
-    order.cancelledAt = new Date();
-    // Restore stock on cancel
-    for (const item of order.items) {
-      await Product.findByIdAndUpdate(item.product, {
-        $inc: { stock: item.quantity },
-      });
-    }
-    // If the customer already paid online, refund them (no delivery happened)
-    if (order.paymentStatus === 'paid') {
-      order.paymentStatus = 'refunded';
-      if (order.settlement) {
-        order.settlement.status           = 'refunded';
-        order.settlement.refundToCustomer = order.total;
-        order.settlement.settledAt        = new Date();
+    // Shared mechanics (backend/utils/shipmentCancellation.js) — stock
+    // restore + allocation-aware refund, then order-level finalization
+    // (paymentStatus/settlement/voucher restore only once EVERY shipment on
+    // the order is cancelled). Identical to the customer per-shipment path.
+    await cancelShipment(shipment, order);
+    ({ updatedOrder, orderFullyCancelled, refunded } = await finalizeOrderCancellation(order._id));
+  } else {
+    shipment.status = status;
+
+    if (status === 'confirmed') shipment.confirmedAt = new Date();
+    if (status === 'packed')    shipment.packedAt    = new Date();
+    if (status === 'dispatched') {
+      if (!deliveryAgentId) {
+        res.status(400);
+        throw new Error('Please assign a delivery agent before dispatching the order');
+      }
+      shipment.dispatchedAt  = new Date();
+      shipment.deliveryAgent = deliveryAgentId;
+
+      // Save seller's shop address as this shipment's pickup address — never
+      // touching sibling shipments belonging to other sellers.
+      const seller = await User.findById(req.user._id).select('shopName shopAddress');
+      if (seller) {
+        shipment.pickupAddress = {
+          shopName: seller.shopName,
+          street:   seller.shopAddress?.street,
+          city:     seller.shopAddress?.city,
+          district: seller.shopAddress?.district,
+          phone:    seller.shopAddress?.phone,
+        };
       }
     }
-    // Restore coupon usage — order never completed
-    if (order.couponCode) {
-      const Coupon = require('../models/Coupon');
-      await Coupon.findOneAndUpdate(
-        { code: order.couponCode },
-        { $inc: { usedCount: -1 } }
-      );
-    }
+    if (status === 'delivered') shipment.deliveredAt = new Date();
+
+    await shipment.save();
+    updatedOrder = await recomputeOrder(order._id);
   }
-
-  await order.save();
-
-  await order.save();
 
   // Send status email to customer
-  const customer = await User.findById(order.customer);
-  if (customer) sendOrderStatusEmail(customer, order, status);
+  const customer = await User.findById(updatedOrder.customer);
+  if (customer) sendOrderStatusEmail(customer, updatedOrder, status);
 
-  // Send delivery assignment email
+  // Send delivery assignment email — scoped to this shipment
   if (status === 'dispatched' && deliveryAgentId) {
     const agent = await User.findById(deliveryAgentId);
-    if (agent) sendDeliveryAssignedEmail(agent, order);
+    if (agent) sendDeliveryAssignedEmail(agent, buildShipmentEmailView(updatedOrder, shipment));
   }
 
-  // If a seller cancellation refunded a paid order, confirm the refund
-  if (status === 'cancelled' && order.paymentStatus === 'refunded' && customer) {
+  // If this cancellation refunded the paid order in full, confirm the refund
+  if (orderFullyCancelled && updatedOrder.paymentStatus === 'refunded' && customer) {
     const { sendCancelRefundToCustomer } = require('../utils/emailService');
-    sendCancelRefundToCustomer(customer, order);
+    sendCancelRefundToCustomer(customer, updatedOrder);
   }
-
 
   res.status(200).json({
     success: true,
     message: `Order status updated to "${status}"`,
-    order,
+    shipment,
+    order: updatedOrder,
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Cancel ONE package (shipment) — customer
+// @route   PUT /api/orders/shipments/:shipmentId/cancel
+// @access  Customer only
+// ─────────────────────────────────────────────────────────
+const cancelShipmentByCustomer = asyncHandler(async (req, res) => {
+  const shipment = await Shipment.findById(req.params.shipmentId);
+  if (!shipment) {
+    res.status(404);
+    throw new Error('Package not found');
+  }
+
+  const order = await Order.findById(shipment.order);
+  if (!order) {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+
+  // Authorization: the requester must be the CUSTOMER on this shipment's
+  // parent order — the seller has their own separate cancel path
+  // (updateOrderStatus), not this one.
+  if (order.customer.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error('Not authorized');
+  }
+
+  if (!['pending', 'confirmed'].includes(shipment.status)) {
+    res.status(400);
+    throw new Error(`Cannot cancel this package — it is already ${shipment.status}`);
+  }
+
+  // Shared mechanics (backend/utils/shipmentCancellation.js) — identical
+  // stock restore + allocation-aware refund + order finalization the seller
+  // per-shipment path and the whole-order customer path use.
+  await cancelShipment(shipment, order);
+  const { updatedOrder, orderFullyCancelled, refunded } = await finalizeOrderCancellation(order._id);
+
+  // Notify this shipment's seller — their package was cancelled by the
+  // customer (mirrors cancelOrder's per-shipment seller notification;
+  // updateOrderStatus doesn't need this since the seller triggered it themselves).
+  const seller = await User.findById(shipment.seller);
+  if (seller) sendOrderCancelledToSeller(seller, buildShipmentEmailView(updatedOrder, shipment));
+
+  // Whole-order side effects (status email, refund confirmation) only fire
+  // once every shipment on the order has ended up cancelled — same rule
+  // cancelOrder uses.
+  const customer = await User.findById(req.user._id);
+  if (orderFullyCancelled) {
+    if (customer) sendOrderStatusEmail(customer, updatedOrder, 'cancelled');
+    if (refunded && customer) {
+      const { sendCancelRefundToCustomer } = require('../utils/emailService');
+      sendCancelRefundToCustomer(customer, updatedOrder);
+    }
+  }
+
+  res.status(200).json({
+    success: true,
+    message: orderFullyCancelled
+      ? (refunded
+          ? 'Package cancelled — it was your last active package, so a full refund has been processed.'
+          : 'Package cancelled successfully.')
+      : 'Package cancelled successfully.',
+    shipment,
+    order: updatedOrder,
   });
 });
 
@@ -441,5 +560,5 @@ module.exports = {
   cancelOrder,
   getSellerOrders,
   updateOrderStatus,
+  cancelShipmentByCustomer,
 };
-

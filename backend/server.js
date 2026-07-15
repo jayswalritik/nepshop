@@ -4,16 +4,22 @@ dns.setDefaultResultOrder('ipv4first');
 // which breaks mongodb+srv:// lookups (querySrv ECONNREFUSED) even though
 // the network itself is fine. Public DNS resolves them without issue.
 dns.setServers(['8.8.8.8', '1.1.1.1']);
-const express = require('express');
+
+// ── Load environment variables ────────────────────────────
+// MUST run before any require() that reads process.env at module-load time
+// (e.g. settlementConfig.js's ESCROW_LOCK_MINUTES/RETURN_WINDOW_MINUTES,
+// computed once via top-level consts) — otherwise those modules see an
+// empty process.env and silently fall back to their hardcoded defaults,
+// no matter what .env actually says.
 const dotenv = require('dotenv');
+dotenv.config();
+
+const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/errorMiddleware');
 const cron = require('node-cron');
-
-
-// ── Load environment variables ────────────────────────────
-dotenv.config();
+const { RELEASE_CRON } = require('./config/settlementConfig');
 
 // ── Connect to MongoDB ────────────────────────────────────
 connectDB();
@@ -34,18 +40,21 @@ cron.schedule('0 14 * * *', async () => {
   }
 }, { timezone: 'Asia/Kathmandu' });
 
-// Settlement release — runs every day, releases seller funds past their 7-day lock
-//cron.schedule('0 1 * * *', async () => {       // uncomment for 7 day lock (1:00 AM Nepal time)
-
-// Settlement release — TESTING: every minute. PRODUCTION: '0 1 * * *'
-cron.schedule('0 18 * * *', async () => {
+// Settlement release — schedule + escrow/return timing are centralized in
+// backend/config/settlementConfig.js. Currently RELEASE_CRON = '* * * * *'
+// (every minute, testing) — production would use a once-daily schedule
+// (e.g. '0 1 * * *') via the RELEASE_CRON env var, no code change needed.
+cron.schedule(RELEASE_CRON, async () => {
   try {
-    const Order = require('./models/Order');
+    const Shipment = require('./models/Shipment');
+    const { recomputeOrder, buildShipmentEmailView } = require('./utils/orderAggregate');
     const now = new Date();
 
-    // Find delivered orders whose lock has expired but seller not yet released
-    const toRelease = await Order.find({
+    // Find delivered shipments whose lock has expired, seller not yet
+    // released, and not held for an active return.
+    const toRelease = await Shipment.find({
       status: 'delivered',
+      returnHold: false,
       'settlement.status': 'partial',
       'settlement.sellerReleased': false,
       'settlement.lockUntil': { $lte: now },
@@ -54,24 +63,26 @@ cron.schedule('0 18 * * *', async () => {
     let released = 0;
     const { sendSettlementReleasedEmail } = require('./utils/emailService');
     const UserModel = require('./models/User');
-    for (const order of toRelease) {
-      order.settlement.status           = 'released';
-      order.settlement.sellerReleased   = true;
-      order.settlement.sellerReleasedAt = now;
-      order.settlement.commissionBooked = true;
-      order.settlement.settledAt        = now;
-      await order.save();
-      // Email the seller(s) that their earnings cleared
-      const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
-      for (const sid of sellerIds) {
-        const seller = await UserModel.findById(sid);
-        if (seller) sendSettlementReleasedEmail(seller, order);
+    const Order = require('./models/Order');
+    for (const shipment of toRelease) {
+      shipment.settlement.status           = 'released';
+      shipment.settlement.sellerReleased   = true;
+      shipment.settlement.sellerReleasedAt = now;
+      shipment.settlement.commissionBooked = true;
+      shipment.settlement.settledAt        = now;
+      await shipment.save();
+
+      // Email this shipment's seller only — their earnings, not the whole order
+      const seller = await UserModel.findById(shipment.seller);
+      if (seller) {
+        const order = await Order.findById(shipment.order);
+        if (order) sendSettlementReleasedEmail(seller, buildShipmentEmailView(order, shipment));
       }
       released++;
     }
 
     if (released > 0) {
-      console.log(`💰 Settlement: released ${released} order(s) past their 7-day window`);
+      console.log(`💰 Settlement: released ${released} shipment(s) past their escrow lock window`);
     }
   } catch (err) {
     console.error('Settlement release failed:', err.message);

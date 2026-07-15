@@ -749,9 +749,9 @@ const sendNewOrderToSeller = (seller, order) => sendEmail({
       ${divider()}
       <p style="color:#374151;font-size:13px;font-weight:600;margin:0 0 8px;">💚 Your Earnings</p>
       ${infoBox([
-        ['Order Total',    formatCurrency(order.total)],
+        ['Product Subtotal', formatCurrency(order.subtotal)],
         ['Commission (5%)', `- ${formatCurrency(order.commissionAmount)}`],
-        ['Your Earnings',   formatCurrency(order.total - order.commissionAmount)],
+        ['Your Earnings',   formatCurrency(order.sellerEarnings)],
       ], '#f0fdf4', '#bbf7d0')}
       ${divider()}
       <p style="color:#374151;font-size:13px;font-weight:600;margin:0 0 8px;">📍 Deliver to</p>
@@ -790,7 +790,7 @@ const sendOrderCancelledToSeller = (seller, order) => sendEmail({
 // 14. Order delivered — earnings credited to seller
 const sendOrderDeliveredToSeller = (seller, order) => sendEmail({
   to:        seller.email,
-  subject:   `🎉 Order Delivered — Earnings of ${formatCurrency(order.total - order.commissionAmount)} Credited | NepShop`,
+  subject:   `🎉 Order Delivered — Earnings of ${formatCurrency(order.sellerEarnings)} Credited | NepShop`,
   preheader: `Order #${order._id.toString().slice(-8).toUpperCase()} delivered. Your earnings have been credited.`,
   html: `
     ${hero('🎉', 'Order Delivered Successfully!', 'Your order has been delivered to the customer. Your earnings have been credited to your account.', 'Delivered', '#16a34a')}
@@ -798,9 +798,9 @@ const sendOrderDeliveredToSeller = (seller, order) => sendEmail({
       ${infoBox([
         ['Order ID',      `#${order._id.toString().slice(-8).toUpperCase()}`],
         ['Delivered On',   formatDateTime(new Date())],
-        ['Order Total',    formatCurrency(order.total)],
+        ['Product Subtotal', formatCurrency(order.subtotal)],
         ['Commission (5%)',`- ${formatCurrency(order.commissionAmount)}`],
-        ['Your Earnings',  formatCurrency(order.total - order.commissionAmount)],
+        ['Your Earnings',  formatCurrency(order.sellerEarnings)],
       ], '#f0fdf4', '#bbf7d0')}
       ${alertBox('Your earnings are reflected in your dashboard. You can request a payout from your Earnings tab.', 'success')}
       ${ctaButton('View Earnings →', `${process.env.FRONTEND_URL}/seller/dashboard`)}
@@ -937,7 +937,7 @@ const sendDeliveryAssignedEmail = (agent, order) => sendEmail({
         ['District',     order.deliveryAddress.district],
         ['Landmark',     order.deliveryAddress.landmark || '—'],
       ], '#f0fdf4', '#bbf7d0')}
-      ${order.paymentMethod === 'cash_on_delivery' ? alertBox(`<strong>💵 Cash on Delivery</strong> — Please collect <strong>${formatCurrency(order.total)}</strong> from the customer upon delivery.`, 'warning') : alertBox('✅ This order has already been paid online. No cash collection needed.', 'success')}
+      ${order.paymentMethod === 'cash_on_delivery' ? alertBox(`<strong>💵 Cash on Delivery</strong> — Please collect <strong>${formatCurrency(order.customerPayable ?? order.total)}</strong> from the customer upon delivery.`, 'warning') : alertBox('✅ This order has already been paid online. No cash collection needed.', 'success')}
       ${ctaButton('Open in Dashboard →', `${process.env.FRONTEND_URL}/login`)}
     `)}
   `,

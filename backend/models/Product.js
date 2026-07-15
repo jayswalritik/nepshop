@@ -73,6 +73,14 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true, // Seller can deactivate without deleting
     },
+    // Set true ONLY when an admin's seller-deactivation bulk-hid this
+    // product (isActive forced false). Lets reactivation tell "we hid this"
+    // apart from "the seller had already turned this off themselves" —
+    // only deactivatedBySystem:true products come back on reactivation.
+    deactivatedBySystem: {
+      type: Boolean,
+      default: false,
+    },
     isFeatured: {
       type: Boolean,
       default: false, // Admin can feature products on homepage

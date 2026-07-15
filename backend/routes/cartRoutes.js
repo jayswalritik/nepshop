@@ -3,6 +3,7 @@ const {
   getCart,
   addToCart,
   updateCartItem,
+  updateSelection,
   removeFromCart,
   clearCart,
 } = require('../controllers/cartController');
@@ -15,10 +16,11 @@ router.use(protect);
 router.use(authorizeRoles('customer'));
 router.use(requireActive);
 
-router.get('/',                  getCart);        // Get cart
-router.post('/',                 addToCart);      // Add item
-router.put('/:productId',        updateCartItem); // Update quantity
-router.delete('/:productId',     removeFromCart); // Remove item
-router.delete('/',               clearCart);      // Clear cart
+router.get('/',                  getCart);          // Get cart
+router.post('/',                 addToCart);        // Add item
+router.patch('/selection',       updateSelection);  // Toggle selection (single/group/all) — before /:productId
+router.put('/:productId',        updateCartItem);   // Update quantity
+router.delete('/:productId',     removeFromCart);   // Remove item
+router.delete('/',               clearCart);        // Clear cart
 
 module.exports = router;

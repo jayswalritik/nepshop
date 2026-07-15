@@ -1,8 +1,10 @@
+const path = require('path');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const User = require('./models/User');
 
-dotenv.config();
+// Absolute path — must not depend on the directory this script is launched from.
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const seedAdmin = async () => {
   try {

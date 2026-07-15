@@ -14,16 +14,45 @@ const statusColors = {
   cancelled:  'bg-red-100 text-red-700',
 };
 
+const round2 = (n) => +Number(n).toFixed(2);
+
+// What the customer actually owes for THIS package — voucher-aware. Mirrors
+// backend/utils/shipmentCancellation.js's exact formula (sellerSubtotal +
+// deliveryCharge - couponAllocation); see backend/utils/orderAggregate.js's
+// buildShipmentEmailView.customerPayable for the email-side twin of this.
+const collectAmount = (shipment) =>
+  round2((shipment.sellerSubtotal || 0) + (shipment.deliveryCharge || 0) - (shipment.couponAllocation || 0));
+
 const DeliveryDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [activeTab, setActiveTab]   = useState('active');
   const [orders, setOrders]         = useState([]);
   const [loading, setLoading]       = useState(true);
   const [selected, setSelected]     = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
+  const [availLoading, setAvailLoading] = useState(false);
   const [stats, setStats] = useState({
-    active: 0, delivered: 0, earnings: 0,
+    active: 0, delivered: 0, earnings: 0, deliveryEarnings: 0, returnEarnings: 0, returnPickupCount: 0,
   });
+
+  // Availability toggle — UI/sorting signal only (backend/models/User.js —
+  // never gates assignment, deliveries, or settlements). Optimistic, with
+  // reconcile-on-failure (revert + alert), same pattern used elsewhere
+  // (e.g. cart selection).
+  const toggleAvailability = async () => {
+    const next = !user?.isAvailable;
+    updateUser({ isAvailable: next });
+    setAvailLoading(true);
+    try {
+      const { data } = await API.put('/delivery/availability', { isAvailable: next });
+      updateUser({ isAvailable: data.isAvailable });
+    } catch (err) {
+      updateUser({ isAvailable: !next }); // revert
+      alert(err.response?.data?.message || 'Failed to update availability');
+    } finally {
+      setAvailLoading(false);
+    }
+  };
 
   const navItems = [
     { key: 'active',    label: 'Active Deliveries', icon: '🚚' },
@@ -41,16 +70,20 @@ const DeliveryDashboard = () => {
     setLoading(true);
     try {
       const { data } = await API.get('/delivery/orders');
-      const all = data.orders;
+      const all = data.shipments;
 
       const active    = all.filter(o => o.status === 'dispatched');
       const delivered = all.filter(o => o.status === 'delivered');
-      const earnings  = delivered.reduce((sum, o) => sum + o.deliveryEarning, 0);
+      const deliveryEarnings = delivered.reduce((sum, o) => sum + o.deliveryEarning, 0);
+      const returnEarnings   = data.returnEarnings || 0;
 
       setStats({
         active:    active.length,
         delivered: delivered.length,
-        earnings,
+        earnings:  deliveryEarnings + returnEarnings,
+        deliveryEarnings,
+        returnEarnings,
+        returnPickupCount: data.returnPickupCount || 0,
       });
 
       if (activeTab === 'active')    setOrders(active);
@@ -99,6 +132,17 @@ const DeliveryDashboard = () => {
               <p className="text-xs text-gray-400">{user?.vehicleType}</p>
             </div>
           </div>
+          <button
+            onClick={toggleAvailability}
+            disabled={availLoading}
+            className={`mt-3 w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all disabled:opacity-60
+              ${user?.isAvailable
+                ? 'bg-green-50 text-green-700 border-green-200'
+                : 'bg-gray-100 text-gray-500 border-gray-200'}`}
+          >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${user?.isAvailable ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+            {availLoading ? 'Updating...' : user?.isAvailable ? 'Available' : 'Offline'}
+          </button>
         </div>
 
         {/* Nav */}
@@ -143,6 +187,17 @@ const DeliveryDashboard = () => {
           <span className="font-bold text-gray-900 text-sm">Nep<span className="text-orange-500">Shop</span></span>
         </div>
         <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={toggleAvailability}
+            disabled={availLoading}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all disabled:opacity-60 flex-shrink-0
+              ${user?.isAvailable
+                ? 'bg-green-50 text-green-700 border-green-200'
+                : 'bg-gray-100 text-gray-500 border-gray-200'}`}
+          >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${user?.isAvailable ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+            {user?.isAvailable ? 'Available' : 'Offline'}
+          </button>
           <RoleSwitcher openDirection="down" />
           <button onClick={logout} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
             Logout
@@ -282,18 +337,32 @@ const DeliveryDashboard = () => {
                           <div className="bg-green-50 rounded-lg p-3">
                             <p className="text-xs font-semibold text-green-700 mb-1">📍 Deliver to</p>
                             <p className="text-xs text-green-600">
-                              {order.deliveryAddress.street}, {order.deliveryAddress.city}
+                              {order.order?.deliveryAddress?.street}, {order.order?.deliveryAddress?.city}
                             </p>
-                            <p className="text-xs text-green-600">{order.deliveryAddress.phone}</p>
+                            <p className="text-xs text-green-600">{order.order?.deliveryAddress?.phone}</p>
                           </div>
                         </div>
                       </div>
 
                       {/* Right side */}
                       <div className="flex flex-col items-end gap-3">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          order.order?.paymentMethod === 'cash_on_delivery'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-green-100 text-green-700'}`}>
+                          {order.order?.paymentMethod === 'cash_on_delivery' ? '💵 COD' : '✅ Prepaid'}
+                        </span>
                         <div className="text-right">
-                          <p className="text-xs text-gray-400">Order value</p>
-                          <p className="text-sm font-bold text-gray-900">Rs {order.total.toLocaleString()}</p>
+                          <p className="text-xs text-gray-400">Package value</p>
+                          <p className="text-sm font-bold text-gray-900">Rs {(order.sellerSubtotal + order.deliveryCharge).toLocaleString()}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400">Collect</p>
+                          <p className={`text-sm font-bold ${order.order?.paymentMethod === 'cash_on_delivery' ? 'text-red-600' : 'text-gray-400'}`}>
+                            {order.order?.paymentMethod === 'cash_on_delivery'
+                              ? `Rs ${collectAmount(order).toLocaleString()}`
+                              : 'Paid online'}
+                          </p>
                         </div>
                         <div className="text-right">
                           <p className="text-xs text-gray-400">Your earning</p>
@@ -331,12 +400,30 @@ const DeliveryDashboard = () => {
             <p className="text-sm text-gray-500 text-center mb-2">
               Order #{selected._id.slice(-8).toUpperCase()}
             </p>
+            <div className="flex justify-center mb-3">
+              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                selected.order?.paymentMethod === 'cash_on_delivery'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-green-100 text-green-700'}`}>
+                {selected.order?.paymentMethod === 'cash_on_delivery' ? '💵 COD' : '✅ Prepaid'}
+              </span>
+            </div>
+            {selected.order?.paymentMethod === 'cash_on_delivery' ? (
+              <div className="bg-red-50 border border-red-100 rounded-xl p-3 mb-4 text-center">
+                <p className="text-xs text-red-600 mb-0.5">Collect from customer</p>
+                <p className="text-lg font-bold text-red-700">Rs {collectAmount(selected).toLocaleString()}</p>
+              </div>
+            ) : (
+              <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-4 text-center">
+                <p className="text-sm font-medium text-green-700">✅ Paid online — no cash collection needed</p>
+              </div>
+            )}
             <div className="bg-gray-50 rounded-xl p-3 mb-5">
               <p className="text-xs font-medium text-gray-700 mb-1">Delivering to:</p>
-              <p className="text-sm text-gray-900">{selected.deliveryAddress.fullName}</p>
-              <p className="text-sm text-gray-500">{selected.deliveryAddress.phone}</p>
+              <p className="text-sm text-gray-900">{selected.order?.deliveryAddress?.fullName}</p>
+              <p className="text-sm text-gray-500">{selected.order?.deliveryAddress?.phone}</p>
               <p className="text-sm text-gray-500">
-                {selected.deliveryAddress.street}, {selected.deliveryAddress.city}
+                {selected.order?.deliveryAddress?.street}, {selected.order?.deliveryAddress?.city}
               </p>
             </div>
             <p className="text-xs text-gray-400 text-center mb-4">
@@ -373,14 +460,26 @@ const EarningsTab = ({ stats }) => (
         <div className="bg-green-50 rounded-xl p-4">
           <p className="text-xs text-green-600 mb-1">Total Earned</p>
           <p className="text-2xl font-bold text-green-700">Rs {stats.earnings}</p>
+          <p className="text-xs text-green-600 mt-1">Deliveries + return pickups</p>
         </div>
         <div className="bg-indigo-50 rounded-xl p-4">
           <p className="text-xs text-indigo-600 mb-1">Deliveries Done</p>
           <p className="text-2xl font-bold text-indigo-700">{stats.delivered}</p>
         </div>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+        <div className="bg-gray-50 rounded-xl p-4">
+          <p className="text-xs text-gray-500 mb-1">🚚 From Deliveries</p>
+          <p className="text-lg font-bold text-gray-800">Rs {stats.deliveryEarnings}</p>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-4">
+          <p className="text-xs text-gray-500 mb-1">🔄 From Return Pickups</p>
+          <p className="text-lg font-bold text-gray-800">Rs {stats.returnEarnings}</p>
+          <p className="text-xs text-gray-400 mt-1">{stats.returnPickupCount} completed pickup{stats.returnPickupCount === 1 ? '' : 's'}</p>
+        </div>
+      </div>
       <div className="mt-4 bg-orange-50 border border-orange-200 rounded-xl p-4">
-        <p className="text-sm text-orange-700 font-medium">💡 Earning per delivery: Rs 50</p>
+        <p className="text-sm text-orange-700 font-medium">💡 Rs 50 per delivery, Rs 50 per return pickup</p>
         <p className="text-xs text-orange-600 mt-1">Payout requests coming in the next update</p>
       </div>
     </div>

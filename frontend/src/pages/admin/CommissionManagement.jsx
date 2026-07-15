@@ -107,9 +107,9 @@ const CommissionManagement = () => {
           <div className="bg-white/10 rounded-xl p-4">
             <p className="text-xs text-indigo-200 mb-1">🎟️ Coupons Funded</p>
             <p className="text-2xl font-bold">
-              − Rs {report?.overall?.totalCouponDiscount?.toLocaleString() || 0}
+              Rs {report?.overall?.totalCouponDiscount?.toLocaleString() || 0}
             </p>
-            <p className="text-xs text-indigo-200 mt-1">Discounts NepShop absorbed</p>
+            <p className="text-xs text-indigo-200 mt-1">Discounts NepShop absorbed, net of returns reclaimed</p>
           </div>
         </div>
       </div>
@@ -128,7 +128,7 @@ const CommissionManagement = () => {
           <p className="text-2xl font-bold text-purple-600">
             Rs {report?.overall?.totalDeliveryPaid?.toLocaleString() || 0}
           </p>
-          <p className="text-xs text-gray-400 mt-1">Rs 50 × delivered orders</p>
+          <p className="text-xs text-gray-400 mt-1">Rs 50 per delivery + Rs 50 per return pickup</p>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-xs text-gray-400 mb-1">Pending Revenue</p>
@@ -168,7 +168,7 @@ const CommissionManagement = () => {
           <div>
             <h3 className="font-semibold text-gray-900">Commission by Seller</h3>
             <p className="text-xs text-gray-400 mt-0.5">
-              Confirmed = delivered orders · Pending = in-progress · Cancelled orders excluded
+              Confirmed = delivered or returned · Pending = in-progress · Cancelled orders excluded
             </p>
           </div>
           <button
@@ -230,6 +230,9 @@ const CommissionManagement = () => {
                     <p className="text-sm font-medium text-green-600">
                       Rs {s.confirmedCommission?.toLocaleString() || 0}
                     </p>
+                    {s.commissionReversal > 0 && (
+                      <p className="text-xs text-red-500">− Rs {s.commissionReversal.toLocaleString()} returned</p>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     {s.pendingRevenue > 0 ? (

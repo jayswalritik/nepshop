@@ -1,7 +1,8 @@
 const asyncHandler = require('express-async-handler');
-const Review  = require('../models/Review');
-const Order   = require('../models/Order');
-const Product = require('../models/Product');
+const Review   = require('../models/Review');
+const Order    = require('../models/Order');
+const Product  = require('../models/Product');
+const Shipment = require('../models/Shipment');
 
 // ─────────────────────────────────────────────────────────
 // @desc    Add a review
@@ -16,7 +17,7 @@ const addReview = asyncHandler(async (req, res) => {
     throw new Error('Product, order, rating and comment are all required');
   }
 
-  // Verify the order exists, belongs to customer, and is delivered
+  // Verify the order exists and belongs to customer
   const order = await Order.findById(orderId);
   if (!order) {
     res.status(404);
@@ -26,9 +27,16 @@ const addReview = asyncHandler(async (req, res) => {
     res.status(403);
     throw new Error('Not authorized');
   }
-  if (order.status !== 'delivered') {
+
+  // Delivery eligibility is SHIPMENT-scoped, not order-scoped — a
+  // multi-package order can have one package delivered while a sibling
+  // isn't, and order.status (the least-advanced-shipment derived status)
+  // would wrongly block reviewing the already-delivered package's items.
+  // (Previously checked order.status !== 'delivered' — that's the bug.)
+  const shipment = await Shipment.findOne({ order: orderId, 'items.product': productId });
+  if (!shipment || shipment.status !== 'delivered') {
     res.status(400);
-    throw new Error('You can only review products from delivered orders');
+    throw new Error('You can only review products from a delivered package');
   }
 
   // Verify product is in the order
@@ -143,14 +151,22 @@ const deleteReview = asyncHandler(async (req, res) => {
 const canReview = asyncHandler(async (req, res) => {
   const { productId } = req.params;
 
-  // Find delivered orders containing this product
-  const order = await Order.findOne({
-    customer: req.user._id,
-    status:   'delivered',
-    'items.product': productId,
-  });
+  // Shipment-scoped, not order-scoped (see addReview) — a delivered package
+  // in an otherwise still-in-transit multi-package order is still
+  // reviewable. Find this customer's orders containing the product, then
+  // look for a DELIVERED shipment (of theirs) carrying it.
+  const orders = await Order.find({ customer: req.user._id, 'items.product': productId }).select('_id');
+  const orderIds = orders.map((o) => o._id);
 
-  if (!order) {
+  const shipment = orderIds.length
+    ? await Shipment.findOne({
+        order: { $in: orderIds },
+        'items.product': productId,
+        status: 'delivered',
+      }).sort({ deliveredAt: -1 })
+    : null;
+
+  if (!shipment) {
     return res.status(200).json({
       success: true,
       canReview: false,
@@ -162,7 +178,7 @@ const canReview = asyncHandler(async (req, res) => {
   const existing = await Review.findOne({
     product:  productId,
     customer: req.user._id,
-    order:    order._id,
+    order:    shipment.order,
   });
 
   if (existing) {
@@ -177,7 +193,7 @@ const canReview = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     canReview: true,
-    orderId: order._id,
+    orderId: shipment.order,
   });
 });
 

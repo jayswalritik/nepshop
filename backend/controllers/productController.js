@@ -155,7 +155,10 @@ const getProductById = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id)
     .populate('seller', 'firstName lastName shopName phone');
 
-  if (!product) {
+  // Same "hidden platform-wide" rule every other customer-facing surface
+  // already applies (browse/search/recommendations) — a deactivated
+  // product's direct-URL page must 404 too, not just be absent from lists.
+  if (!product || !product.isActive) {
     res.status(404);
     throw new Error('Product not found');
   }

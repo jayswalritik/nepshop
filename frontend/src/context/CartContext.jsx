@@ -46,6 +46,30 @@ export const CartProvider = ({ children }) => {
     }
   };
 
+  // itemIds may be cart-item _ids or product ids (mirrors backend/controllers/
+  // cartController.js's updateSelection) — covers single-item, seller-group,
+  // and select-all toggles with one call. Optimistic UI, reconciled with the
+  // server response (or a full refetch if the request itself fails).
+  const updateSelection = async (itemIds, selected) => {
+    const idSet = new Set(itemIds.map(String));
+    setCart((prev) => ({
+      ...prev,
+      items: prev.items.map((item) => {
+        const productId = item.product?._id || item.product;
+        return idSet.has(String(item._id)) || idSet.has(String(productId))
+          ? { ...item, selected }
+          : item;
+      }),
+    }));
+    try {
+      const { data } = await API.patch('/cart/selection', { itemIds, selected });
+      setCart(data.cart);
+    } catch (err) {
+      console.error('Selection update failed:', err);
+      fetchCart(); // reconcile local state with the server's actual truth
+    }
+  };
+
   const removeFromCart = async (productId) => {
     try {
       const { data } = await API.delete(`/cart/${productId}`);
@@ -67,7 +91,7 @@ export const CartProvider = ({ children }) => {
   return (
     <CartContext.Provider value={{
       cart, loading, fetchCart,
-      addToCart, updateQuantity, removeFromCart, clearCart,
+      addToCart, updateQuantity, updateSelection, removeFromCart, clearCart,
     }}>
       {children}
     </CartContext.Provider>

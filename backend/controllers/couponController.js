@@ -126,7 +126,7 @@ const validateCoupon = asyncHandler(async (req, res) => {
     throw new Error('Invalid coupon code');
   }
 
-  const result = coupon.validateFor(subtotal || 0);
+  const result = coupon.validateFor(subtotal || 0, req.user._id);
 
   if (!result.valid) {
     res.status(400);

@@ -9,6 +9,7 @@ const {
   undoRejectUser,
   suspendUser,
   reactivateUser,
+  getSellerDeactivationPreview,
   getUserById,
   deleteUser,
   getPlatformStats,
@@ -32,8 +33,12 @@ router.get(
   protect,
   authorizeRoles('seller', 'admin'),
   asyncHandler(async (req, res) => {
+    // Available agents first (then alphabetical within each group) — the
+    // ONLY place this needs sorting, since both the seller dispatch picker
+    // and the admin return-pickup picker read this same endpoint.
     const agents = await User.find({ role: 'delivery', status: 'active' })
-      .select('firstName lastName phone vehicleType');
+      .select('firstName lastName phone vehicleType isAvailable')
+      .sort({ isAvailable: -1, firstName: 1 });
     res.status(200).json({ success: true, agents });
   })
 );
@@ -52,6 +57,10 @@ router.get('/users/:id',              getUserById);
 router.put('/users/:id/approve',      approveUser);
 router.put('/users/:id/reject',       rejectUser);
 router.put('/users/:id/undoreject',   undoRejectUser);
+// Seller-deactivation warning precheck — read-only, before the same
+// suspend/reactivate actions below (extended to hide/restore seller
+// products; see adminController.js).
+router.get('/users/:id/deactivation-preview', getSellerDeactivationPreview);
 router.put('/users/:id/suspend',      suspendUser);
 router.put('/users/:id/reactivate',   reactivateUser);
 router.delete('/users/:id',           deleteUser);

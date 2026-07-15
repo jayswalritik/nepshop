@@ -109,6 +109,14 @@ shopAddress: {
       trim: true,
       default: null,
     },
+    // Self-toggled online/offline signal — delivery-agent role only, other
+    // roles ignore it. UI/sorting signal ONLY: never gates assignment,
+    // deliveries, or settlements. Starts false (offline) for every agent,
+    // existing documents included, via this default.
+    isAvailable: {
+      type: Boolean,
+      default: false,
+    },
 
     // ── Profile ──────────────────────────────────────────
     profileImage: {
@@ -225,6 +233,7 @@ userSchema.methods.toPublicJSON = function () {
     panNumber:          this.panNumber,
     vehicleType:        this.vehicleType,
     citizenshipNumber:  this.citizenshipNumber,
+    isAvailable:        this.isAvailable,
     profileImage:       this.profileImage,
     payoutDetails:      this.payoutDetails,
     commissionRate:     this.commissionRate,

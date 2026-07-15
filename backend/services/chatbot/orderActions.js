@@ -10,11 +10,11 @@
 
 const Order = require('../../models/Order');
 
-// Statuses that mean "this order is still in motion"
-const ACTIVE_STATUSES = [
-  'pending', 'confirmed', 'packed', 'dispatched',
-  'return_assigned', 'return_in_transit',
-];
+// Statuses that mean "this order is still in motion". Item-level returns
+// never write 'return_assigned'/'return_in_transit' at the order level
+// anymore (see returnController.js) — an in-progress return is tracked via
+// Return.status per shipment, surfaced separately by returnActions.js.
+const ACTIVE_STATUSES = ['pending', 'confirmed', 'packed', 'dispatched'];
 
 const ORDER_SELECT =
   'items status total subtotal paymentMethod deliveryAgent settlement ' +

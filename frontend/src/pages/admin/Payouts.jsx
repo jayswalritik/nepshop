@@ -160,7 +160,7 @@ const Payouts = () => {
         <div className="bg-white border border-gray-200 rounded-2xl p-5">
           <p className="text-xs text-gray-400 mb-1">Owed to Delivery Agents</p>
           <p className="text-3xl font-bold text-purple-600">Rs {data?.totals?.agentPayout?.toLocaleString() || 0}</p>
-          <p className="text-xs text-gray-400 mt-1">Completed deliveries</p>
+          <p className="text-xs text-gray-400 mt-1">Completed deliveries + return pickups</p>
         </div>
 
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
@@ -203,15 +203,21 @@ const Payouts = () => {
                   </td>
                   <td className="px-4 py-4 text-sm text-gray-700">{s.orders}</td>
                   <td className="px-4 py-4">
-                    <p className="text-sm font-bold text-green-600">Rs {s.amount.toLocaleString()}</p>
+                    <p className={`text-sm font-bold ${s.amount > 0 ? 'text-green-600' : 'text-red-500'}`}>Rs {s.amount.toLocaleString()}</p>
                   </td>
                   <td className="px-4 py-4">
-                    <button
-                      onClick={() => setConfirm({ type: 'seller', id: s.sellerId._id, name: s.sellerId?.shopName || s.sellerId?.firstName, amount: s.amount })}
-                      className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg transition-all"
-                    >
-                      💰 Mark Paid
-                    </button>
+                    {s.amount > 0 ? (
+                      <button
+                        onClick={() => setConfirm({ type: 'seller', id: s.sellerId._id, name: s.sellerId?.shopName || s.sellerId?.firstName, amount: s.amount })}
+                        className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg transition-all"
+                      >
+                        💰 Mark Paid
+                      </button>
+                    ) : (
+                      <span className="text-xs text-red-500 font-medium px-3 py-2 bg-red-50 border border-red-200 rounded-lg inline-block" title="Seller owes NepShop back from a return reversal — resolve out-of-band, not payable here.">
+                        ⚠️ Recovery pending
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -225,7 +231,7 @@ const Payouts = () => {
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">🚚 Delivery Agent Payouts</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Rs 50 per completed delivery</p>
+          <p className="text-xs text-gray-400 mt-0.5">Rs 50 per completed delivery + Rs 50 per completed return pickup</p>
         </div>
         {!data?.agents?.length ? (
           <div className="text-center py-12 text-gray-400">
@@ -237,7 +243,7 @@ const Payouts = () => {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Agent', 'Payout Method', 'Deliveries', 'Amount Owed', 'Action'].map(h => (
+                {['Agent', 'Payout Method', 'Jobs', 'Amount Owed', 'Action'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
@@ -252,7 +258,12 @@ const Payouts = () => {
                   <td className="px-4 py-4">
                     <p className="text-xs text-gray-600">{fmtMethod(a.agentId?.payoutDetails)}</p>
                   </td>
-                  <td className="px-4 py-4 text-sm text-gray-700">{a.jobs}</td>
+                  <td className="px-4 py-4">
+                    <p className="text-sm text-gray-700">{a.jobs}</p>
+                    {a.pickupJobs > 0 && (
+                      <p className="text-xs text-gray-400">{a.deliveryJobs} delivery · {a.pickupJobs} pickup</p>
+                    )}
+                  </td>
                   <td className="px-4 py-4">
                     <p className="text-sm font-bold text-purple-600">Rs {a.amount.toLocaleString()}</p>
                   </td>

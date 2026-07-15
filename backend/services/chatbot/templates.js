@@ -157,10 +157,6 @@ const orderStatusLine = (o) => {
       return `was delivered${o.deliveredAt ? ` on ${shortDate(o.deliveredAt)}` : ''} ✅`;
     case 'cancelled':
       return `was cancelled`;
-    case 'return_assigned':
-      return `has a return approved — a pickup agent has been assigned`;
-    case 'return_in_transit':
-      return `is being returned — the agent has picked it up`;
     case 'returned':
       return `was returned${o.refund > 0 ? ` — your refund of ${formatRs(o.refund)} is being processed` : ''}`;
     default:
@@ -201,7 +197,7 @@ const historyReply = (orders) => {
 // never promises a specific refund amount.
 const refundMathBit = (a) =>
   `If it's a product issue (seller's fault) you'd get a full refund of ${formatRs(a.sellerFaultRefund)}; ` +
-  `if it's a change of mind, the refund is ${formatRs(a.customerFaultRefund)} (product price minus both Rs 50 delivery legs). ` +
+  `if it's a change of mind, the refund is ${formatRs(a.customerFaultRefund)} (minus the Rs ${a.pickupFee} return pickup fee). ` +
   `Our team confirms which applies when reviewing your request.`;
 
 const returnReply = (facts, orderCards) => {
@@ -228,7 +224,8 @@ const returnReply = (facts, orderCards) => {
   // 3. Eligible orders exist → list them
   if (eligible.length > 0) {
     const plural = eligible.length > 1;
-    return `You have ${eligible.length} order${plural ? 's' : ''} still inside the return window${plural ? ' — which one do you mean?' : ':'} Returns are reviewed by our team; refund depends on the reason (full refund for product issues, minus Rs 100 delivery for change-of-mind). Tap below to submit:`;
+    const { RETURN_PICKUP_FEE } = require('../../utils/returnMath');
+    return `You have ${eligible.length} order${plural ? 's' : ''} still inside the return window${plural ? ' — which one do you mean?' : ':'} Returns are reviewed by our team; refund depends on the reason (full refund for product issues, minus the Rs ${RETURN_PICKUP_FEE} return pickup fee for change-of-mind). Tap below to submit:`;
   }
 
   // 4. Delivered orders exist but every window has closed
@@ -241,9 +238,9 @@ const returnReply = (facts, orderCards) => {
   return `Returns are only possible for delivered orders, and you don't have any delivered orders yet. Once something arrives, you'll have a return window from the delivery date.`;
 };
 
-// Window length in days, derived from the same constant the controller uses
+// Window length in days, derived from the same constant returnController uses
 const latestWindowDays = () => {
-  const { RETURN_WINDOW_MINUTES } = require('../../controllers/returnController');
+  const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
   return RETURN_WINDOW_MINUTES / (24 * 60);
 };
 

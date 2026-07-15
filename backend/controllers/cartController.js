@@ -1,6 +1,31 @@
 const asyncHandler = require('express-async-handler');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
+const { isStale } = require('../utils/cartSelection');
+
+// Nested-populates the seller's shop name too — the frontend groups the
+// cart by seller (Daraz-style) and shows a seller-group header/checkbox.
+const PRODUCT_POPULATE = {
+  path: 'items.product',
+  select: 'name images price stock isActive seller',
+  populate: { path: 'seller', select: 'shopName firstName lastName' },
+};
+
+// Shapes a populated Cart document into the { items, total, itemCount }
+// response every cart endpoint returns — items gain a computed `stale` flag
+// (out of stock / deactivated) so the frontend can disable that checkbox.
+// total/itemCount are ALL-items aggregates (unchanged meaning from before
+// selective checkout existed) — the frontend derives selected-subset totals
+// itself, the same way it already derives per-seller-group delivery.
+const shapeCartResponse = (cart) => {
+  const items = cart.items.map((item) => {
+    const obj = item.toObject ? item.toObject() : item;
+    return { ...obj, stale: isStale(item) };
+  });
+  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  return { items, total, itemCount };
+};
 
 // ─────────────────────────────────────────────────────────
 // @desc    Get customer's cart
@@ -9,7 +34,7 @@ const Product = require('../models/Product');
 // ─────────────────────────────────────────────────────────
 const getCart = asyncHandler(async (req, res) => {
   const cart = await Cart.findOne({ customer: req.user._id })
-    .populate('items.product', 'name images price stock isActive seller');
+    .populate(PRODUCT_POPULATE);
 
   if (!cart) {
     return res.status(200).json({
@@ -18,27 +43,32 @@ const getCart = asyncHandler(async (req, res) => {
     });
   }
 
-  // Filter out items whose product was deleted or deactivated
-  const validItems = cart.items.filter(
-    (item) => item.product && item.product.isActive
-  );
+  // Drop items whose product was hard-deleted entirely — nothing to show or
+  // flag. (Deactivated/out-of-stock items are handled differently below —
+  // they stay in the cart, just auto-deselected + flagged.)
+  const hasDeletedProduct = cart.items.some((item) => !item.product);
+  if (hasDeletedProduct) {
+    cart.items = cart.items.filter((item) => item.product);
+  }
 
-  if (validItems.length !== cart.items.length) {
-    cart.items = validItems;
+  // Stale = out of stock or deactivated — auto-deselect (never delete the
+  // item or touch its quantity) so it can't accidentally ride along into a
+  // checkout. Once already deselected, leave it alone (don't fight a
+  // customer who re-selects it only to have it flip back on an identical
+  // fetch — the checkbox itself stays disabled via the `stale` flag anyway).
+  let selectionChanged = false;
+  for (const item of cart.items) {
+    if (isStale(item) && item.selected !== false) {
+      item.selected = false;
+      selectionChanged = true;
+    }
+  }
+
+  if (hasDeletedProduct || selectionChanged) {
     await cart.save();
   }
 
-  const total = validItems.reduce(
-    (sum, item) => sum + item.price * item.quantity, 0
-  );
-  const itemCount = validItems.reduce(
-    (sum, item) => sum + item.quantity, 0
-  );
-
-  res.status(200).json({
-    success: true,
-    cart: { items: validItems, total, itemCount },
-  });
+  res.status(200).json({ success: true, cart: shapeCartResponse(cart) });
 });
 
 // ─────────────────────────────────────────────────────────
@@ -86,28 +116,21 @@ const addToCart = asyncHandler(async (req, res) => {
     }
     existingItem.quantity = newQty;
   } else {
-    // Add new item — snapshot the price
+    // Add new item — snapshot the price, selected by default
     const price = product.discount > 0
       ? +(product.price - (product.price * product.discount) / 100).toFixed(2)
       : product.price;
 
-    cart.items.push({ product: productId, quantity: Number(quantity), price });
+    cart.items.push({ product: productId, quantity: Number(quantity), price, selected: true });
   }
 
   await cart.save();
-  await cart.populate('items.product', 'name images price stock isActive');
-
-  const total = cart.items.reduce(
-    (sum, item) => sum + item.price * item.quantity, 0
-  );
-  const itemCount = cart.items.reduce(
-    (sum, item) => sum + item.quantity, 0
-  );
+  await cart.populate(PRODUCT_POPULATE);
 
   res.status(200).json({
     success: true,
     message: 'Item added to cart',
-    cart: { items: cart.items, total, itemCount },
+    cart: shapeCartResponse(cart),
   });
 });
 
@@ -152,19 +175,62 @@ const updateCartItem = asyncHandler(async (req, res) => {
 
   item.quantity = Number(quantity);
   await cart.save();
-  await cart.populate('items.product', 'name images price stock isActive');
-
-  const total = cart.items.reduce(
-    (sum, i) => sum + i.price * i.quantity, 0
-  );
-  const itemCount = cart.items.reduce(
-    (sum, i) => sum + i.quantity, 0
-  );
+  await cart.populate(PRODUCT_POPULATE);
 
   res.status(200).json({
     success: true,
     message: 'Cart updated',
-    cart: { items: cart.items, total, itemCount },
+    cart: shapeCartResponse(cart),
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Update selection (check/uncheck) for one or more cart items
+// @route   PATCH /api/cart/selection
+// @access  Customer only
+// ─────────────────────────────────────────────────────────
+// Body: { itemIds: [...], selected: bool } — itemIds may be cart-item _ids
+// or product ids (whichever the caller has on hand); a single call covers
+// single-item toggle, seller-group toggle, and select-all.
+const updateSelection = asyncHandler(async (req, res) => {
+  const { itemIds, selected } = req.body;
+
+  if (!Array.isArray(itemIds) || itemIds.length === 0) {
+    res.status(400);
+    throw new Error('itemIds must be a non-empty array');
+  }
+  if (typeof selected !== 'boolean') {
+    res.status(400);
+    throw new Error('selected must be true or false');
+  }
+
+  const cart = await Cart.findOne({ customer: req.user._id });
+  if (!cart) {
+    res.status(404);
+    throw new Error('Cart not found');
+  }
+
+  const idSet = new Set(itemIds.map(String));
+  let matched = 0;
+  for (const item of cart.items) {
+    if (idSet.has(item._id.toString()) || idSet.has(item.product.toString())) {
+      item.selected = selected;
+      matched++;
+    }
+  }
+
+  if (matched === 0) {
+    res.status(404);
+    throw new Error('No matching items found in cart');
+  }
+
+  await cart.save();
+  await cart.populate(PRODUCT_POPULATE);
+
+  res.status(200).json({
+    success: true,
+    message: 'Selection updated',
+    cart: shapeCartResponse(cart),
   });
 });
 
@@ -185,19 +251,12 @@ const removeFromCart = asyncHandler(async (req, res) => {
   );
 
   await cart.save();
-  await cart.populate('items.product', 'name images price stock isActive');
-
-  const total = cart.items.reduce(
-    (sum, i) => sum + i.price * i.quantity, 0
-  );
-  const itemCount = cart.items.reduce(
-    (sum, i) => sum + i.quantity, 0
-  );
+  await cart.populate(PRODUCT_POPULATE);
 
   res.status(200).json({
     success: true,
     message: 'Item removed from cart',
-    cart: { items: cart.items, total, itemCount },
+    cart: shapeCartResponse(cart),
   });
 });
 // ─────────────────────────────────────────────────────────
@@ -222,6 +281,7 @@ module.exports = {
   getCart,
   addToCart,
   updateCartItem,
+  updateSelection,
   removeFromCart,
   clearCart,
 };

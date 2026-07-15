@@ -10,7 +10,15 @@ const AuthPage = () => {
   const [currentRole, setCurrentRole] = useState('customer');
   const [currentMode, setCurrentMode] = useState('login');
   const [loading, setLoading] = useState(false);
-  const [apiError, setApiError] = useState('');
+  // Picks up the message left by utils/api.js's response interceptor when a
+  // request 403'd mid-session because the account got suspended — reuses
+  // this exact banner (the same one a suspended LOGIN attempt shows below),
+  // so both paths land the user on the identical message.
+  const [apiError, setApiError] = useState(() => {
+    const notice = sessionStorage.getItem('nepshop_suspended_notice');
+    if (notice) sessionStorage.removeItem('nepshop_suspended_notice');
+    return notice || '';
+  });
   const [success, setSuccess] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);

@@ -1,3 +1,4 @@
+const path = require('path');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const Product = require('./models/Product');
@@ -6,7 +7,8 @@ const fetchDummyProducts = require('./data/fetchDummyProducts');
 const customCategoryProducts = require('./data/customCategoryProducts');
 const { embedDocument, buildProductText } = require('./services/embeddingService'); // Phase2
 
-dotenv.config();
+// Absolute path — must not depend on the directory this script is launched from.
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const SELLER_CATEGORY_MAP = {
   'electronics@nepshop.com': 'Electronics',

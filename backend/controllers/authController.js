@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const { generateToken } = require('../utils/generateToken');
+const { SUSPENDED_MESSAGE } = require('../middleware/authMiddleware');
 
 // ─────────────────────────────────────────────────────────
 // @desc    Register a new user (customer / seller / delivery)
@@ -186,7 +187,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
   if (user.status === 'suspended') {
     res.status(403);
-    throw new Error('Your account has been suspended. Please contact support.');
+    throw new Error(SUSPENDED_MESSAGE);
   }
 
   if (user.status === 'rejected') {

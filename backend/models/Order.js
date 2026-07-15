@@ -15,6 +15,12 @@ const orderItemSchema = new mongoose.Schema({
     ref: 'User',
     required: true,
   },
+  // This line's PER-LINE share of the order's coupon discount (Rs, not a
+  // per-unit rate) — computed by orderPricing.allocateCouponDiscount,
+  // proportional to price*quantity, 0/absent on orders without a coupon.
+  // Consumed by per-shipment cancellation refunds today (see
+  // orderController.js) and by item-level returns later.
+  couponAllocation: { type: Number, default: 0 },
 });
 
 const orderSchema = new mongoose.Schema(

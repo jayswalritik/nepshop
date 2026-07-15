@@ -98,8 +98,6 @@ const statusBadge = {
   dispatched:         { label: 'Out for delivery', cls: 'bg-orange-100 text-orange-700' },
   delivered:          { label: 'Delivered',      cls: 'bg-green-100 text-green-700' },
   cancelled:          { label: 'Cancelled',      cls: 'bg-red-100 text-red-600' },
-  return_assigned:    { label: 'Return approved', cls: 'bg-purple-100 text-purple-700' },
-  return_in_transit:  { label: 'Return pickup',  cls: 'bg-purple-100 text-purple-700' },
   returned:           { label: 'Returned',       cls: 'bg-gray-200 text-gray-600' },
 };
 

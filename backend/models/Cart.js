@@ -16,6 +16,15 @@ const cartItemSchema = new mongoose.Schema({
     type: Number,
     required: true, // Snapshot of price at time of adding
   },
+  // Selective checkout (Daraz-style) — whether this item is part of the NEXT
+  // checkout. Existing carts predating this field have it undefined; every
+  // read site must treat that as true (see backend/utils/cartSelection.js) —
+  // Mongoose's own `default: true` already covers freshly-loaded documents,
+  // but code must not rely on strict `=== true` checks.
+  selected: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 const cartSchema = new mongoose.Schema(

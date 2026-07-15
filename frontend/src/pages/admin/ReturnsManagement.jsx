@@ -30,11 +30,28 @@ const ReturnsManagement = () => {
   const [returnAgent, setReturnAgent]   = useState('');
   const [agents, setAgents]             = useState([]);
   const [actionLoading, setActionLoading] = useState(false);
+  const [preview, setPreview]           = useState(null);
 
   useEffect(() => {
     fetchReturns();
     fetchAgents();
   }, [filter]);
+
+  // Refund preview comes from the backend (same classification/math
+  // completeReturn will actually apply) — fetched once per selected return,
+  // independent of the fault choice, so it can never drift from what
+  // approval will do. See backend/controllers/returnController.js.
+  useEffect(() => {
+    let cancelled = false;
+    if (!selected || selected.status !== 'pending') {
+      queueMicrotask(() => { if (!cancelled) setPreview(null); });
+      return () => { cancelled = true; };
+    }
+    API.get(`/returns/${selected._id}/preview`)
+      .then(({ data }) => { if (!cancelled) setPreview(data.preview); })
+      .catch(() => { if (!cancelled) setPreview(null); });
+    return () => { cancelled = true; };
+  }, [selected]);
 
   const fetchReturns = async () => {
     setLoading(true);
@@ -105,22 +122,19 @@ const ReturnsManagement = () => {
     }
   };
 
-  // Refund preview based on fault
-  const refundPreview = () => {
-    if (!selected) return null;
-    const total    = selected.order?.total || 0;
-    const subtotal = total - 100; // delivery was 100 (or 0 for free delivery; simplified for preview)
-    if (fault === 'seller') {
-      return { customerGets: total, note: 'Full refund (seller at fault — customer pays nothing).' };
-    }
-    if (fault === 'customer') {
-      const refund = Math.max(0, subtotal - 50 - 50); // product − forward delivery − return pickup
-      return { customerGets: refund, note: 'Product price minus both delivery legs (customer\'s choice).' };
-    }
-    return null;
-  };
+  const round2 = (n) => +Number(n).toFixed(2);
 
-  const preview = refundPreview();
+  // Refund preview note — text formatting only; the numbers themselves come
+  // from the backend (`preview` state, fetched above) so this can never
+  // disagree with what completeReturn will actually apply.
+  const previewNote = () => {
+    if (!preview || !fault) return null;
+    const { isFullShipmentReturn, voucherSlice, pickupFee } = preview;
+    if (fault === 'seller') {
+      return `Seller fault — full item value back${voucherSlice > 0 ? ' minus the voucher slice already used' : ''}${isFullShipmentReturn ? ', plus the package delivery charge (entire package returned)' : ''}. Seller also bears the Rs ${pickupFee} pickup fee${isFullShipmentReturn ? ' and the delivery charge' : ''}.`;
+    }
+    return `Customer's choice — item value minus voucher minus the Rs ${pickupFee} return-pickup fee (withheld from refund, not billed to seller).`;
+  };
 
   return (
     <div>
@@ -163,7 +177,7 @@ const ReturnsManagement = () => {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Customer', 'Order', 'Reason', 'Refund Amount', 'Status', 'Date', 'Actions'].map(h => (
+                {['Customer', 'Order / Seller', 'Reason', 'Value / Refund', 'Status', 'Date', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     {h}
                   </th>
@@ -183,6 +197,10 @@ const ReturnsManagement = () => {
                     <p className="text-sm font-mono text-gray-700">
                       #{r.order?._id?.slice(-8).toUpperCase()}
                     </p>
+                    <p className="text-xs text-gray-400">
+                      {r.seller?.shopName || `${r.seller?.firstName || ''} ${r.seller?.lastName || ''}`.trim()}
+                      {r.fullShipmentReturn && ' · full package'}
+                    </p>
                   </td>
                   <td className="px-4 py-4">
                     <p className="text-sm text-gray-700">{r.reason}</p>
@@ -191,9 +209,16 @@ const ReturnsManagement = () => {
                     )}
                   </td>
                   <td className="px-4 py-4">
-                    <p className="text-sm font-semibold text-gray-900">
-                      Rs {r.refundAmount?.toLocaleString()}
-                    </p>
+                    {r.status === 'refunded' ? (
+                      <p className="text-sm font-semibold text-gray-900">
+                        Refunded Rs {r.refundToCustomer?.toLocaleString() ?? r.refundAmount?.toLocaleString()}
+                      </p>
+                    ) : (
+                      <p className="text-sm font-semibold text-gray-900">
+                        Rs {r.items.reduce((s, i) => s + i.price * i.quantity, 0).toLocaleString()}
+                        <span className="block text-xs font-normal text-gray-400">item value, pending review</span>
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[r.status]}`}>
@@ -252,6 +277,12 @@ const ReturnsManagement = () => {
                   </span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-gray-500">Seller / Package</span>
+                  <span className="font-medium text-gray-700 text-right">
+                    {selected.seller?.shopName || `${selected.seller?.firstName || ''} ${selected.seller?.lastName || ''}`.trim() || '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-gray-500">Reason</span>
                   <span className="font-medium text-gray-700">{selected.reason}</span>
                 </div>
@@ -262,8 +293,10 @@ const ReturnsManagement = () => {
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Order Total</span>
-                  <span className="font-medium">Rs {selected.order?.total?.toLocaleString()}</span>
+                  <span className="text-gray-500">Returned Value</span>
+                  <span className="font-medium">
+                    Rs {round2(selected.items.reduce((s, i) => s + i.price * i.quantity, 0)).toLocaleString()}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Payment Method</span>
@@ -329,12 +362,20 @@ const ReturnsManagement = () => {
                 </div>
 
                 {/* REFUND PREVIEW */}
-                {preview && (
+                {preview && fault && (
                   <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-4">
                     <p className="text-sm font-semibold text-indigo-900">
-                      Customer will be refunded: Rs {preview.customerGets.toLocaleString()}
+                      Customer will be refunded: Rs {(fault === 'seller' ? preview.seller.refundToCustomer : preview.customer.refundToCustomer).toLocaleString()}
                     </p>
-                    <p className="text-xs text-indigo-700 mt-1">{preview.note}</p>
+                    <p className="text-xs text-indigo-700 mt-1">{previewNote()}</p>
+                    <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-indigo-100 text-xs text-indigo-800">
+                      <div><span className="block text-indigo-500">Seller gives back</span>Rs {preview.seller.sellerReversal.toLocaleString()}</div>
+                      <div><span className="block text-indigo-500">NepShop gives back</span>Rs {preview.seller.commissionReversal.toLocaleString()}</div>
+                      <div><span className="block text-indigo-500">Voucher reclaimed</span>Rs {preview.voucherSlice.toLocaleString()}</div>
+                    </div>
+                    {preview.isFullShipmentReturn && (
+                      <p className="text-xs font-medium text-indigo-900 mt-2">📦 This is the entire package — settlement will be marked fully refunded.</p>
+                    )}
                   </div>
                 )}
 
@@ -350,8 +391,13 @@ const ReturnsManagement = () => {
                   >
                     <option value="">Select agent for return pickup</option>
                     {agents.map((a) => (
-                      <option key={a._id} value={a._id}>
-                        {a.firstName} {a.lastName} — {a.vehicleType}
+                      <option
+                        key={a._id}
+                        value={a._id}
+                        style={{ color: a.isAvailable ? '#111827' : '#9ca3af' }}
+                      >
+                        {a.isAvailable ? '🟢' : '⚪'} {a.firstName} {a.lastName} — {a.vehicleType}
+                        {a.isAvailable ? ' (Available)' : ' (Offline)'}
                       </option>
                     ))}
                   </select>

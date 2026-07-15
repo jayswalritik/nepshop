@@ -6,6 +6,7 @@ const {
   cancelOrder,
   getSellerOrders,
   updateOrderStatus,
+  cancelShipmentByCustomer,
 } = require('../controllers/orderController');
 const { protect, authorizeRoles, requireActive } = require('../middleware/authMiddleware');
 
@@ -17,6 +18,10 @@ router.use(requireActive);
 // ── Customer routes ───────────────────────────────────────
 router.post('/',           authorizeRoles('customer'), placeOrder);
 router.get('/my',          authorizeRoles('customer'), getMyOrders);
+// Specific path before /:id/cancel — per-PACKAGE cancel (one shipment), as
+// opposed to /:id/cancel below which cancels every eligible shipment on the
+// whole order.
+router.put('/shipments/:shipmentId/cancel', authorizeRoles('customer'), cancelShipmentByCustomer);
 router.put('/:id/cancel',  authorizeRoles('customer'), cancelOrder);
 
 // ── Seller routes ─────────────────────────────────────────

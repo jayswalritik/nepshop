@@ -322,7 +322,12 @@ const OrderMonitoring = () => {
                 onChange={(e) => setNewStatus(e.target.value)}
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white mb-3"
               >
-                {['pending', 'confirmed', 'packed', 'dispatched', 'delivered', 'cancelled'].map(s => (
+                {/* Restricted to what admin override can safely apply — packed/
+                    dispatched/delivered/returned bypass real side-effects
+                    (settlement init, agent assignment) a bare override can't
+                    reproduce; those statuses only happen through their normal
+                    flow (seller/agent/return process), never an override. */}
+                {['pending', 'confirmed', 'cancelled'].map(s => (
                   <option key={s} value={s}>
                     {s.charAt(0).toUpperCase() + s.slice(1)}
                     {s === selected.status ? ' (current)' : ''}

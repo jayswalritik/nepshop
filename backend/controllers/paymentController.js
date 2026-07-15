@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const axios        = require('axios');
 const crypto       = require('crypto');
 const Order        = require('../models/Order');
+const Shipment     = require('../models/Shipment');
 const User         = require('../models/User');
 const {
   sendOrderStatusEmail,
@@ -10,8 +11,20 @@ const {
 const Cart    = require('../models/Cart');
 const Product = require('../models/Product');
 
-// Helper — create order from cart
-const createOrderFromCart = async (userId, orderData) => {
+const { groupItemsBySeller, allocateCouponDiscount, round2 } = require('../utils/orderPricing');
+const { buildShipmentEmailView } = require('../utils/orderAggregate');
+const { isSelected } = require('../utils/cartSelection');
+
+// Helper — create order (+ per-seller shipments) from cart. Used by both the
+// Khalti and eSewa verify handlers, AFTER payment is confirmed.
+//
+// verifiedPaidAmount (Rs, optional): what the payment gateway actually
+// confirmed as paid, at verification time. When provided, the freshly
+// recomputed selected-subset total is compared against it — if the cart
+// changed (items deselected/removed/qty changed) between initiation and
+// verification, the two can diverge, and this throws loudly instead of
+// creating an order that doesn't match the money actually received.
+const createOrderFromCart = async (userId, orderData, verifiedPaidAmount) => {
   const Order = require('../models/Order');
 
   const cart = await Cart.findOne({ customer: userId })
@@ -21,9 +34,15 @@ const createOrderFromCart = async (userId, orderData) => {
     throw new Error('Cart is empty');
   }
 
+  // Selective checkout — only SELECTED items flow into the order.
+  const selectedItems = cart.items.filter(isSelected);
+  if (selectedItems.length === 0) {
+    throw new Error('Select at least one item to check out');
+  }
+
   // Validate stock
   const orderItems = [];
-  for (const item of cart.items) {
+  for (const item of selectedItems) {
     const product = item.product;
     if (!product || !product.isActive) {
       throw new Error(`Product "${product?.name}" is no longer available`);
@@ -41,29 +60,48 @@ const createOrderFromCart = async (userId, orderData) => {
     });
   }
 
-  const subtotal       = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const deliveryCharge = subtotal >= 2000 ? 0 : 100;
   const commissionRate = 5;
-  const commissionAmount = +(subtotal * commissionRate / 100).toFixed(2); // commission on product price only
+  const { groups, subtotal, deliveryCharge, commissionAmount } = groupItemsBySeller(orderItems, commissionRate);
 
   // ── Apply coupon (platform-funded — does not affect seller/commission) ──
+  // Atomic redeem, same as orderController.placeOrder — checks + consumes
+  // global usageLimit AND this customer's perUserLimit in one race-safe
+  // update. Fails the coupon step cleanly (no discount) if the limits no
+  // longer hold, same as any other invalid-coupon reason.
   let couponDiscount = 0;
   let couponCode     = null;
   if (orderData.couponCode) {
     const Coupon = require('../models/Coupon');
-    const coupon = await Coupon.findOne({ code: orderData.couponCode.toUpperCase().trim() });
-    if (coupon) {
-      const result = coupon.validateFor(subtotal);
-      if (result.valid) {
-        couponDiscount = result.discount;
-        couponCode     = coupon.code;
-        coupon.usedCount += 1;
-        await coupon.save();
-      }
+    const redemption = await Coupon.redeemFor(orderData.couponCode, userId, subtotal);
+    if (redemption.ok) {
+      couponDiscount = redemption.discount;
+      couponCode     = redemption.coupon.code;
     }
   }
 
-  const total = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
+  const total = round2(subtotal + deliveryCharge - couponDiscount);
+
+  // ── Mid-payment consistency guard ───────────────────────
+  // The cart may have changed between payment initiation and this
+  // verification step (a real time gap — the customer is off on the gateway
+  // site). Compare the FRESH selected-subset total against what the gateway
+  // actually verified as paid; on mismatch, do NOT create a wrong order.
+  if (verifiedPaidAmount !== undefined && verifiedPaidAmount !== null && round2(verifiedPaidAmount) !== total) {
+    // Undo the coupon redemption we just consumed — no order will be created,
+    // so this customer's use of it must not be burned.
+    if (couponCode) {
+      const Coupon = require('../models/Coupon');
+      await Coupon.restoreFor(couponCode, userId);
+    }
+    throw new Error(
+      'Your cart changed after payment was started, so the verified amount no longer matches your order total. ' +
+      'No order was created — your payment was not lost. Please contact support with your transaction details.'
+    );
+  }
+
+  // Allocate the discount across items proportionally (mutates orderItems —
+  // and groups[].items, same object references — see orderPricing.js).
+  allocateCouponDiscount(orderItems, couponDiscount);
 
   const order = await Order.create({
     customer: userId,
@@ -82,8 +120,23 @@ const createOrderFromCart = async (userId, orderData) => {
     paymentStatus: 'paid',
   });
 
-  // Deduct stock
-  for (const item of cart.items) {
+  const shipments = await Shipment.insertMany(groups.map(g => ({
+    order:  order._id,
+    seller: g.seller,
+    items: g.items.map(i => ({
+      product: i.product, name: i.name, image: i.image, price: i.price, quantity: i.quantity,
+      couponAllocation: i.couponAllocation || 0,
+    })),
+    sellerSubtotal:   g.sellerSubtotal,
+    deliveryCharge:   g.deliveryCharge,
+    commissionRate:   g.commissionRate,
+    commissionAmount: g.commissionAmount,
+    deliveryEarning:  g.deliveryEarning,
+    couponAllocation: round2(g.items.reduce((s, i) => s + (i.couponAllocation || 0), 0)),
+  })));
+
+  // Deduct stock — selected items only
+  for (const item of selectedItems) {
     const updated = await Product.findByIdAndUpdate(
       item.product._id,
       { $inc: { stock: -item.quantity } },
@@ -98,11 +151,31 @@ const createOrderFromCart = async (userId, orderData) => {
     }
   }
 
-  // Clear cart
-  cart.items = [];
-  await cart.save();
+  // Remove only the ordered (selected) items from the cart — unselected
+  // items remain, exactly as they were.
+  const orderedProductIds = selectedItems.map((item) => item.product._id);
+  await Cart.updateOne(
+    { customer: userId },
+    { $pull: { items: { product: { $in: orderedProductIds } } } }
+  );
 
-  return order;
+  return { order, shipments };
+};
+
+// Helper — same grouping logic as order creation, computes the amount to
+// charge at Khalti/eSewa initiation so it can NEVER drift from what
+// createOrderFromCart charges after payment is confirmed. Callers pass the
+// already-SELECTED subset (see initiateKhalti/initiateEsewa) — filtering
+// happens at the call site, this stays a pure pricing pass-through.
+const computeCartPricing = (cartItems, couponResult) => {
+  // cartItems here are populated Cart.items — each has .product (with seller) and .price/.quantity
+  const pseudoItems = cartItems.map(i => ({
+    price: i.price, quantity: i.quantity, seller: i.product.seller,
+  }));
+  const { subtotal, deliveryCharge } = groupItemsBySeller(pseudoItems);
+  const couponDiscount = couponResult?.discount || 0;
+  const total = round2(subtotal + deliveryCharge - couponDiscount);
+  return { subtotal, deliveryCharge, total };
 };
 
 // ─────────────────────────────────────────────────────────
@@ -122,24 +195,29 @@ const initiateKhalti = asyncHandler(async (req, res) => {
 
   // Get cart to calculate amount
   const cart = await Cart.findOne({ customer: req.user._id })
-    .populate('items.product', 'name price discount stock isActive');
+    .populate('items.product', 'name price discount stock isActive seller');
 
   if (!cart || cart.items.length === 0) {
     res.status(400);
     throw new Error('Cart is empty');
   }
 
-  const subtotal       = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const deliveryCharge = subtotal >= 2000 ? 0 : 100;
+  // Selective checkout — only SELECTED items are charged/initiated.
+  const selectedItems = cart.items.filter(isSelected);
+  if (selectedItems.length === 0) {
+    res.status(400);
+    throw new Error('Select at least one item to check out');
+  }
 
   // ── Apply coupon to the amount charged ──────────────────
   let couponDiscount = 0;
   let couponCode     = null;
+  const rawSubtotal = selectedItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
   if (req.body.couponCode) {
     const Coupon = require('../models/Coupon');
     const coupon = await Coupon.findOne({ code: req.body.couponCode.toUpperCase().trim() });
     if (coupon) {
-      const result = coupon.validateFor(subtotal);
+      const result = coupon.validateFor(rawSubtotal, req.user._id);
       if (result.valid) {
         couponDiscount = result.discount;
         couponCode     = coupon.code;
@@ -147,7 +225,7 @@ const initiateKhalti = asyncHandler(async (req, res) => {
     }
   }
 
-  const total         = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
+  const { total } = computeCartPricing(selectedItems, { discount: couponDiscount });
   const amountInPaisa  = Math.round(total * 100);
 
   const orderData = {
@@ -218,8 +296,15 @@ const verifyKhalti = asyncHandler(async (req, res) => {
   const khaltiData = response.data;
 
   if (khaltiData.status === 'Completed') {
+    // Khalti reports the confirmed-paid amount in paisa — convert to Rs so
+    // createOrderFromCart can compare it against the freshly recomputed
+    // selected-subset total (mid-payment cart-drift guard).
+    const verifiedPaidAmount = khaltiData.total_amount != null
+      ? round2(khaltiData.total_amount / 100)
+      : undefined;
+
     // Create order NOW after payment confirmed
-    const order = await createOrderFromCart(req.user._id, orderData);
+    const { order, shipments } = await createOrderFromCart(req.user._id, orderData, verifiedPaidAmount);
 
     // Send emails
     const customer = await User.findById(req.user._id);
@@ -229,10 +314,9 @@ const verifyKhalti = asyncHandler(async (req, res) => {
     } = require('../utils/emailService');
 
     sendOrderPlacedEmail(customer, order);
-    const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
-    for (const sellerId of sellerIds) {
-      const seller = await User.findById(sellerId);
-      if (seller) sendNewOrderToSeller(seller, order);
+    for (const shipment of shipments) {
+      const seller = await User.findById(shipment.seller);
+      if (seller) sendNewOrderToSeller(seller, buildShipmentEmailView(order, shipment));
     }
 
     return res.status(200).json({
@@ -268,24 +352,29 @@ const initiateEsewa = asyncHandler(async (req, res) => {
   }
 
   const cart = await Cart.findOne({ customer: req.user._id })
-    .populate('items.product', 'name price stock isActive');
+    .populate('items.product', 'name price stock isActive seller');
 
   if (!cart || cart.items.length === 0) {
     res.status(400);
     throw new Error('Cart is empty');
   }
 
-  const subtotal       = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  const deliveryCharge = subtotal >= 2000 ? 0 : 100;
+  // Selective checkout — only SELECTED items are charged/initiated.
+  const selectedItems = cart.items.filter(isSelected);
+  if (selectedItems.length === 0) {
+    res.status(400);
+    throw new Error('Select at least one item to check out');
+  }
 
   // ── Apply coupon to the amount charged ──────────────────
   let couponDiscount = 0;
   let couponCode     = null;
+  const rawSubtotal = selectedItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
   if (req.body.couponCode) {
     const Coupon = require('../models/Coupon');
     const coupon = await Coupon.findOne({ code: req.body.couponCode.toUpperCase().trim() });
     if (coupon) {
-      const result = coupon.validateFor(subtotal);
+      const result = coupon.validateFor(rawSubtotal, req.user._id);
       if (result.valid) {
         couponDiscount = result.discount;
         couponCode     = coupon.code;
@@ -293,7 +382,7 @@ const initiateEsewa = asyncHandler(async (req, res) => {
     }
   }
 
-  const total = +(subtotal + deliveryCharge - couponDiscount).toFixed(2);
+  const { total } = computeCartPricing(selectedItems, { discount: couponDiscount });
 
   const orderData = {
     deliveryAddress,
@@ -362,15 +451,19 @@ const verifyEsewa = asyncHandler(async (req, res) => {
       throw new Error('Payment amount mismatch');
     }
 
-    const order = await createOrderFromCart(req.user._id, parsedOrderData);
+    // Above: guards against the redirect payload being tampered with (gateway-
+    // reported amount vs. what we told it to charge at initiation). Separately,
+    // createOrderFromCart re-checks the verified amount against a FRESH
+    // recompute of the selected cart subset — guards against the cart itself
+    // changing during the gateway round-trip (see its verifiedPaidAmount doc).
+    const { order, shipments } = await createOrderFromCart(req.user._id, parsedOrderData, parseFloat(totalAmount));
 
     const customer = await User.findById(req.user._id);
     const { sendOrderPlacedEmail, sendNewOrderToSeller } = require('../utils/emailService');
     sendOrderPlacedEmail(customer, order);
-    const sellerIds = [...new Set(order.items.map(i => i.seller.toString()))];
-    for (const sellerId of sellerIds) {
-      const seller = await User.findById(sellerId);
-      if (seller) sendNewOrderToSeller(seller, order);
+    for (const shipment of shipments) {
+      const seller = await User.findById(shipment.seller);
+      if (seller) sendNewOrderToSeller(seller, buildShipmentEmailView(order, shipment));
     }
 
     return res.status(200).json({

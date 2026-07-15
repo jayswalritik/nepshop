@@ -1,5 +1,7 @@
 // One-time migration — backfills roles[] and activeRole for existing users
-require('dotenv').config();
+const path = require('path');
+// Absolute path — must not depend on the directory this script is launched from.
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const mongoose = require('mongoose');
 const User     = require('./models/User');
 
