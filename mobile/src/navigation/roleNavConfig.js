@@ -16,6 +16,10 @@ export const ROLE_NAV_CONFIG = {
       { name: 'orders', title: 'Orders' },
       { name: 'account', title: 'Account' },
     ],
+    // Routes reachable from a tab (e.g. "See all" on Home, tapping a
+    // product card) but not shown in the tab bar themselves — registered
+    // with the tabs navigator via href:null in RoleTabs.js.
+    hiddenRoutes: ['products', 'product/[id]'],
   },
   delivery: {
     label: 'Delivery Agent',

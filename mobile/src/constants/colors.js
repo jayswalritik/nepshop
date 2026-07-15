@@ -16,4 +16,6 @@ export const COLORS = {
   heroText: '#C7D2FE',
   glowIndigo: 'rgba(99, 102, 241, 0.35)',
   glowOrange: 'rgba(249, 115, 22, 0.25)',
+  success: '#16A34A',
+  star: '#FBBF24',
 };

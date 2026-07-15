@@ -7,6 +7,7 @@ import { COLORS } from '../constants/colors';
 // registry, so it stays in one place.
 export default function RoleTabs({ role }) {
   const config = ROLE_NAV_CONFIG[role];
+  const hiddenRoutes = config.hiddenRoutes || [];
 
   return (
     <Tabs
@@ -20,6 +21,9 @@ export default function RoleTabs({ role }) {
     >
       {config.tabs.map((tab) => (
         <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.title }} />
+      ))}
+      {hiddenRoutes.map((name) => (
+        <Tabs.Screen key={name} name={name} options={{ href: null, headerShown: false }} />
       ))}
     </Tabs>
   );

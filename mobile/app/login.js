@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth } from '../src/context/AuthContext';
 import API from '../src/utils/api';
@@ -147,7 +148,11 @@ export default function LoginScreen() {
                 hitSlop={10}
                 onPress={() => setShowPassword((v) => !v)}
               >
-                <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁️'}</Text>
+                <Ionicons
+                  name={showPassword ? 'eye-off' : 'eye'}
+                  size={20}
+                  color={COLORS.textMuted}
+                />
               </Pressable>
             </View>
 
@@ -338,9 +343,6 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 16,
     justifyContent: 'center',
-  },
-  eyeIcon: {
-    fontSize: 18,
   },
   error: {
     color: COLORS.danger,
