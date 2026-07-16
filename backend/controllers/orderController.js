@@ -9,6 +9,7 @@ const { groupItemsBySeller, allocateCouponDiscount, round2 } = require('../utils
 const { recomputeOrder, buildShipmentEmailView } = require('../utils/orderAggregate');
 const { isSelected } = require('../utils/cartSelection');
 const { cancelShipment, finalizeOrderCancellation } = require('../utils/shipmentCancellation');
+const { computeOrderBuckets, computeShipmentSummaries } = require('../utils/orderSummary');
 
 const {
   sendOrderPlacedEmail,
@@ -280,6 +281,48 @@ const getOrderById = asyncHandler(async (req, res) => {
       createdAt:       order.createdAt,
     },
     shipments: scoped,
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Paid / To-pay-on-delivery / Refunded buckets + per-shipment
+//          cancel-refund preview — server-computed equivalent of what
+//          frontend/src/pages/customer/OrdersPage.jsx currently computes
+//          client-side (its footer money line and CancelPackageModal).
+//          All arithmetic delegated to backend/utils/orderSummary.js —
+//          nothing is computed in this handler.
+// @route   GET /api/orders/:id/summary
+// @access  Customer only (must own the order)
+// ─────────────────────────────────────────────────────────
+const getOrderSummary = asyncHandler(async (req, res) => {
+  const order = await Order.findById(req.params.id);
+  if (!order) {
+    res.status(404);
+    throw new Error('Order not found');
+  }
+
+  // Same ownership check cancelOrder/cancelShipmentByCustomer already use
+  // (this route is customer-only, unlike getOrderById which also serves
+  // seller/admin/delivery — no need for that function's broader role check).
+  if (order.customer.toString() !== req.user._id.toString()) {
+    res.status(403);
+    throw new Error('Not authorized');
+  }
+
+  const shipments = await Shipment.find({ order: order._id });
+
+  const buckets = computeOrderBuckets(order, shipments);
+  const shipmentSummaries = computeShipmentSummaries(shipments);
+
+  res.status(200).json({
+    success: true,
+    orderId: order._id,
+    buckets: {
+      paid: buckets.paid,
+      toPayOnDelivery: buckets.toPayOnDelivery,
+      refunded: buckets.refunded,
+    },
+    shipments: shipmentSummaries,
   });
 });
 
@@ -557,6 +600,7 @@ module.exports = {
   placeOrder,
   getMyOrders,
   getOrderById,
+  getOrderSummary,
   cancelOrder,
   getSellerOrders,
   updateOrderStatus,

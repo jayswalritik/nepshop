@@ -25,6 +25,15 @@ export const COLORS = {
   warning: '#D97706',
   warningSoft: '#FEF3C7',
   star: '#FBBF24',
+  // Added for order-status chips (mobile/app/(customer)/orders.js) — mirrors
+  // web's OrdersPage.jsx statusColors 'confirmed' (blue) and 'dispatched'
+  // (purple); every other status already has a home in the tokens above
+  // (packed/pending/delivered/cancelled/returned reuse primary/warning/
+  // success/danger/tabInactive respectively).
+  info: '#1D4ED8',
+  infoSoft: '#DBEAFE',
+  purple: '#7E22CE',
+  purpleSoft: '#F3E8FF',
 };
 
 // One spacing scale, used instead of scattering magic numbers through

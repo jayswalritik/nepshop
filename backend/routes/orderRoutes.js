@@ -3,6 +3,7 @@ const {
   placeOrder,
   getMyOrders,
   getOrderById,
+  getOrderSummary,
   cancelOrder,
   getSellerOrders,
   updateOrderStatus,
@@ -23,6 +24,10 @@ router.get('/my',          authorizeRoles('customer'), getMyOrders);
 // whole order.
 router.put('/shipments/:shipmentId/cancel', authorizeRoles('customer'), cancelShipmentByCustomer);
 router.put('/:id/cancel',  authorizeRoles('customer'), cancelOrder);
+// Paid / To-pay-on-delivery / Refunded buckets + per-shipment cancel-refund
+// preview — server-computed equivalent of what OrdersPage.jsx currently
+// computes client-side (see backend/utils/orderSummary.js).
+router.get('/:id/summary', authorizeRoles('customer'), getOrderSummary);
 
 // ── Seller routes ─────────────────────────────────────────
 router.get('/seller',      authorizeRoles('seller'),   getSellerOrders);
