@@ -190,21 +190,63 @@ const updateProduct = asyncHandler(async (req, res) => {
     category, stock, discount, isActive,
   } = req.body;
 
-  // Handle new image uploads
-let images = product.images;
-if (req.files && req.files.length > 0) {
-  // Delete old images from Cloudinary
-  for (const img of product.images) {
-    await cloudinary.uploader.destroy(img.publicId);
+  // New images are APPENDED, existing images are only ever removed when the
+  // seller explicitly marks them in the edit form (ProductList.jsx's
+  // EditProductModal) and sends their publicId back here — this is the one
+  // legitimate destructive path, so it's built to a strict order of
+  // operations: (1) validate everything, including that every removal
+  // publicId actually belongs to THIS product — anything sent that doesn't
+  // match is silently dropped from the destroy list (and reported in the
+  // response message), never trusted blindly; (2) upload new images;
+  // (3) save the product with the final image set; (4) ONLY once that save
+  // has succeeded, destroy the validated removals on Cloudinary. If destroy
+  // ran before the save and the save then failed, the images would be gone
+  // while the product still referenced them — data loss plus broken image
+  // links. The reverse (save succeeds, a destroy call fails) just orphans
+  // an asset on Cloudinary, which is harmless, so destroy failures are
+  // logged, never thrown.
+
+  // FormData sends repeated fields under the same name for the removal
+  // list (matching how `images` files are already sent), which multer
+  // collects into req.body.removePublicIds as either a single string (one
+  // value) or an array (multiple) — [].concat() normalizes both cases
+  // without needing JSON stringify/parse on either side of the request.
+  const removePublicIds = req.body.removePublicIds
+    ? [].concat(req.body.removePublicIds)
+    : [];
+
+  const existingIds = new Set(product.images.map((img) => img.publicId));
+  const validRemoveIds = removePublicIds.filter((id) => existingIds.has(id));
+  const invalidRemoveIds = removePublicIds.filter((id) => !existingIds.has(id));
+
+  const keptImages = product.images.filter((img) => !validRemoveIds.includes(img.publicId));
+  const incomingFileCount = req.files ? req.files.length : 0;
+  const finalImageCount = keptImages.length + incomingFileCount;
+
+  if (finalImageCount < 1) {
+    res.status(400);
+    throw new Error(
+      'A product needs at least 1 image — add a replacement before removing the last one.'
+    );
   }
-  // Upload new images
-  const uploadPromises = req.files.map((file) => uploadToCloudinary(file.buffer));
-  const uploadedImages = await Promise.all(uploadPromises);
-  images = uploadedImages.map((result) => ({
-    url:      result.secure_url,
-    publicId: result.public_id,
-  }));
-}
+  if (finalImageCount > 5) {
+    res.status(400);
+    throw new Error(
+      `This would leave ${finalImageCount} images — the maximum is 5. Remove more or add fewer.`
+    );
+  }
+
+  // Upload new images only after every check above has passed.
+  let images = keptImages;
+  if (incomingFileCount > 0) {
+    const uploadPromises = req.files.map((file) => uploadToCloudinary(file.buffer));
+    const uploadedImages = await Promise.all(uploadPromises);
+    const newImages = uploadedImages.map((result) => ({
+      url:      result.secure_url,
+      publicId: result.public_id,
+    }));
+    images = [...keptImages, ...newImages];
+  }
 
   product.name         = name         || product.name;
   product.description  = description  || product.description;
@@ -225,6 +267,17 @@ if (req.files && req.files.length > 0) {
 
   const updated = await product.save();
 
+  // Destroy removed images ONLY after the save above has succeeded, and
+  // ONLY the validated list — never product.images generally (that was
+  // exactly the previous bug).
+  for (const publicId of validRemoveIds) {
+    try {
+      await cloudinary.uploader.destroy(publicId);
+    } catch (err) {
+      console.warn(`Failed to delete Cloudinary image ${publicId} after product update:`, err.message);
+    }
+  }
+
   // Low stock alert — send email if stock drops to 5 or below
   if (updated.stock <= 5 && updated.stock > 0) {
     const seller = await User.findById(req.user._id);
@@ -237,7 +290,9 @@ if (req.files && req.files.length > 0) {
 
   res.status(200).json({
     success: true,
-    message: 'Product updated successfully',
+    message: invalidRemoveIds.length > 0
+      ? `Product updated successfully. ${invalidRemoveIds.length} requested image removal${invalidRemoveIds.length === 1 ? '' : 's'} ignored (not part of this product).`
+      : 'Product updated successfully',
     product: productData,
   });
 });
