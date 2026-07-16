@@ -23,10 +23,11 @@ export default function Toast({ toast, onHide }) {
 
   if (!toast) return null;
 
+  const variantStyle =
+    toast.type === 'error' ? styles.error : toast.type === 'info' ? styles.info : styles.success;
+
   return (
-    <Animated.View
-      style={[styles.toast, toast.type === 'error' ? styles.error : styles.success, { opacity }]}
-    >
+    <Animated.View style={[styles.toast, variantStyle, { opacity }]}>
       <Text style={styles.text}>{toast.message}</Text>
     </Animated.View>
   );
@@ -50,5 +51,6 @@ const styles = StyleSheet.create({
   },
   success: { backgroundColor: COLORS.success },
   error: { backgroundColor: COLORS.danger },
+  info: { backgroundColor: COLORS.primary },
   text: { color: '#fff', fontSize: 13, fontWeight: '600', textAlign: 'center' },
 });

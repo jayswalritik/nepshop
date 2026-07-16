@@ -12,8 +12,10 @@ export default function RoleTabs({ role }) {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: COLORS.primary },
-        headerTintColor: '#fff',
+        // Every tab screen renders its own header (ScreenHeader, or Home's
+        // gradient hero) — the default react-navigation title bar never
+        // shows anywhere in the app.
+        headerShown: false,
         tabBarActiveTintColor: COLORS.accent,
         tabBarInactiveTintColor: COLORS.tabInactive,
         tabBarStyle: { backgroundColor: COLORS.background, borderTopColor: COLORS.border },

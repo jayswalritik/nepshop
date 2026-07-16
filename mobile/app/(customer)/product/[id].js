@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,11 +15,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import API from '../../../src/utils/api';
 import { addToCart } from '../../../src/utils/cart';
+import ScreenHeader from '../../../src/components/ScreenHeader';
 import Toast from '../../../src/components/Toast';
-import { COLORS } from '../../../src/constants/colors';
+import { COLORS, RADII, SHADOWS, SPACING } from '../../../src/constants/colors';
 import { getDisplayPrice, formatRs } from '../../../src/utils/format';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 // Not a modal, unlike frontend/src/pages/customer/ProductsPage.jsx's
 // ProductDetailModal — mobile pattern is a pushed screen, routed as
@@ -28,6 +27,9 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 // from the web modal aren't part of this task's scope, so they're omitted.
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams();
+  // useWindowDimensions (not Dimensions.get, captured once at module load)
+  // so the gallery stays correctly sized across rotation/resize.
+  const { width: screenWidth } = useWindowDimensions();
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -83,8 +85,8 @@ export default function ProductDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top']}>
-        <Header title="Product" />
+      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+        <ScreenHeader title="Product" onBack={() => router.back()} />
         <View style={styles.centerFill}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
@@ -94,8 +96,8 @@ export default function ProductDetailScreen() {
 
   if (notFound || !product) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top']}>
-        <Header title="Product" />
+      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+        <ScreenHeader title="Product" onBack={() => router.back()} />
         <View style={styles.centerFill}>
           <Ionicons name="alert-circle-outline" size={40} color={COLORS.tabInactive} />
           <Text style={styles.emptyTitle}>Product not found</Text>
@@ -111,26 +113,39 @@ export default function ProductDetailScreen() {
     : null;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <Header title={product.name} />
+    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <ScreenHeader title={product.name} onBack={() => router.back()} />
+
       <ScrollView contentContainerStyle={styles.content}>
         {images.length > 0 ? (
           <>
-            <FlatList
-              ref={galleryRef}
-              data={images}
-              keyExtractor={(_, i) => String(i)}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onMomentumScrollEnd={(e) => {
-                const idx = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-                setActiveImage(idx);
-              }}
-              renderItem={({ item }) => (
-                <Image source={{ uri: item.url }} style={styles.galleryImage} />
+            <View>
+              <FlatList
+                ref={galleryRef}
+                data={images}
+                keyExtractor={(_, i) => String(i)}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={(e) => {
+                  const idx = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+                  setActiveImage(idx);
+                }}
+                renderItem={({ item }) => (
+                  <Image
+                    source={{ uri: item.url }}
+                    style={[styles.galleryImage, { width: screenWidth, height: screenWidth * 0.9 }]}
+                  />
+                )}
+              />
+              {images.length > 1 && (
+                <View style={styles.dotRow} pointerEvents="none">
+                  {images.map((_, i) => (
+                    <View key={i} style={[styles.dot, activeImage === i && styles.dotActive]} />
+                  ))}
+                </View>
               )}
-            />
+            </View>
             {images.length > 1 && (
               <View style={styles.thumbRow}>
                 {images.map((img, i) => (
@@ -145,7 +160,7 @@ export default function ProductDetailScreen() {
             )}
           </>
         ) : (
-          <View style={[styles.galleryImage, styles.galleryFallback]}>
+          <View style={[styles.galleryImage, styles.galleryFallback, { width: screenWidth, height: screenWidth * 0.9 }]}>
             <Ionicons name="image-outline" size={48} color={COLORS.tabInactive} />
           </View>
         )}
@@ -154,7 +169,10 @@ export default function ProductDetailScreen() {
           <Text style={styles.category}>{product.category}</Text>
           <Text style={styles.name}>{product.name}</Text>
           {product.seller?.shopName && (
-            <Text style={styles.seller}>by {product.seller.shopName}</Text>
+            <View style={styles.sellerRow}>
+              <Ionicons name="storefront-outline" size={13} color={COLORS.textMuted} />
+              <Text style={styles.seller}>{product.seller.shopName}</Text>
+            </View>
           )}
 
           <View style={styles.priceRow}>
@@ -175,50 +193,21 @@ export default function ProductDetailScreen() {
             </Text>
           </View>
 
+          <Text style={styles.sectionHeading}>Description</Text>
           <Text style={styles.description}>{product.description}</Text>
 
           {/* No separate "specifications" field exists on the Product model
               (backend/models/Product.js) — this is a compact summary of the
               fields the API actually returns, not invented data. */}
+          <Text style={styles.sectionHeading}>Specifications</Text>
           <View style={styles.specs}>
             <SpecRow label="Category" value={product.category} />
             <SpecRow label="Seller" value={product.seller?.shopName || '—'} />
             <SpecRow label="Stock" value={outOfStock ? 'Out of stock' : `${product.stock} units`} />
           </View>
 
-          {!outOfStock && (
-            <View style={styles.qtyRow}>
-              <Text style={styles.qtyLabel}>Qty:</Text>
-              <View style={styles.stepper}>
-                <Pressable
-                  style={styles.stepperButton}
-                  onPress={() => setQuantity((q) => Math.max(1, q - 1))}
-                >
-                  <Ionicons name="remove" size={18} color={COLORS.text} />
-                </Pressable>
-                <Text style={styles.stepperValue}>{quantity}</Text>
-                <Pressable
-                  style={styles.stepperButton}
-                  onPress={() => setQuantity((q) => Math.min(product.stock, q + 1))}
-                >
-                  <Ionicons name="add" size={18} color={COLORS.text} />
-                </Pressable>
-              </View>
-            </View>
-          )}
-
-          <Pressable
-            style={[styles.addButton, (outOfStock || adding) && styles.addButtonDisabled]}
-            disabled={outOfStock || adding}
-            onPress={handleAddToCart}
-          >
-            <Text style={styles.addButtonText}>
-              {adding ? 'Adding…' : outOfStock ? 'Out of stock' : 'Add to Cart'}
-            </Text>
-          </Pressable>
-
           <View style={styles.reviewsSection}>
-            <Text style={styles.reviewsHeading}>Reviews</Text>
+            <Text style={styles.sectionHeading}>Reviews</Text>
             {reviewsLoading ? (
               <ActivityIndicator color={COLORS.primary} style={styles.reviewsLoader} />
             ) : reviews.length === 0 ? (
@@ -256,19 +245,39 @@ export default function ProductDetailScreen() {
         </View>
       </ScrollView>
 
+      {/* Sticky bottom bar — quantity stepper + Add to Cart, always visible */}
+      <View style={styles.stickyBar}>
+        {!outOfStock && (
+          <View style={styles.stepper}>
+            <Pressable
+              style={styles.stepperButton}
+              onPress={() => setQuantity((q) => Math.max(1, q - 1))}
+            >
+              <Ionicons name="remove" size={18} color={COLORS.text} />
+            </Pressable>
+            <Text style={styles.stepperValue}>{quantity}</Text>
+            <Pressable
+              style={styles.stepperButton}
+              onPress={() => setQuantity((q) => Math.min(product.stock, q + 1))}
+            >
+              <Ionicons name="add" size={18} color={COLORS.text} />
+            </Pressable>
+          </View>
+        )}
+
+        <Pressable
+          style={[styles.addButton, (outOfStock || adding) && styles.addButtonDisabled]}
+          disabled={outOfStock || adding}
+          onPress={handleAddToCart}
+        >
+          <Text style={styles.addButtonText}>
+            {adding ? 'Adding…' : outOfStock ? 'Out of stock' : 'Add to Cart'}
+          </Text>
+        </Pressable>
+      </View>
+
       <Toast toast={toast} onHide={() => setToast(null)} />
     </SafeAreaView>
-  );
-}
-
-function Header({ title }) {
-  return (
-    <View style={styles.header}>
-      <Pressable style={styles.backButton} onPress={() => router.back()} hitSlop={10}>
-        <Ionicons name="arrow-back" size={22} color={COLORS.text} />
-      </Pressable>
-      <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-    </View>
   );
 }
 
@@ -286,27 +295,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    gap: 12,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
   centerFill: {
     flex: 1,
     alignItems: 'center',
@@ -320,27 +308,46 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   content: {
-    paddingBottom: 40,
+    paddingBottom: 110,
   },
   galleryImage: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH * 0.9,
+    // width/height come from an inline override (screenWidth, from
+    // useWindowDimensions) so it stays correct across rotation/resize.
     backgroundColor: COLORS.surface,
   },
   galleryFallback: {
     alignItems: 'center',
     justifyContent: 'center',
   },
+  dotRow: {
+    position: 'absolute',
+    bottom: SPACING.md,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  dotActive: {
+    backgroundColor: '#fff',
+    width: 16,
+  },
   thumbRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: SPACING.sm,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md - 2,
   },
   thumb: {
     width: 48,
     height: 48,
-    borderRadius: 8,
+    borderRadius: RADII.sm,
     borderWidth: 2,
     borderColor: COLORS.border,
   },
@@ -348,8 +355,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
   },
   info: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.md,
   },
   category: {
     alignSelf: 'flex-start',
@@ -357,27 +364,32 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textMuted,
     backgroundColor: COLORS.surface,
-    paddingHorizontal: 8,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
-    borderRadius: 999,
-    marginBottom: 8,
+    borderRadius: RADII.pill,
+    marginBottom: SPACING.sm,
   },
   name: {
     fontSize: 19,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: 2,
+    marginBottom: 4,
+  },
+  sellerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: SPACING.md,
   },
   seller: {
     fontSize: 13,
     color: COLORS.textMuted,
-    marginBottom: 12,
   },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 12,
+    marginBottom: SPACING.md,
   },
   price: {
     fontSize: 24,
@@ -390,9 +402,9 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
   },
   discountBadge: {
-    backgroundColor: '#FFEDD5',
-    borderRadius: 999,
-    paddingHorizontal: 8,
+    backgroundColor: COLORS.accentSoft,
+    borderRadius: RADII.pill,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: 3,
   },
   discountBadgeText: {
@@ -402,16 +414,16 @@ const styles = StyleSheet.create({
   },
   stockBadge: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 10,
+    borderRadius: RADII.pill,
+    paddingHorizontal: SPACING.md - 2,
     paddingVertical: 4,
-    marginBottom: 14,
+    marginBottom: SPACING.lg - 2,
   },
   stockBadgeIn: {
-    backgroundColor: '#DCFCE7',
+    backgroundColor: COLORS.successSoft,
   },
   stockBadgeOut: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: COLORS.dangerSoft,
   },
   stockBadgeText: {
     fontSize: 12,
@@ -423,19 +435,25 @@ const styles = StyleSheet.create({
   stockTextOut: {
     color: COLORS.danger,
   },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: SPACING.sm,
+  },
   description: {
     fontSize: 14,
     lineHeight: 21,
     color: COLORS.textMuted,
-    marginBottom: 16,
+    marginBottom: SPACING.lg,
   },
   specs: {
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: COLORS.border,
-    paddingVertical: 10,
-    marginBottom: 16,
-    gap: 8,
+    paddingVertical: SPACING.md - 2,
+    marginBottom: SPACING.lg,
+    gap: SPACING.sm,
   },
   specRow: {
     flexDirection: 'row',
@@ -450,77 +468,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
   },
-  qtyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  qtyLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-  },
-  stepperButton: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepperValue: {
-    minWidth: 32,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  addButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  addButtonDisabled: {
-    opacity: 0.5,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
   reviewsSection: {
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
-    paddingTop: 16,
-  },
-  reviewsHeading: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 8,
+    paddingTop: SPACING.lg,
   },
   reviewsLoader: {
-    marginTop: 8,
+    marginTop: SPACING.sm,
   },
   noReviews: {
     fontSize: 13,
     color: COLORS.tabInactive,
     textAlign: 'center',
-    paddingVertical: 12,
+    paddingVertical: SPACING.md,
   },
   avgRatingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 10,
+    marginBottom: SPACING.md,
   },
   avgRatingText: {
     fontSize: 15,
@@ -533,9 +499,9 @@ const styles = StyleSheet.create({
   },
   reviewCard: {
     backgroundColor: COLORS.surface,
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 8,
+    borderRadius: RADII.sm,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
   },
   reviewHeader: {
     flexDirection: 'row',
@@ -556,5 +522,56 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     lineHeight: 17,
+  },
+  stickyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.background,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    ...SHADOWS.stickyBar,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.sm + 2,
+  },
+  stepperButton: {
+    width: 36,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperValue: {
+    minWidth: 30,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  addButton: {
+    flex: 1,
+    backgroundColor: COLORS.accent,
+    borderRadius: RADII.sm + 2,
+    paddingVertical: 13,
+    alignItems: 'center',
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
+  },
+  addButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

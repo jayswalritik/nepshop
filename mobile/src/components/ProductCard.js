@@ -1,16 +1,20 @@
 import { useState } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS } from '../constants/colors';
+import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 import { getDisplayPrice, formatRs } from '../utils/format';
 
 // Shared by the Home rails and the product grid. Sizing is controlled by the
 // parent via `style` (e.g. a fixed width in a horizontal rail, flex:1 in a
-// grid row) — the card itself doesn't assume a layout context.
+// grid row) — the card itself doesn't assume a layout context. Badge/price
+// presentation mirrors frontend/src/pages/customer/ProductsPage.jsx's grid
+// card: discount badge top-left, low-stock badge bottom-left, strike-through
+// original price next to the discounted one.
 export default function ProductCard({ product, onPress, onAddToCart, adding, showReason, style }) {
   const [imgState, setImgState] = useState('loading'); // loading | loaded | error
   const imageUrl = product.images?.[0]?.url;
   const outOfStock = product.stock === 0;
+  const lowStock = product.stock > 0 && product.stock <= 5;
 
   return (
     <Pressable style={[styles.card, style]} onPress={onPress}>
@@ -38,6 +42,11 @@ export default function ProductCard({ product, onPress, onAddToCart, adding, sho
         {product.discount > 0 && (
           <View style={styles.discountBadge}>
             <Text style={styles.discountBadgeText}>{product.discount}% OFF</Text>
+          </View>
+        )}
+        {lowStock && (
+          <View style={styles.lowStockBadge}>
+            <Text style={styles.lowStockBadgeText}>Only {product.stock} left</Text>
           </View>
         )}
       </View>
@@ -83,11 +92,12 @@ export default function ProductCard({ product, onPress, onAddToCart, adding, sho
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: COLORS.background,
-    borderRadius: 14,
+    backgroundColor: COLORS.card,
+    borderRadius: RADII.md,
     borderWidth: 1,
     borderColor: COLORS.border,
     overflow: 'hidden',
+    ...SHADOWS.card,
   },
   imageWrap: {
     width: '100%',
@@ -113,10 +123,10 @@ const styles = StyleSheet.create({
   },
   discountBadge: {
     position: 'absolute',
-    top: 8,
-    left: 8,
+    top: SPACING.sm,
+    left: SPACING.sm,
     backgroundColor: COLORS.accent,
-    borderRadius: 999,
+    borderRadius: RADII.pill,
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
@@ -125,8 +135,23 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  lowStockBadge: {
+    position: 'absolute',
+    bottom: SPACING.sm,
+    left: SPACING.sm,
+    backgroundColor: COLORS.danger,
+    borderRadius: RADII.pill,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  lowStockBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+  },
   info: {
-    padding: 10,
+    padding: SPACING.md,
+    paddingTop: SPACING.sm,
   },
   reason: {
     fontSize: 10,
@@ -136,7 +161,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 999,
+    borderRadius: RADII.pill,
     marginBottom: 4,
   },
   name: {
@@ -150,7 +175,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    marginBottom: 6,
+    marginBottom: SPACING.xs + 2,
     height: 14,
   },
   ratingText: {
@@ -165,7 +190,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 8,
+    marginBottom: SPACING.sm,
   },
   price: {
     fontSize: 14,
@@ -179,8 +204,8 @@ const styles = StyleSheet.create({
   },
   addButton: {
     backgroundColor: COLORS.primary,
-    borderRadius: 8,
-    paddingVertical: 8,
+    borderRadius: RADII.sm,
+    paddingVertical: SPACING.sm,
     alignItems: 'center',
   },
   addButtonDisabled: {

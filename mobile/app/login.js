@@ -10,21 +10,25 @@ import {
   View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../src/context/AuthContext';
 import API from '../src/utils/api';
 import { homeRouteForRole } from '../src/navigation/roleNavConfig';
 import { COLORS } from '../src/constants/colors';
+import AuthHero from '../src/components/AuthHero';
 
 // Same POST /auth/login endpoint the web AuthPage uses. The backend
 // requires a `role` field (see backend/routes/authRoutes.js loginValidation)
 // so, same as web's role tabs, the user picks which mode they're signing
-// into — scoped here to the two roles the app supports.
+// into. Seller is shown (matching the web's three roles) but isn't wired
+// to a real seller experience yet — selecting it shows a coming-soon notice
+// and the form won't submit, same spirit as the unsupported-role screen.
 const LOGIN_ROLES = [
   { key: 'customer', label: 'Customer', icon: '🛍️' },
   { key: 'delivery', label: 'Delivery', icon: '🚚' },
+  { key: 'seller', label: 'Seller', icon: '🏪' },
 ];
 
 export default function LoginScreen() {
@@ -37,9 +41,17 @@ export default function LoginScreen() {
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
 
   const handleLogin = async () => {
     setError('');
+    setNeedsVerification(false);
+    setResendMsg('');
+    // Defense in depth — the Sign In button is already disabled for seller,
+    // but never let this fall through to an actual login attempt.
+    if (role === 'seller') return;
     if (!email || !password) {
       setError('Email and password are required.');
       return;
@@ -52,15 +64,37 @@ export default function LoginScreen() {
       const activeRole = data.user.activeRole || data.user.role;
       router.replace(homeRouteForRole(activeRole) || '/unsupported');
     } catch (err) {
-      setError(err.data?.message || 'Login failed. Please try again.');
+      const msg = err.data?.message || 'Login failed. Please try again.';
+      // Same sentinel the web checks for (backend/controllers/authController.js
+      // loginUser throws this exact string when isEmailVerified is false) —
+      // shown as a resend prompt instead of a generic error, same as web.
+      if (msg === 'EMAIL_NOT_VERIFIED') {
+        setNeedsVerification(true);
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    setResendMsg('');
+    try {
+      await API.post('/auth/resend-verification', { email });
+      setResendMsg('A new verification link has been sent. Please check your inbox.');
+    } catch {
+      setResendMsg('Could not resend. Please try again.');
+    } finally {
+      setResending(false);
     }
   };
 
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
+      <SafeAreaView style={styles.flex} edges={['bottom']}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -70,31 +104,10 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           bounces={false}
         >
-          {/* ── Hero ── */}
-          <LinearGradient
-            colors={[COLORS.primaryDark, COLORS.primary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.hero}
-          >
-            <View style={[styles.glow, styles.glowOrange]} />
-            <View style={[styles.glow, styles.glowIndigo]} />
-
-            <View style={styles.logoRow}>
-              <View style={styles.logoBadge}>
-                <Text style={styles.logoBadgeText}>N</Text>
-              </View>
-              <Text style={styles.wordmark}>
-                Nep<Text style={{ color: COLORS.accentLight }}>Shop</Text>
-              </Text>
-            </View>
-
-            <Text style={styles.eyebrow}>Nepal's Smart Marketplace</Text>
-            <Text style={styles.headline}>
-              Buy, sell & deliver{'\n'}
-              <Text style={{ color: COLORS.accentLight }}>smarter.</Text>
-            </Text>
-          </LinearGradient>
+          <AuthHero eyebrow="Nepal's Smart Marketplace">
+            Buy, sell & deliver{'\n'}
+            <Text style={{ color: COLORS.accentLight }}>smarter.</Text>
+          </AuthHero>
 
           {/* ── Form card ── */}
           <View style={styles.card}>
@@ -156,14 +169,57 @@ export default function LoginScreen() {
               </Pressable>
             </View>
 
+            {role === 'seller' && (
+              <View style={styles.noticeBox}>
+                <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} style={styles.noticeIcon} />
+                <View style={styles.noticeTextWrap}>
+                  <Text style={[styles.noticeText, styles.noticeTextInfo]}>
+                    Seller login is coming soon to the app. Please use the website to sign in as a seller.
+                  </Text>
+                </View>
+              </View>
+            )}
+
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
+            {needsVerification && (
+              <View style={styles.noticeBox}>
+                <Ionicons name="mail-outline" size={16} color={COLORS.warning} style={styles.noticeIcon} />
+                <View style={styles.noticeTextWrap}>
+                  <Text style={styles.noticeText}>
+                    Please verify your email before signing in. Check your inbox for the verification link.
+                  </Text>
+                  {resendMsg ? (
+                    <Text style={styles.noticeResendDone}>{resendMsg}</Text>
+                  ) : (
+                    <Pressable onPress={handleResend} disabled={resending} hitSlop={6}>
+                      <Text style={styles.noticeResendLink}>
+                        {resending ? 'Sending…' : 'Resend verification email'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            )}
+
             <Pressable
-              style={({ pressed }) => [styles.submitButton, pressed && styles.submitButtonPressed]}
+              style={({ pressed }) => [
+                styles.submitButton,
+                pressed && styles.submitButtonPressed,
+                role === 'seller' && styles.submitButtonDisabled,
+              ]}
               onPress={handleLogin}
-              disabled={loading}
+              disabled={loading || role === 'seller'}
             >
-              <Text style={styles.submitButtonText}>{loading ? 'Signing in…' : 'Sign in'}</Text>
+              <Text style={styles.submitButtonText}>
+                {role === 'seller' ? 'Coming soon' : loading ? 'Signing in…' : 'Sign in'}
+              </Text>
+            </Pressable>
+
+            <Pressable style={styles.signupRow} onPress={() => router.push('/signup')} hitSlop={6}>
+              <Text style={styles.signupText}>
+                New to NepShop? <Text style={styles.signupLink}>Create account</Text>
+              </Text>
             </Pressable>
 
             <View style={styles.trustRow}>
@@ -173,6 +229,7 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      </SafeAreaView>
     </View>
   );
 }
@@ -187,66 +244,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  hero: {
-    paddingTop: 72,
-    paddingBottom: 56,
-    paddingHorizontal: 28,
-    overflow: 'hidden',
-  },
-  glow: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-  },
-  glowOrange: {
-    backgroundColor: COLORS.glowOrange,
-    top: -60,
-    right: -60,
-  },
-  glowIndigo: {
-    backgroundColor: COLORS.glowIndigo,
-    bottom: -80,
-    left: -60,
-  },
-  logoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 28,
-  },
-  logoBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoBadgeText: {
-    color: '#fff',
-    fontWeight: '800',
-    fontSize: 18,
-  },
-  wordmark: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  eyebrow: {
-    color: COLORS.accentLight,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  headline: {
-    color: '#fff',
-    fontSize: 30,
-    fontWeight: '800',
-    lineHeight: 36,
   },
   card: {
     flex: 1,
@@ -350,6 +347,43 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginTop: -6,
   },
+  noticeBox: {
+    flexDirection: 'row',
+    gap: 8,
+    backgroundColor: COLORS.warningSoft,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  noticeIcon: {
+    marginTop: 2,
+  },
+  noticeTextWrap: {
+    flex: 1,
+  },
+  noticeText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: '#92400E',
+    marginBottom: 4,
+  },
+  noticeTextInfo: {
+    color: COLORS.primary,
+    marginBottom: 0,
+  },
+  noticeResendLink: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: COLORS.primary,
+    textDecorationLine: 'underline',
+  },
+  noticeResendDone: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: COLORS.success,
+  },
   submitButton: {
     backgroundColor: COLORS.accent,
     borderRadius: 12,
@@ -365,17 +399,32 @@ const styles = StyleSheet.create({
   submitButtonPressed: {
     opacity: 0.9,
   },
+  submitButtonDisabled: {
+    opacity: 0.5,
+  },
   submitButtonText: {
     color: '#fff',
     fontWeight: '700',
     fontSize: 16,
+  },
+  signupRow: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  signupText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  signupLink: {
+    color: COLORS.primary,
+    fontWeight: '700',
   },
   trustRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    marginTop: 20,
+    marginTop: 16,
   },
   trustDot: {
     width: 6,
