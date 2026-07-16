@@ -14,6 +14,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import API from '../../src/utils/api';
 import { addToCart } from '../../src/utils/cart';
+import { useWishlist } from '../../src/context/WishlistContext';
 import ProductCard from '../../src/components/ProductCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import Toast from '../../src/components/Toast';
@@ -62,6 +63,7 @@ export default function ProductsScreen() {
   // Home's category tiles navigate here with a `category` param — re-sync
   // if it changes while this (hidden tab) screen stays mounted.
   const params = useLocalSearchParams();
+  const { isWished, toggleWish } = useWishlist();
   const { width } = useWindowDimensions();
   const columns = columnsForWidth(width);
   const [category, setCategory] = useState(params.category || '');
@@ -209,6 +211,8 @@ export default function ProductsScreen() {
               adding={addingId === item._id}
               onPress={() => goToProduct(item)}
               onAddToCart={() => handleAddToCart(item)}
+              isWished={isWished(item._id)}
+              onToggleWish={() => toggleWish(item._id)}
             />
           )}
           ListFooterComponent={

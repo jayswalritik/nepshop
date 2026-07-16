@@ -1,10 +1,13 @@
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../src/context/AuthContext';
+import { WishlistProvider } from '../src/context/WishlistContext';
 
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <Stack screenOptions={{ headerShown: false }} />
+      <WishlistProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </WishlistProvider>
     </AuthProvider>
   );
 }

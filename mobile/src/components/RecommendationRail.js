@@ -1,5 +1,6 @@
 import { ActivityIndicator, FlatList, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import ProductCard from './ProductCard';
+import { useWishlist } from '../context/WishlistContext';
 import { COLORS, RADII, SPACING } from '../constants/colors';
 
 // Card width scales with the window instead of a fixed pixel value tuned to
@@ -11,6 +12,12 @@ const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 // hides entirely when empty with no emptyText, shows an empty-state box when
 // emptyText is provided, otherwise a horizontal scroll of ProductCards. The
 // "N items →" count next to the title matches the web's section header too.
+//
+// Wishlist state comes from useWishlist() directly (mirrors web's
+// RecommendationRow, which does the same) instead of being threaded in as
+// props — a caller forgetting to pass isWished/onToggleWish previously made
+// the heart silently disappear from that rail. WishlistProvider is mounted
+// at root (app/_layout.js), so the context is always available here.
 export default function RecommendationRail({
   title,
   subtitle,
@@ -21,6 +28,7 @@ export default function RecommendationRail({
   showReason = false,
   emptyText = null,
 }) {
+  const { isWished, toggleWish } = useWishlist();
   const { width } = useWindowDimensions();
   const cardWidth = clamp(width * 0.4, 140, 220);
 
@@ -64,6 +72,8 @@ export default function RecommendationRail({
               showReason={showReason}
               onPress={() => onProduct(item)}
               onAddToCart={() => onAddToCart(item)}
+              isWished={isWished(item._id)}
+              onToggleWish={() => toggleWish(item._id)}
             />
           )}
         />

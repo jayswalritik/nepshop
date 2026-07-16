@@ -10,27 +10,30 @@ export const ROLE_NAV_CONFIG = {
     label: 'Customer',
     group: '(customer)',
     tabs: [
-      { name: 'home', title: 'Home' },
-      { name: 'cart', title: 'Cart' },
-      { name: 'orders', title: 'Orders' },
-      { name: 'account', title: 'Account' },
+      { name: 'home', title: 'Home', icon: 'home-outline' },
+      { name: 'cart', title: 'Cart', icon: 'cart-outline' },
+      { name: 'orders', title: 'Orders', icon: 'receipt-outline' },
+      { name: 'account', title: 'Account', icon: 'person-outline' },
     ],
     // Routes reachable from a tab (e.g. "See all"/search on Home, tapping a
     // product card) but not shown in the tab bar themselves — registered
     // with the tabs navigator via href:null in RoleTabs.js. Search moved
     // here from `tabs`: it's now reached only via Home's header search bar,
     // not a permanent bottom-bar entry.
-    hiddenRoutes: ['products', 'product/[id]', 'search', 'checkout', 'order/[id]'],
+    hiddenRoutes: ['products', 'product/[id]', 'search', 'checkout', 'order/[id]', 'wishlist'],
   },
   delivery: {
     label: 'Delivery Agent',
     group: '(delivery)',
     tabs: [
-      { name: 'jobs', title: 'Available Jobs' },
-      { name: 'deliveries', title: 'My Deliveries' },
-      { name: 'returns', title: 'Return Pickups' },
-      { name: 'earnings', title: 'Earnings' },
-      { name: 'account', title: 'Account' },
+      // Icon names match what each screen's own PlaceholderScreen already
+      // uses (app/(delivery)/*.js) — same choice, just also surfaced in the
+      // tab bar now.
+      { name: 'jobs', title: 'Available Jobs', icon: 'briefcase-outline' },
+      { name: 'deliveries', title: 'My Deliveries', icon: 'navigate-outline' },
+      { name: 'returns', title: 'Return Pickups', icon: 'return-down-back-outline' },
+      { name: 'earnings', title: 'Earnings', icon: 'cash-outline' },
+      { name: 'account', title: 'Account', icon: 'person-outline' },
     ],
   },
 };

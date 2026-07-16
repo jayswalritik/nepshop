@@ -165,7 +165,7 @@ export default function CheckoutScreen() {
   const canPlaceOrder = !summaryLoading && packages.length > 0 && !placing;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <ScreenHeader title="Checkout" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -466,7 +466,7 @@ function TotalRow({ label, value, bold, highlight }) {
 function OrderSuccess({ order }) {
   const shortId = order._id.toString().slice(-8).toUpperCase();
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <ScreenHeader title="Order Placed" />
       <View style={styles.successContainer}>
         <Ionicons name="checkmark-circle" size={64} color={COLORS.success} />

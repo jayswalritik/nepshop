@@ -17,28 +17,49 @@ export function StatusBadge({ status, label }) {
 // line), driven entirely by `status`. Renders a NON_FORWARD_STATUSES badge
 // instead if given a terminal status (same guard web's diagnosis fixed:
 // never index statusSteps with a status outside it).
+//
+// Each step's connector is split into a left half and a right half, with
+// the (fixed-size) dot centered between them — NOT a dot followed by a
+// single trailing line, which pushed the dot to the left edge of its
+// column while the label below (centered separately) stayed centered.
+// Splitting the line in half per item keeps the dot genuinely centered in
+// its flex:1 column, so it lines up with the label under it.
+//
+// Fill semantics: circles 1..currentIndex are filled: dot i is filled iff
+// i <= currentIndex. A connector SEGMENT between dot k and dot k+1 is
+// filled only once dot k+1 itself is reached — i.e. segment k is filled
+// iff (k+1) <= currentIndex, equivalently k < currentIndex. The dot's own
+// "isDone" must NOT be used to fill the segment leaving it (that was the
+// fill-ahead bug: a segment lit up as soon as the step it starts FROM was
+// reached, one step too early).
 export default function OrderStatusStepper({ status }) {
   if (NON_FORWARD_STATUSES.includes(status)) {
     return <StatusBadge status={status} />;
   }
 
   const currentIndex = STATUS_STEPS.indexOf(status);
+  const segmentFilled = (k) => k + 1 <= currentIndex;
 
   return (
     <View style={styles.stepper}>
       {STATUS_STEPS.map((step, i) => {
         const isDone = i <= currentIndex;
         const isActive = i === currentIndex;
+        const isFirst = i === 0;
         const isLast = i === STATUS_STEPS.length - 1;
+        const leftFilled = !isFirst && segmentFilled(i - 1);
+        const rightFilled = !isLast && segmentFilled(i);
+
         return (
           <View key={step} style={styles.stepItem}>
-            <View style={styles.dotRow}>
+            <View style={styles.connectorRow}>
+              <View style={[styles.lineHalf, isFirst && styles.lineHalfHidden, leftFilled && styles.lineHalfDone]} />
               <View style={[styles.dot, isDone && styles.dotDone]}>
                 <Text style={[styles.dotText, isDone && styles.dotTextDone]}>
                   {isDone ? '✓' : i + 1}
                 </Text>
               </View>
-              {!isLast && <View style={[styles.line, isDone && styles.lineDone]} />}
+              <View style={[styles.lineHalf, isLast && styles.lineHalfHidden, rightFilled && styles.lineHalfDone]} />
             </View>
             <Text
               style={[styles.stepLabel, isActive && styles.stepLabelActive, isDone && !isActive && styles.stepLabelDone]}
@@ -73,7 +94,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
   },
-  dotRow: {
+  connectorRow: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
@@ -100,13 +121,20 @@ const styles = StyleSheet.create({
   dotTextDone: {
     color: '#fff',
   },
-  line: {
+  // Each half spans from the column edge to the dot's edge — two adjacent
+  // items' touching halves together form one full connector segment
+  // between their dots.
+  lineHalf: {
     flex: 1,
     height: 2,
     backgroundColor: COLORS.border,
-    marginLeft: -1,
   },
-  lineDone: {
+  // The stub before the first dot / after the last dot has no segment to
+  // represent — invisible rather than colored either way.
+  lineHalfHidden: {
+    backgroundColor: 'transparent',
+  },
+  lineHalfDone: {
     backgroundColor: COLORS.primary,
   },
   stepLabel: {

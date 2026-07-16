@@ -14,9 +14,10 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import API from '../../src/utils/api';
-import { updateCartQuantity, updateCartSelection, removeCartItem, clearCart, getCartSummary } from '../../src/utils/cart';
+import { updateCartQuantity, updateCartSelection, removeCartItem, clearCart, getCartSummary, addToCart } from '../../src/utils/cart';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import Toast from '../../src/components/Toast';
+import RecommendationRail from '../../src/components/RecommendationRail';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 import { formatRs } from '../../src/utils/format';
 
@@ -84,6 +85,26 @@ export default function CartScreen() {
   // while still focused, which fetches again... an infinite refetch loop.
   const summaryRef = useRef(null);
 
+  // "Complete Your Cart" rail — same GET /recommendations/cart endpoint and
+  // limit as web's CartRecommendations (frontend/src/pages/customer/
+  // CartPage.jsx), refetched on the SAME triggers as the summary (focus +
+  // the existing 400ms debounce after a mutation) rather than a second,
+  // competing fetch/debounce of its own.
+  const [cartRecs, setCartRecs] = useState([]);
+  const [cartRecsLoading, setCartRecsLoading] = useState(true);
+
+  const fetchCartRecs = useCallback(async () => {
+    setCartRecsLoading(true);
+    try {
+      const { data } = await API.get('/recommendations/cart?limit=8');
+      setCartRecs(data.products || []);
+    } catch {
+      setCartRecs([]);
+    } finally {
+      setCartRecsLoading(false);
+    }
+  }, []);
+
   const fetchCart = useCallback(async (isRefresh) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
@@ -126,14 +147,16 @@ export default function CartScreen() {
     summaryDebounceRef.current = setTimeout(() => {
       summaryDebounceRef.current = null;
       fetchSummaryNow();
+      fetchCartRecs(); // cart contents changed — same trigger, same timer, no second debounce
     }, 400);
-  }, [fetchSummaryNow]);
+  }, [fetchSummaryNow, fetchCartRecs]);
 
   useFocusEffect(
     useCallback(() => {
       fetchCart(false);
       fetchSummaryNow();
-    }, [fetchCart, fetchSummaryNow])
+      fetchCartRecs();
+    }, [fetchCart, fetchSummaryNow, fetchCartRecs])
   );
 
   const applyMutation = async (mutationFn, busyKey) => {
@@ -180,6 +203,22 @@ export default function CartScreen() {
 
   const handleCheckout = () => {
     router.push('/(customer)/checkout');
+  };
+
+  // Adding a "Complete Your Cart" rec adds a NEW product to the cart —
+  // unlike every other mutation on this screen, there's no existing item to
+  // patch locally, so this refetches the cart itself (not just the
+  // summary/recs) same as web's CartRecommendations.handleAdd implicitly
+  // does via the shared CartContext re-rendering CartPage's item list.
+  const handleAddRec = async (product) => {
+    const result = await addToCart(product._id, 1);
+    if (result.success) {
+      setToast({ type: 'success', message: `"${product.name}" added to cart!` });
+      fetchCart(false);
+      scheduleSummaryRefetch();
+    } else {
+      setToast({ type: 'error', message: result.message });
+    }
   };
 
   const items = cart?.items?.filter((item) => item.product) || [];
@@ -349,6 +388,20 @@ export default function CartScreen() {
               </Text>
             </Pressable>
           </View>
+
+          {/* "Complete Your Cart" — same placement as web: below the
+              summary/checkout button, not interleaved with the item list. */}
+          <View style={styles.recsWrap}>
+            <RecommendationRail
+              title="🛒 Complete Your Cart"
+              subtitle="Frequently bought with items in your cart"
+              products={cartRecs}
+              loading={cartRecsLoading}
+              onProduct={(p) => router.push(`/(customer)/product/${p._id}`)}
+              onAddToCart={handleAddRec}
+              showReason
+            />
+          </View>
         </ScrollView>
       )}
 
@@ -428,6 +481,9 @@ const styles = StyleSheet.create({
   },
   emptyContainer: {
     flexGrow: 1,
+  },
+  recsWrap: {
+    marginTop: SPACING.xl,
   },
   emptyIconWrap: {
     width: 72,

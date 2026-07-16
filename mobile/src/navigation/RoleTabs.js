@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { ROLE_NAV_CONFIG } from './roleNavConfig';
 import { COLORS } from '../constants/colors';
 
@@ -16,13 +17,20 @@ export default function RoleTabs({ role }) {
         // gradient hero) — the default react-navigation title bar never
         // shows anywhere in the app.
         headerShown: false,
-        tabBarActiveTintColor: COLORS.accent,
+        tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.tabInactive,
         tabBarStyle: { backgroundColor: COLORS.background, borderTopColor: COLORS.border },
       }}
     >
       {config.tabs.map((tab) => (
-        <Tabs.Screen key={tab.name} name={tab.name} options={{ title: tab.title }} />
+        <Tabs.Screen
+          key={tab.name}
+          name={tab.name}
+          options={{
+            title: tab.title,
+            tabBarIcon: ({ color, size }) => <Ionicons name={tab.icon} size={size} color={color} />,
+          }}
+        />
       ))}
       {hiddenRoutes.map((name) => (
         <Tabs.Screen key={name} name={name} options={{ href: null, headerShown: false }} />

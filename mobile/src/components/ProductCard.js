@@ -10,7 +10,16 @@ import { getDisplayPrice, formatRs } from '../utils/format';
 // presentation mirrors frontend/src/pages/customer/ProductsPage.jsx's grid
 // card: discount badge top-left, low-stock badge bottom-left, strike-through
 // original price next to the discounted one.
-export default function ProductCard({ product, onPress, onAddToCart, adding, showReason, style }) {
+//
+// `isWished`/`onToggleWish` are both optional — the heart only renders when
+// a toggle handler is passed, so this card is unaffected wherever a caller
+// doesn't wire wishlist state in (there's no such caller today, but this
+// keeps the component's default behavior additive). Mirrors web's ProductCard
+// hearts (ProductsPage.jsx/SearchPage.jsx/RecommendationRow.jsx) — filled red
+// when wished, outline muted gray otherwise. Web's ProductDetailModal has NO
+// heart (confirmed by reading it), so this is deliberately not added to
+// mobile's product detail screen either.
+export default function ProductCard({ product, onPress, onAddToCart, adding, showReason, style, isWished, onToggleWish }) {
   const [imgState, setImgState] = useState('loading'); // loading | loaded | error
   const imageUrl = product.images?.[0]?.url;
   const outOfStock = product.stock === 0;
@@ -48,6 +57,15 @@ export default function ProductCard({ product, onPress, onAddToCart, adding, sho
           <View style={styles.lowStockBadge}>
             <Text style={styles.lowStockBadgeText}>Only {product.stock} left</Text>
           </View>
+        )}
+        {onToggleWish && (
+          <Pressable style={styles.heartButton} onPress={onToggleWish} hitSlop={6}>
+            <Ionicons
+              name={isWished ? 'heart' : 'heart-outline'}
+              size={16}
+              color={isWished ? COLORS.danger : COLORS.tabInactive}
+            />
+          </Pressable>
         )}
       </View>
 
@@ -148,6 +166,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 9,
     fontWeight: '700',
+  },
+  heartButton: {
+    position: 'absolute',
+    top: SPACING.sm,
+    right: SPACING.sm,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   info: {
     padding: SPACING.md,

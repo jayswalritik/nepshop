@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import API from '../../src/utils/api';
 import { addToCart } from '../../src/utils/cart';
+import { useWishlist } from '../../src/context/WishlistContext';
 import ProductCard from '../../src/components/ProductCard';
 import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
@@ -40,6 +41,7 @@ export default function SearchScreen() {
   const { width } = useWindowDimensions();
   const columns = columnsForWidth(width);
   const inputRef = useRef(null);
+  const { isWished, toggleWish } = useWishlist();
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -305,6 +307,8 @@ export default function SearchScreen() {
               showReason={index < 4}
               onPress={() => goToProduct(item)}
               onAddToCart={() => handleAddToCart(item)}
+              isWished={isWished(item._id)}
+              onToggleWish={() => toggleWish(item._id)}
             />
           )}
         />

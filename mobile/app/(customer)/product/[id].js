@@ -17,14 +17,24 @@ import API from '../../../src/utils/api';
 import { addToCart } from '../../../src/utils/cart';
 import ScreenHeader from '../../../src/components/ScreenHeader';
 import Toast from '../../../src/components/Toast';
+import RecommendationRail from '../../../src/components/RecommendationRail';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../../src/constants/colors';
 import { getDisplayPrice, formatRs } from '../../../src/utils/format';
 
 // Not a modal, unlike frontend/src/pages/customer/ProductsPage.jsx's
 // ProductDetailModal — mobile pattern is a pushed screen, routed as
 // app/(customer)/product/[id].js (registered as a hidden tab, see
-// src/navigation/RoleTabs.js). Similar/Bought-together/Also-bought rails
-// from the web modal aren't part of this task's scope, so they're omitted.
+// src/navigation/RoleTabs.js). Similar/Frequently Bought Together/Customers
+// Also Bought rails mirror the web modal's three rows exactly (same
+// endpoints, limits, titles, showReason=true) — fetched inside the SAME
+// [id]-keyed effect that already fetches the product and reviews, so
+// tapping into another product's rec card (which pushes a new /product/:id)
+// refreshes everything for the new id the same way the existing
+// product/reviews fetch already does. Not converted to useFocusEffect: this
+// screen's data (product/reviews/recs) isn't mutated by OTHER screens the
+// way cart/orders/wishlist are, so the standing rule's "stays mounted,
+// refetch on focus" concern doesn't apply here — this predates this task
+// and isn't being restructured.
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams();
   // useWindowDimensions (not Dimensions.get, captured once at module load)
@@ -40,6 +50,13 @@ export default function ProductDetailScreen() {
   const [adding, setAdding] = useState(false);
   const [toast, setToast] = useState(null);
   const galleryRef = useRef(null);
+
+  const [similar, setSimilar] = useState([]);
+  const [similarLoading, setSimilarLoading] = useState(true);
+  const [boughtTogether, setBoughtTogether] = useState([]);
+  const [boughtTogetherLoading, setBoughtTogetherLoading] = useState(true);
+  const [alsoBought, setAlsoBought] = useState([]);
+  const [alsoBoughtLoading, setAlsoBoughtLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,6 +81,25 @@ export default function ProductDetailScreen() {
       .catch(() => { if (!cancelled) setReviews([]); })
       .finally(() => { if (!cancelled) setReviewsLoading(false); });
 
+    // Three rec rows — same endpoints/limits as web's ProductDetailModal.
+    setSimilarLoading(true);
+    API.get(`/recommendations/similar/${id}?limit=8`)
+      .then(({ data }) => { if (!cancelled) setSimilar(data.products || []); })
+      .catch(() => { if (!cancelled) setSimilar([]); })
+      .finally(() => { if (!cancelled) setSimilarLoading(false); });
+
+    setBoughtTogetherLoading(true);
+    API.get(`/recommendations/bought-together/${id}?limit=6`)
+      .then(({ data }) => { if (!cancelled) setBoughtTogether(data.products || []); })
+      .catch(() => { if (!cancelled) setBoughtTogether([]); })
+      .finally(() => { if (!cancelled) setBoughtTogetherLoading(false); });
+
+    setAlsoBoughtLoading(true);
+    API.get(`/recommendations/also-bought/${id}?limit=8`)
+      .then(({ data }) => { if (!cancelled) setAlsoBought(data.products || []); })
+      .catch(() => { if (!cancelled) setAlsoBought([]); })
+      .finally(() => { if (!cancelled) setAlsoBoughtLoading(false); });
+
     return () => { cancelled = true; };
   }, [id]);
 
@@ -78,6 +114,21 @@ export default function ProductDetailScreen() {
     );
   };
 
+  // For the rec rows below — always qty 1, distinct from the sticky bar's
+  // quantity-aware add for the product actually being viewed.
+  const handleAddRecToCart = async (recProduct) => {
+    const result = await addToCart(recProduct._id, 1);
+    setToast(
+      result.success
+        ? { type: 'success', message: `"${recProduct.name}" added to cart!` }
+        : { type: 'error', message: result.message }
+    );
+  };
+
+  const goToRecProduct = (recProduct) => {
+    router.push(`/(customer)/product/${recProduct._id}`);
+  };
+
   const scrollToImage = (index) => {
     setActiveImage(index);
     galleryRef.current?.scrollToIndex({ index, animated: true });
@@ -85,7 +136,7 @@ export default function ProductDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.screen} edges={['top']}>
         <ScreenHeader title="Product" onBack={() => router.back()} />
         <View style={styles.centerFill}>
           <ActivityIndicator size="large" color={COLORS.primary} />
@@ -96,7 +147,7 @@ export default function ProductDetailScreen() {
 
   if (notFound || !product) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.screen} edges={['top']}>
         <ScreenHeader title="Product" onBack={() => router.back()} />
         <View style={styles.centerFill}>
           <Ionicons name="alert-circle-outline" size={40} color={COLORS.tabInactive} />
@@ -113,7 +164,7 @@ export default function ProductDetailScreen() {
     : null;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <ScreenHeader title={product.name} onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -242,6 +293,42 @@ export default function ProductDetailScreen() {
               </>
             )}
           </View>
+        </View>
+
+        {/* Recommendation rows — same order/titles/endpoints as web's
+            ProductDetailModal: Similar → Frequently Bought Together →
+            Customers Also Bought. Each hides itself automatically when
+            empty (RecommendationRail's own loading/empty handling, same
+            mechanism Home's rails already rely on) — no extra wrapper
+            needed to match web's outer loading-or-nonempty conditional. */}
+        <View style={styles.recsSection}>
+          <RecommendationRail
+            title="🔍 Similar Products"
+            subtitle={`More in ${product.category}`}
+            products={similar}
+            loading={similarLoading}
+            onProduct={goToRecProduct}
+            onAddToCart={handleAddRecToCart}
+            showReason
+          />
+          <RecommendationRail
+            title="🧺 Frequently Bought Together"
+            subtitle="Often added to the same order"
+            products={boughtTogether}
+            loading={boughtTogetherLoading}
+            onProduct={goToRecProduct}
+            onAddToCart={handleAddRecToCart}
+            showReason
+          />
+          <RecommendationRail
+            title="👥 Customers Also Bought"
+            subtitle="Popular with shoppers who bought this"
+            products={alsoBought}
+            loading={alsoBoughtLoading}
+            onProduct={goToRecProduct}
+            onAddToCart={handleAddRecToCart}
+            showReason
+          />
         </View>
       </ScrollView>
 
@@ -469,6 +556,13 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   reviewsSection: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingTop: SPACING.lg,
+  },
+  recsSection: {
+    paddingHorizontal: SPACING.lg,
+    marginTop: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     paddingTop: SPACING.lg,
