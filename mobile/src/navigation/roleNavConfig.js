@@ -11,15 +11,16 @@ export const ROLE_NAV_CONFIG = {
     group: '(customer)',
     tabs: [
       { name: 'home', title: 'Home' },
-      { name: 'search', title: 'Search' },
       { name: 'cart', title: 'Cart' },
       { name: 'orders', title: 'Orders' },
       { name: 'account', title: 'Account' },
     ],
-    // Routes reachable from a tab (e.g. "See all" on Home, tapping a
+    // Routes reachable from a tab (e.g. "See all"/search on Home, tapping a
     // product card) but not shown in the tab bar themselves — registered
-    // with the tabs navigator via href:null in RoleTabs.js.
-    hiddenRoutes: ['products', 'product/[id]'],
+    // with the tabs navigator via href:null in RoleTabs.js. Search moved
+    // here from `tabs`: it's now reached only via Home's header search bar,
+    // not a permanent bottom-bar entry.
+    hiddenRoutes: ['products', 'product/[id]', 'search'],
   },
   delivery: {
     label: 'Delivery Agent',

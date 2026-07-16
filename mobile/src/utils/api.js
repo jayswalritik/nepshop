@@ -29,7 +29,11 @@ export class ApiError extends Error {
   }
 }
 
-const request = async (method, path, body) => {
+// `options.signal` (an AbortController's signal) is optional and additive —
+// every existing call site that omits it behaves exactly as before. Search
+// is the first caller that needs it, to cancel a superseded in-flight
+// request (React Native's global fetch supports AbortController natively).
+const request = async (method, path, body, options = {}) => {
   const headers = { 'Content-Type': 'application/json' };
   if (authToken) {
     headers.Authorization = `Bearer ${authToken}`;
@@ -39,6 +43,7 @@ const request = async (method, path, body) => {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: options.signal,
   });
 
   const data = await res.json().catch(() => null);
@@ -51,11 +56,11 @@ const request = async (method, path, body) => {
 };
 
 const API = {
-  get: (path) => request('GET', path),
-  post: (path, body) => request('POST', path, body),
-  put: (path, body) => request('PUT', path, body),
-  patch: (path, body) => request('PATCH', path, body),
-  delete: (path) => request('DELETE', path),
+  get: (path, options) => request('GET', path, undefined, options),
+  post: (path, body, options) => request('POST', path, body, options),
+  put: (path, body, options) => request('PUT', path, body, options),
+  patch: (path, body, options) => request('PATCH', path, body, options),
+  delete: (path, options) => request('DELETE', path, undefined, options),
 };
 
 export default API;

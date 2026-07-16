@@ -4,6 +4,7 @@
 export const COLORS = {
   primary: '#3730A3',
   primaryDark: '#1E1B4B',
+  primarySoft: '#EEF2FF',
   accent: '#F97316',
   accentLight: '#FB923C',
   accentSoft: '#FFEDD5',

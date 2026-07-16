@@ -122,6 +122,7 @@ export default function Home() {
 
       <SafeAreaView style={styles.flex} edges={['bottom']}>
         <ScrollView
+          style={styles.scrollView}
           contentContainerStyle={styles.content}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.primary} />
@@ -235,8 +236,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textMuted,
   },
-  content: {
+  // BLUE BAR BUG: this was the fix. `content` (a ScrollView
+  // contentContainerStyle) only paints its background behind the actual
+  // children, sized to their natural content height — NOT across the full
+  // scroll viewport. The ScrollView itself had no `style` prop, so whenever
+  // rendered content was shorter than the screen (e.g. right after mount,
+  // while rails are still showing their slim loading skeletons), the area
+  // below the content showed straight through to `screen`'s indigo
+  // `primaryDark` background — a horizontal indigo/blue bar or box at the
+  // bottom of the visible area. Fix: `scrollView` below gives the
+  // ScrollView itself flex:1 + a white background, so white now fills the
+  // entire viewport regardless of content length; `content` keeps padding
+  // only.
+  scrollView: {
+    flex: 1,
     backgroundColor: COLORS.background,
+  },
+  content: {
     padding: SPACING.lg,
     paddingBottom: 32,
   },
