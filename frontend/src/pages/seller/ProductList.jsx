@@ -300,9 +300,13 @@ const EditProductModal = ({ product, onClose, onSuccess }) => {
     stock:        product.stock,
     discount:     product.discount || 0,
   });
-  const [images, setImages]   = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
+  const [images, setImages]     = useState([]);
+  const [previews, setPreviews] = useState([]);
+  // publicIds of EXISTING images the seller has marked for removal — purely
+  // local until Save; nothing is deleted until the request succeeds.
+  const [removedIds, setRemovedIds] = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
 
   const categories = [
     'Electronics', 'Clothing', 'Food & Grocery', 'Home & Kitchen',
@@ -310,17 +314,68 @@ const EditProductModal = ({ product, onClose, onSuccess }) => {
     'Toys & Games', 'Automotive', 'Other',
   ];
 
+  // How many existing images are still "kept" after the seller's removal
+  // marks — the add-more cap and the final save/floor check both derive
+  // from this, not from product.images.length directly.
+  const keptExistingCount = product.images.length - removedIds.length;
+  const remainingSlots = 5 - keptExistingCount - images.length;
+  const finalCount = keptExistingCount + images.length;
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  const handleImages = (e) => {
+    const newFiles = Array.from(e.target.files);
+
+    if (newFiles.length > remainingSlots) {
+      setError(
+        remainingSlots > 0
+          ? `You can add ${remainingSlots} more image${remainingSlots === 1 ? '' : 's'} (max 5 total).`
+          : 'Maximum of 5 images reached — remove one before adding more.'
+      );
+      e.target.value = '';
+      return;
+    }
+
+    setError('');
+    setImages((prev) => [...prev, ...newFiles]);
+    setPreviews((prev) => [...prev, ...newFiles.map((f) => URL.createObjectURL(f))]);
+    e.target.value = '';
+  };
+
+  const removeNewImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+    setPreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const toggleRemoveExisting = (publicId) => {
+    setError('');
+    setRemovedIds((prev) =>
+      prev.includes(publicId) ? prev.filter((id) => id !== publicId) : [...prev, publicId]
+    );
+  };
+
   const handleSubmit = async () => {
+    if (finalCount < 1) {
+      setError('A product needs at least 1 image — add a replacement before removing the last one, or undo the removal.');
+      return;
+    }
+    if (finalCount > 5) {
+      setError(`This would leave ${finalCount} images — the maximum is 5.`);
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
       const form = new FormData();
       Object.entries(formData).forEach(([k, v]) => form.append(k, v));
       images.forEach((img) => form.append('images', img));
+      // Repeated fields under the same name, same mechanism as `images` —
+      // the backend normalizes this to an array regardless of whether it's
+      // one value or several.
+      removedIds.forEach((id) => form.append('removePublicIds', id));
 
       await API.put(`/products/${product._id}`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -389,14 +444,14 @@ const EditProductModal = ({ product, onClose, onSuccess }) => {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Replace images (optional)
+              Add more images <span className="text-gray-400 font-normal text-xs">(optional)</span>
             </label>
             <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center">
               <input
                 type="file"
                 multiple
                 accept="image/*"
-                onChange={(e) => setImages(Array.from(e.target.files))}
+                onChange={handleImages}
                 className="hidden"
                 id="edit-images"
               />
@@ -405,15 +460,68 @@ const EditProductModal = ({ product, onClose, onSuccess }) => {
                 <p className="text-sm text-gray-500">
                   {images.length > 0 ? `${images.length} new image(s) selected` : 'Click to select new images'}
                 </p>
-                <p className="text-xs text-gray-400 mt-1">Leave empty to keep existing images</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {remainingSlots > 0
+                    ? `New images are added to the ones below — up to ${remainingSlots} more (max 5 total)`
+                    : 'Maximum of 5 images reached'}
+                </p>
               </label>
             </div>
-            {/* Current images preview */}
-            <div className="flex gap-2 mt-2 flex-wrap">
-              {product.images.map((img, i) => (
-                <img key={i} src={img.url} alt="" className="w-14 h-14 rounded-lg object-cover border border-gray-200" />
-              ))}
-            </div>
+
+            {/* Existing images — ✕ marks one for removal (nothing is
+                deleted until Save); a marked image dims with a strike-
+                through and its button becomes an undo. */}
+            {product.images.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs font-medium text-gray-500 mb-1.5">Current images</p>
+                <div className="flex gap-2 flex-wrap">
+                  {product.images.map((img) => {
+                    const marked = removedIds.includes(img.publicId);
+                    return (
+                      <div key={img.publicId} className="relative">
+                        <img
+                          src={img.url}
+                          alt=""
+                          className={`w-14 h-14 rounded-lg object-cover border transition-all
+                            ${marked ? 'border-red-300 opacity-40' : 'border-gray-200'}`}
+                        />
+                        {marked && (
+                          <div className="absolute top-1/2 left-1/2 w-20 h-0.5 bg-red-500 -translate-x-1/2 -translate-y-1/2 rotate-45 pointer-events-none" />
+                        )}
+                        <button
+                          onClick={() => toggleRemoveExisting(img.publicId)}
+                          title={marked ? 'Undo remove' : 'Remove image'}
+                          className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-xs flex items-center justify-center text-white
+                            ${marked ? 'bg-gray-500 hover:bg-gray-600' : 'bg-red-500 hover:bg-red-600'}`}
+                        >
+                          {marked ? '↺' : '✕'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* New image previews */}
+            {previews.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs font-medium text-gray-500 mb-1.5">New images to add</p>
+                <div className="flex gap-2 flex-wrap">
+                  {previews.map((url, i) => (
+                    <div key={i} className="relative">
+                      <img src={url} alt={`New ${i + 1}`} className="w-14 h-14 rounded-lg object-cover border border-indigo-300" />
+                      <button
+                        onClick={() => removeNewImage(i)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
