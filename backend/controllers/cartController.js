@@ -1,7 +1,8 @@
 const asyncHandler = require('express-async-handler');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
-const { isStale } = require('../utils/cartSelection');
+const { isSelected, isStale } = require('../utils/cartSelection');
+const { groupItemsBySeller, allocateCouponDiscount, round2 } = require('../utils/orderPricing');
 
 // Nested-populates the seller's shop name too — the frontend groups the
 // cart by seller (Daraz-style) and shows a seller-group header/checkbox.
@@ -277,6 +278,118 @@ const clearCart = asyncHandler(async (req, res) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────
+// @desc    Checkout preview — per-seller packages, delivery, coupon
+// @route   GET /api/cart/summary?coupon=CODE
+// @access  Customer only
+// ─────────────────────────────────────────────────────────
+// Delegates ALL money math to the exact same helpers order creation uses
+// (backend/controllers/orderController.js's placeOrder): groupItemsBySeller
+// for per-seller packages/delivery (backend/utils/orderPricing.js), and
+// allocateCouponDiscount for the per-line coupon split. The coupon check
+// itself uses coupon.validateFor — the SAME instance method
+// POST /coupons/validate calls (backend/controllers/couponController.js) —
+// NOT Coupon.redeemFor, which order creation uses: redeemFor atomically
+// CONSUMES the coupon's usage limits, which a preview must never do.
+// Nothing in this handler computes a pricing formula of its own.
+const getCartSummary = asyncHandler(async (req, res) => {
+  const emptySummary = {
+    packages: [],
+    itemsSubtotal: 0,
+    totalDelivery: 0,
+    totalDiscount: 0,
+    grandTotal: 0,
+    coupon: null,
+  };
+
+  const cart = await Cart.findOne({ customer: req.user._id }).populate(PRODUCT_POPULATE);
+  if (!cart || cart.items.length === 0) {
+    return res.status(200).json({ success: true, summary: emptySummary });
+  }
+
+  // Same eligibility as checkout itself would apply: selected AND not stale
+  // (isSelected/isStale — backend/utils/cartSelection.js), product present.
+  const eligibleItems = cart.items.filter(
+    (item) => item.product && isSelected(item) && !isStale(item)
+  );
+  if (eligibleItems.length === 0) {
+    return res.status(200).json({ success: true, summary: emptySummary });
+  }
+
+  const orderItems = eligibleItems.map((item) => ({
+    product: item.product._id,
+    name:    item.product.name,
+    image:   item.product.images?.[0]?.url || '',
+    price:   item.price,
+    quantity: item.quantity,
+    seller:  item.product.seller?._id || item.product.seller,
+    sellerName:
+      item.product.seller?.shopName ||
+      `${item.product.seller?.firstName || ''} ${item.product.seller?.lastName || ''}`.trim() ||
+      'Seller',
+  }));
+
+  const { groups, subtotal, deliveryCharge } = groupItemsBySeller(orderItems);
+
+  // ── Coupon preview — never consumes usage limits ────────────────────
+  let couponResult = null;
+  let couponDiscount = 0;
+  if (req.query.coupon) {
+    const Coupon = require('../models/Coupon');
+    const code = String(req.query.coupon).toUpperCase().trim();
+    const coupon = await Coupon.findOne({ code });
+
+    if (!coupon) {
+      // Same message POST /coupons/validate returns for an unknown code.
+      couponResult = { code, valid: false, message: 'Invalid coupon code', discount: 0 };
+    } else {
+      const result = coupon.validateFor(subtotal, req.user._id);
+      couponResult = {
+        code: coupon.code,
+        valid: result.valid,
+        message: result.valid ? 'Coupon applied successfully' : result.message,
+        discount: result.valid ? result.discount : 0,
+      };
+      if (result.valid) couponDiscount = result.discount;
+    }
+  }
+
+  // Mutates orderItems (and, via reference, groups[].items) with
+  // .couponAllocation — same call placeOrder makes; a no-op when
+  // couponDiscount is 0 (no coupon, or an invalid one).
+  allocateCouponDiscount(orderItems, couponDiscount);
+
+  const packages = groups.map((g) => ({
+    seller:     g.seller,
+    sellerName: g.items[0]?.sellerName || 'Seller',
+    items: g.items.map((i) => ({
+      product:  i.product,
+      name:     i.name,
+      image:    i.image,
+      price:    i.price,
+      quantity: i.quantity,
+      couponAllocation: i.couponAllocation || 0,
+    })),
+    packageSubtotal:  g.sellerSubtotal,
+    deliveryCharge:   g.deliveryCharge,
+    couponAllocation: round2(g.items.reduce((s, i) => s + (i.couponAllocation || 0), 0)),
+  }));
+
+  const grandTotal = round2(subtotal + deliveryCharge - couponDiscount);
+
+  res.status(200).json({
+    success: true,
+    summary: {
+      packages,
+      itemsSubtotal: subtotal,
+      totalDelivery: deliveryCharge,
+      totalDiscount: round2(couponDiscount),
+      grandTotal,
+      coupon: couponResult,
+    },
+  });
+});
+
 module.exports = {
   getCart,
   addToCart,
@@ -284,4 +397,5 @@ module.exports = {
   updateSelection,
   removeFromCart,
   clearCart,
+  getCartSummary,
 };

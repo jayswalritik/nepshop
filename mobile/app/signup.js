@@ -17,6 +17,7 @@ import API from '../src/utils/api';
 import { COLORS, RADII, SPACING } from '../src/constants/colors';
 import AuthHero from '../src/components/AuthHero';
 import Dropdown from '../src/components/Dropdown';
+import { DISTRICTS } from '../src/constants/districts';
 
 // Full role parity with frontend/src/pages/auth/AuthPage.jsx's signup form —
 // same three roles, same fields, same payload shape per role (see the
@@ -31,12 +32,6 @@ const ROLES = [
   { key: 'customer', label: 'Customer', icon: '🛍️' },
   { key: 'seller', label: 'Seller', icon: '🏪' },
   { key: 'delivery', label: 'Delivery', icon: '🚚' },
-];
-
-// AuthPage.jsx's district <select> options (shopDistrict for seller).
-const DISTRICTS = [
-  'Kathmandu', 'Lalitpur', 'Bhaktapur', 'Pokhara', 'Chitwan',
-  'Butwal', 'Birgunj', 'Biratnagar', 'Dharan', 'Hetauda', 'Other',
 ];
 
 // AuthPage.jsx's vehicleType <select> options.

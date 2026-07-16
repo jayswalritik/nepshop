@@ -6,6 +6,7 @@ const {
   updateSelection,
   removeFromCart,
   clearCart,
+  getCartSummary,
 } = require('../controllers/cartController');
 const { protect, authorizeRoles, requireActive } = require('../middleware/authMiddleware');
 
@@ -17,6 +18,7 @@ router.use(authorizeRoles('customer'));
 router.use(requireActive);
 
 router.get('/',                  getCart);          // Get cart
+router.get('/summary',           getCartSummary);   // Checkout preview — before /:productId
 router.post('/',                 addToCart);        // Add item
 router.patch('/selection',       updateSelection);  // Toggle selection (single/group/all) — before /:productId
 router.put('/:productId',        updateCartItem);   // Update quantity

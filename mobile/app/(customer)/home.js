@@ -204,8 +204,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.primaryDark,
   },
+  // Belt-and-suspenders alongside `scrollView`'s own background below: the
+  // ScrollView's `style` (not contentContainerStyle) already paints the
+  // full viewport regardless of content height, which should be sufficient
+  // on its own — this just means the SafeAreaView wrapping it is never
+  // itself the thing showing `screen`'s indigo through, on any platform.
   flex: {
     flex: 1,
+    backgroundColor: COLORS.background,
   },
   header: {
     paddingHorizontal: SPACING.lg,

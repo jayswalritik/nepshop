@@ -52,3 +52,18 @@ export const clearCart = async () => {
     return { success: false, message: err.data?.message || 'Failed to clear cart' };
   }
 };
+
+// Checkout preview — GET /api/cart/summary?coupon=CODE. Delegates every
+// money figure (per-package delivery, coupon allocation, grand total) to
+// the backend; nothing is computed here. couponCode is optional.
+export const getCartSummary = async (couponCode) => {
+  try {
+    const path = couponCode
+      ? `/cart/summary?coupon=${encodeURIComponent(couponCode)}`
+      : '/cart/summary';
+    const { data } = await API.get(path);
+    return { success: true, summary: data.summary };
+  } catch (err) {
+    return { success: false, message: err.data?.message || 'Failed to load checkout summary' };
+  }
+};

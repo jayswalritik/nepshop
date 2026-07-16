@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,7 +14,7 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import API from '../../src/utils/api';
-import { updateCartQuantity, updateCartSelection, removeCartItem, clearCart } from '../../src/utils/cart';
+import { updateCartQuantity, updateCartSelection, removeCartItem, clearCart, getCartSummary } from '../../src/utils/cart';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
@@ -23,20 +23,19 @@ import { formatRs } from '../../src/utils/format';
 // Mirrors frontend/src/pages/customer/CartPage.jsx's structure: items
 // grouped by seller, per-item selection, quantity editing, remove, clear
 // all — same endpoints as web's CartContext (frontend/src/context/
-// CartContext.jsx). Checkout is a "coming soon" placeholder per this task's
-// scope (no order logic yet).
+// CartContext.jsx).
 //
-// MONEY DISPLAY: CartPage.jsx computes selected-subtotal, per-package
-// delivery charge (subtotal >= 2000 ? 0 : 100), and delivery-inclusive total
-// entirely CLIENT-SIDE (its groupCartBySeller helper) — GET /cart never
-// returns any of those figures, only the whole-cart { total, itemCount }.
-// Flagged this as client-computed money math; per-item price × quantity,
-// summed over the SELECTED items, was then explicitly approved (the Total
-// below must reflect only checked items, not the whole cart) — so that sum
-// is computed here. The per-package delivery charge / free-delivery
-// threshold remain out of scope (never approved, no server source either),
-// so no delivery line is shown — just a caption noting it's calculated at
-// checkout.
+// MONEY DISPLAY: the Order Summary box (subtotal / per-package delivery /
+// total) now comes ENTIRELY from GET /api/cart/summary (no coupon param) —
+// the same endpoint checkout uses. Zero money arithmetic happens in this
+// file: `selectedCount` below is a plain item-quantity TALLY (a count, not
+// a Rupee value), which is why it's still computed locally, same as the
+// checkout screen's identical pattern. One deliberate omission: the web
+// shows "Add Rs X more for free delivery" (computed as 2000 − subtotal)
+// for a single under-threshold package. That's money arithmetic against a
+// hardcoded threshold the endpoint doesn't return, and this task is mobile-
+// only (can't extend the endpoint to add the figure) — so that hint is left
+// out rather than reimplemented client-side. Noted in the PR summary.
 const isCheckoutEligible = (item) => item.selected !== false && !item.stale;
 
 const groupCartBySeller = (items) => {
@@ -69,6 +68,22 @@ export default function CartScreen() {
   const [busyId, setBusyId] = useState(null);
   const [toast, setToast] = useState(null);
 
+  const [summary, setSummary] = useState(null);
+  const [summaryUpdating, setSummaryUpdating] = useState(false);
+  const [summaryError, setSummaryError] = useState(false);
+  // Monotonic counter, not a query string (search.js's equivalent) — each
+  // fetch tags itself with the id current at its START; a response only
+  // gets applied if that id is still the latest when it lands, so a slower
+  // earlier request can never overwrite a faster later one.
+  const summaryRequestIdRef = useRef(0);
+  const summaryDebounceRef = useRef(null);
+  // Mirrors `summary` without being a dependency of fetchSummaryNow below —
+  // if `summary` itself were in that useCallback's deps, every successful
+  // fetch would change fetchSummaryNow's identity, which would change the
+  // useFocusEffect callback's identity, which re-fires the focus effect
+  // while still focused, which fetches again... an infinite refetch loop.
+  const summaryRef = useRef(null);
+
   const fetchCart = useCallback(async (isRefresh) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
@@ -83,10 +98,42 @@ export default function CartScreen() {
     }
   }, []);
 
+  // Immediate (no debounce) — used on focus, not on rapid user interaction.
+  const fetchSummaryNow = useCallback(async () => {
+    const requestId = ++summaryRequestIdRef.current;
+    setSummaryUpdating(true);
+    const result = await getCartSummary();
+    if (requestId !== summaryRequestIdRef.current) return; // superseded
+    if (result.success) {
+      summaryRef.current = result.summary;
+      setSummary(result.summary);
+      setSummaryError(false);
+    } else if (!summaryRef.current) {
+      // Only surface an error state when we have nothing to fall back on —
+      // a failed background refresh should just leave the last-known
+      // summary on screen (same "keep stale numbers" idea as summaryUpdating).
+      setSummaryError(true);
+    }
+    setSummaryUpdating(false);
+  }, []);
+
+  // Debounced — used after cart mutations, so spamming a checkbox doesn't
+  // stack a request per tap. Only the LAST scheduled call in a burst ever
+  // actually fires; fetchSummaryNow's own requestId guard then also covers
+  // the (separate) case of two fetches genuinely in flight at once.
+  const scheduleSummaryRefetch = useCallback(() => {
+    if (summaryDebounceRef.current) clearTimeout(summaryDebounceRef.current);
+    summaryDebounceRef.current = setTimeout(() => {
+      summaryDebounceRef.current = null;
+      fetchSummaryNow();
+    }, 400);
+  }, [fetchSummaryNow]);
+
   useFocusEffect(
     useCallback(() => {
       fetchCart(false);
-    }, [fetchCart])
+      fetchSummaryNow();
+    }, [fetchCart, fetchSummaryNow])
   );
 
   const applyMutation = async (mutationFn, busyKey) => {
@@ -95,6 +142,7 @@ export default function CartScreen() {
     if (busyKey) setBusyId(null);
     if (result.success) {
       setCart(result.cart);
+      scheduleSummaryRefetch();
     } else {
       setToast({ type: 'error', message: result.message });
     }
@@ -131,7 +179,7 @@ export default function CartScreen() {
   };
 
   const handleCheckout = () => {
-    setToast({ type: 'info', message: 'Checkout is coming soon!' });
+    router.push('/(customer)/checkout');
   };
 
   const items = cart?.items?.filter((item) => item.product) || [];
@@ -139,8 +187,9 @@ export default function CartScreen() {
   const selectableItems = items.filter((item) => !item.stale);
   const selectedItems = items.filter(isCheckoutEligible);
   const allSelected = selectableItems.length > 0 && selectableItems.every((i) => i.selected !== false);
+  // Plain quantity tally — a count, not a Rupee value, so it stays local
+  // (see the MONEY DISPLAY note at the top of this file).
   const selectedCount = selectedItems.reduce((s, i) => s + i.quantity, 0);
-  const selectedSubtotal = selectedItems.reduce((s, i) => s + i.price * i.quantity, 0);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -233,19 +282,62 @@ export default function CartScreen() {
           })}
 
           <View style={styles.summary}>
-            <Text style={styles.summaryHeading}>Order Summary</Text>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Items in cart</Text>
-              <Text style={styles.summaryValue}>{cart.itemCount}</Text>
+            <View style={styles.summaryHeadingRow}>
+              <Text style={styles.summaryHeading}>Order Summary</Text>
+              {summaryUpdating && <ActivityIndicator size="small" color={COLORS.primary} />}
             </View>
-            <View style={styles.summaryDivider} />
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabelTotal}>Total ({selectedCount} selected)</Text>
-              <Text style={styles.summaryValueTotal}>{formatRs(selectedSubtotal)}</Text>
-            </View>
-            <Text style={styles.summaryCaption}>
-              Delivery charges are calculated at checkout.
-            </Text>
+
+            {summary ? (
+              <View style={[summaryUpdating && styles.summaryBodyUpdating]}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Subtotal ({selectedCount} selected)</Text>
+                  <Text style={styles.summaryValue}>{formatRs(summary.itemsSubtotal)}</Text>
+                </View>
+
+                {summary.packages.length > 1 ? (
+                  <>
+                    <Text style={styles.packagesNote}>
+                      📦 Arrives in {summary.packages.length} packages — delivery charged per package
+                    </Text>
+                    {summary.packages.map((pkg, i) => (
+                      <View key={pkg.seller} style={styles.packageDeliveryRow}>
+                        <Text style={styles.packageDeliveryLabel}>Package {i + 1} delivery</Text>
+                        <Text style={[styles.summaryValue, pkg.deliveryCharge === 0 && styles.freeText]}>
+                          {pkg.deliveryCharge === 0 ? 'FREE' : formatRs(pkg.deliveryCharge)}
+                        </Text>
+                      </View>
+                    ))}
+                  </>
+                ) : (
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Delivery charge</Text>
+                    {/* Same as web: this single-package delivery figure is
+                        always styled as the "free" green, even when it's a
+                        real Rs 100 charge — mirrored as-is. */}
+                    <Text style={[styles.summaryValue, styles.freeText]}>
+                      {summary.totalDelivery === 0 ? 'FREE' : formatRs(summary.totalDelivery)}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.summaryDivider} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabelTotal}>Total</Text>
+                  <Text style={styles.summaryValueTotal}>{formatRs(summary.grandTotal)}</Text>
+                </View>
+              </View>
+            ) : summaryError ? (
+              <View style={styles.summaryLoadingRow}>
+                <Text style={styles.summaryErrorText}>Couldn't load order summary.</Text>
+                <Pressable onPress={fetchSummaryNow}>
+                  <Text style={styles.summaryRetryText}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.summaryLoadingRow}>
+                <ActivityIndicator color={COLORS.primary} />
+              </View>
+            )}
 
             <Pressable
               style={[styles.checkoutButton, selectedCount === 0 && styles.checkoutButtonDisabled]}
@@ -495,15 +587,41 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
     ...SHADOWS.card,
   },
+  summaryHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.md,
+  },
   summaryHeading: {
     fontSize: 15,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: SPACING.md,
+  },
+  // Subtle "updating" treatment while a refetch is in flight — the last
+  // known numbers stay fully visible underneath (dimmed, not blanked), plus
+  // the spinner in summaryHeadingRow above.
+  summaryBodyUpdating: {
+    opacity: 0.55,
+  },
+  summaryLoadingRow: {
+    paddingVertical: SPACING.lg,
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  summaryErrorText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+  },
+  summaryRetryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingVertical: 2,
   },
   summaryDivider: {
     height: 1,
@@ -519,6 +637,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.text,
   },
+  freeText: {
+    color: COLORS.success,
+  },
+  packagesNote: {
+    fontSize: 11,
+    color: COLORS.tabInactive,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  packageDeliveryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingLeft: SPACING.md,
+    paddingVertical: 2,
+  },
+  packageDeliveryLabel: {
+    fontSize: 13,
+    color: COLORS.tabInactive,
+  },
   summaryLabelTotal: {
     fontSize: 15,
     fontWeight: '700',
@@ -528,12 +665,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.primary,
-  },
-  summaryCaption: {
-    fontSize: 11,
-    color: COLORS.tabInactive,
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.md,
   },
   checkoutButton: {
     backgroundColor: COLORS.accent,

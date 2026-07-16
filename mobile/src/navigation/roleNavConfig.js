@@ -20,7 +20,7 @@ export const ROLE_NAV_CONFIG = {
     // with the tabs navigator via href:null in RoleTabs.js. Search moved
     // here from `tabs`: it's now reached only via Home's header search bar,
     // not a permanent bottom-bar entry.
-    hiddenRoutes: ['products', 'product/[id]', 'search'],
+    hiddenRoutes: ['products', 'product/[id]', 'search', 'checkout'],
   },
   delivery: {
     label: 'Delivery Agent',
