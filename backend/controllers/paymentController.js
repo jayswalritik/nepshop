@@ -4,6 +4,7 @@ const crypto       = require('crypto');
 const Order        = require('../models/Order');
 const Shipment     = require('../models/Shipment');
 const User         = require('../models/User');
+const PendingPayment = require('../models/PendingPayment');
 const {
   sendOrderStatusEmail,
 } = require('../utils/emailService');
@@ -178,6 +179,59 @@ const computeCartPricing = (cartItems, couponResult) => {
   return { subtotal, deliveryCharge, total };
 };
 
+// ── Return-URL allowlist ────────────────────────────────────────────────
+// The client may request which "source" it's returning to (web browser vs.
+// a future mobile app deep link) but can NEVER supply a URL itself — every
+// return URL handed to a gateway comes from this fixed map. The mobile
+// entries aren't wired to any live screen yet (mobile/ is untouched by this
+// change) — they exist so the initiate endpoints already speak the
+// (source, gateway) contract mobile will need later.
+const RETURN_URLS = {
+  web: {
+    khalti: () => `${process.env.FRONTEND_URL}/payment/khalti/verify`,
+    esewa: () => ({
+      success: `${process.env.FRONTEND_URL}/payment/esewa/verify`,
+      failure: `${process.env.FRONTEND_URL}/payment/failed`,
+    }),
+  },
+  mobile: {
+    khalti: () => 'nepshop://payment/khalti/verify',
+    esewa: () => ({
+      success: 'nepshop://payment/esewa/verify',
+      failure: 'nepshop://payment/failed',
+    }),
+  },
+};
+
+const VALID_SOURCES = ['web', 'mobile'];
+
+// undefined/omitted -> defaults to 'web' (matches the PendingPayment schema
+// default, and keeps any caller that predates the `source` field working).
+// Anything explicitly sent that isn't a known source is rejected.
+const resolveSource = (source) => {
+  if (source === undefined) return 'web';
+  return VALID_SOURCES.includes(source) ? source : null;
+};
+
+// Shared verify-time lookup — both gateways look up their PendingPayment the
+// same way, just keyed by a different gatewayRef (pidx vs. transaction_uuid).
+// Distinguishes "already completed" (idempotent double-verify) from every
+// other non-initiated state, per the idempotency requirement below.
+const findInitiatedPendingPayment = async (gatewayRef, customerId) => {
+  const pendingPayment = await PendingPayment.findOne({ gatewayRef, customer: customerId });
+
+  if (!pendingPayment) {
+    return { pendingPayment: null, error: 'Payment session not found or expired' };
+  }
+  if (pendingPayment.status === 'completed') {
+    return { pendingPayment: null, error: 'Payment already processed' };
+  }
+  if (pendingPayment.status !== 'initiated') {
+    return { pendingPayment: null, error: 'Payment session not found or expired' };
+  }
+  return { pendingPayment, error: null };
+};
+
 // ─────────────────────────────────────────────────────────
 // @desc    Initiate Khalti payment
 // @route   POST /api/payment/khalti/initiate
@@ -186,6 +240,12 @@ const computeCartPricing = (cartItems, couponResult) => {
 
 const initiateKhalti = asyncHandler(async (req, res) => {
   const { deliveryAddress, customerNote, cartSummary } = req.body;
+
+  const source = resolveSource(req.body.source);
+  if (!source) {
+    res.status(400);
+    throw new Error('Invalid source');
+  }
 
   if (!deliveryAddress?.fullName || !deliveryAddress?.phone ||
       !deliveryAddress?.street || !deliveryAddress?.city || !deliveryAddress?.district) {
@@ -237,8 +297,8 @@ const initiateKhalti = asyncHandler(async (req, res) => {
   };
 
   const payload = {
-    return_url:          `${process.env.FRONTEND_URL}/payment/khalti/verify`,
-    website_url:          process.env.FRONTEND_URL,
+    return_url:           RETURN_URLS[source].khalti(),
+    website_url:           process.env.FRONTEND_URL,
     amount:               amountInPaisa,
     purchase_order_id:    `NEPSHOP-${req.user._id}-${Date.now()}`,
     purchase_order_name: `NepShop Order`,
@@ -260,11 +320,25 @@ const initiateKhalti = asyncHandler(async (req, res) => {
     }
   );
 
+  // Server-side pending-payment record — verify looks orderData up from
+  // here by pidx instead of trusting anything the client sends back. If
+  // this fails, do NOT hand the client a payment URL for a payment the
+  // server won't be able to recognize on return (asyncHandler + the global
+  // error handler turn an uncaught failure here into a 500, same as any
+  // other unexpected error in this file).
+  await PendingPayment.create({
+    gateway:    'khalti',
+    gatewayRef: response.data.pidx,
+    customer:   req.user._id,
+    orderData,
+    source,
+  });
+
   res.status(200).json({
     success:    true,
     paymentUrl: response.data.payment_url,
     pidx:       response.data.pidx,
-    orderData,  // Send back to frontend to store temporarily
+    orderData,  // Kept for backward compatibility this deploy — web frontend no longer reads it.
   });
 });
 
@@ -274,12 +348,19 @@ const initiateKhalti = asyncHandler(async (req, res) => {
 // @access  Customer only
 // ─────────────────────────────────────────────────────────
 const verifyKhalti = asyncHandler(async (req, res) => {
-  const { pidx, orderData } = req.body;
+  const { pidx } = req.body;
 
-  if (!pidx || !orderData) {
+  if (!pidx) {
     res.status(400);
-    throw new Error('pidx and orderData are required');
+    throw new Error('pidx is required');
   }
+
+  const { pendingPayment, error } = await findInitiatedPendingPayment(pidx, req.user._id);
+  if (!pendingPayment) {
+    res.status(400);
+    throw new Error(error);
+  }
+  const orderData = pendingPayment.orderData;
 
   // Verify with Khalti
   const response = await axios.post(
@@ -304,7 +385,19 @@ const verifyKhalti = asyncHandler(async (req, res) => {
       : undefined;
 
     // Create order NOW after payment confirmed
-    const { order, shipments } = await createOrderFromCart(req.user._id, orderData, verifiedPaidAmount);
+    let order, shipments;
+    try {
+      ({ order, shipments } = await createOrderFromCart(req.user._id, orderData, verifiedPaidAmount));
+    } catch (err) {
+      // Cart-changed-mid-payment abort (or any other creation failure) —
+      // this pidx did not result in an order, so it shouldn't be re-usable.
+      pendingPayment.status = 'failed';
+      await pendingPayment.save();
+      throw err;
+    }
+
+    pendingPayment.status = 'completed';
+    await pendingPayment.save();
 
     // Send emails
     const customer = await User.findById(req.user._id);
@@ -327,6 +420,9 @@ const verifyKhalti = asyncHandler(async (req, res) => {
   }
 
   // Payment failed — don't create order, cart stays intact
+  pendingPayment.status = 'failed';
+  await pendingPayment.save();
+
   res.status(400).json({
     success: false,
     message: khaltiData.status === 'User canceled'
@@ -344,6 +440,12 @@ const verifyKhalti = asyncHandler(async (req, res) => {
 // ─────────────────────────────────────────────────────────
 const initiateEsewa = asyncHandler(async (req, res) => {
   const { deliveryAddress, customerNote } = req.body;
+
+  const source = resolveSource(req.body.source);
+  if (!source) {
+    res.status(400);
+    throw new Error('Invalid source');
+  }
 
   if (!deliveryAddress?.fullName || !deliveryAddress?.phone ||
       !deliveryAddress?.street || !deliveryAddress?.city || !deliveryAddress?.district) {
@@ -400,14 +502,26 @@ const initiateEsewa = asyncHandler(async (req, res) => {
     .update(message)
     .digest('base64');
 
-  // Encode orderData to pass through eSewa redirect
-  const encodedOrderData = Buffer.from(JSON.stringify(orderData)).toString('base64');
+  const { success: successUrl, failure: failureUrl } = RETURN_URLS[source].esewa();
+
+  // Server-side pending-payment record — verify looks orderData up from
+  // here by transaction_uuid instead of trusting anything the client sends
+  // back (previously base64-encoded into success_url; no longer needed).
+  // If this fails, do NOT hand the client a gateway form for a payment the
+  // server won't be able to recognize on return.
+  await PendingPayment.create({
+    gateway:    'esewa',
+    gatewayRef: transactionUuid,
+    customer:   req.user._id,
+    orderData,
+    source,
+  });
 
   res.status(200).json({
     success:    true,
     gatewayUrl: `${process.env.ESEWA_GATEWAY_URL}/api/epay/main/v2/form`,
     transactionUuid,
-    orderData,
+    orderData, // Kept for backward compatibility this deploy — web frontend no longer reads it.
     formData: {
       amount:                    total,
       tax_amount:                0,
@@ -416,8 +530,8 @@ const initiateEsewa = asyncHandler(async (req, res) => {
       product_code:              process.env.ESEWA_MERCHANT_ID,
       product_service_charge:    0,
       product_delivery_charge:   0,
-      success_url: `${process.env.FRONTEND_URL}/payment/esewa/verify?orderData=${encodedOrderData}`,
-      failure_url: `${process.env.FRONTEND_URL}/payment/failed`,
+      success_url: successUrl,
+      failure_url: failureUrl,
       signed_field_names:        'total_amount,transaction_uuid,product_code',
       signature,
     },
@@ -430,23 +544,34 @@ const initiateEsewa = asyncHandler(async (req, res) => {
 // @access  Customer only
 // ─────────────────────────────────────────────────────────
 const verifyEsewa = asyncHandler(async (req, res) => {
-  const { data, orderData } = req.body;
+  const { data } = req.body;
 
-  if (!data || !orderData) {
+  if (!data) {
     res.status(400);
-    throw new Error('data and orderData are required');
+    throw new Error('data is required');
   }
 
   const decoded     = JSON.parse(Buffer.from(data, 'base64').toString('utf-8'));
   const status      = decoded.status;
   const totalAmount = decoded.total_amount;
+  const transactionUuid = decoded.transaction_uuid;
+
+  if (!transactionUuid) {
+    res.status(400);
+    throw new Error('Payment session not found or expired');
+  }
+
+  const { pendingPayment, error } = await findInitiatedPendingPayment(transactionUuid, req.user._id);
+  if (!pendingPayment) {
+    res.status(400);
+    throw new Error(error);
+  }
+  const parsedOrderData = pendingPayment.orderData;
 
   if (status === 'COMPLETE') {
-    const parsedOrderData = typeof orderData === 'string'
-      ? JSON.parse(Buffer.from(orderData, 'base64').toString('utf-8'))
-      : orderData;
-
     if (parseFloat(totalAmount) !== parsedOrderData.total) {
+      pendingPayment.status = 'failed';
+      await pendingPayment.save();
       res.status(400);
       throw new Error('Payment amount mismatch');
     }
@@ -456,7 +581,17 @@ const verifyEsewa = asyncHandler(async (req, res) => {
     // createOrderFromCart re-checks the verified amount against a FRESH
     // recompute of the selected cart subset — guards against the cart itself
     // changing during the gateway round-trip (see its verifiedPaidAmount doc).
-    const { order, shipments } = await createOrderFromCart(req.user._id, parsedOrderData, parseFloat(totalAmount));
+    let order, shipments;
+    try {
+      ({ order, shipments } = await createOrderFromCart(req.user._id, parsedOrderData, parseFloat(totalAmount)));
+    } catch (err) {
+      pendingPayment.status = 'failed';
+      await pendingPayment.save();
+      throw err;
+    }
+
+    pendingPayment.status = 'completed';
+    await pendingPayment.save();
 
     const customer = await User.findById(req.user._id);
     const { sendOrderPlacedEmail, sendNewOrderToSeller } = require('../utils/emailService');
@@ -473,6 +608,9 @@ const verifyEsewa = asyncHandler(async (req, res) => {
     });
   }
 
+  pendingPayment.status = 'failed';
+  await pendingPayment.save();
+
   res.status(400).json({
     success: false,
     message: 'eSewa payment failed. Your cart is still saved.',
@@ -484,4 +622,10 @@ module.exports = {
   verifyKhalti,
   initiateEsewa,
   verifyEsewa,
+  // Exported additionally (not part of the HTTP surface) so the return-URL
+  // allowlist and the PendingPayment lookup can be unit-tested directly —
+  // see backend/tests/pendingPayment.test.js.
+  RETURN_URLS,
+  resolveSource,
+  findInitiatedPendingPayment,
 };

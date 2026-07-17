@@ -28,27 +28,13 @@ const KhaltiVerify = () => {
           ? 'Payment was cancelled. Your cart is still saved.'
           : 'Payment failed — this could be due to insufficient balance or a network issue. Your cart is still saved.'
       );
-      sessionStorage.removeItem('khalti_order_data');
       return;
     }
-
-    const orderDataStr = sessionStorage.getItem('khalti_order_data');
-    if (!orderDataStr) {
-      setStatus('failed');
-      setMessage('Session expired. Please try again.');
-      return;
-    }
-
-    const orderData = JSON.parse(orderDataStr);
 
     try {
-      const { data } = await API.post('/payment/khalti/verify', {
-        pidx,
-        orderData,
-      });
+      const { data } = await API.post('/payment/khalti/verify', { pidx });
 
       if (data.success) {
-        sessionStorage.removeItem('khalti_order_data');
         await fetchCart(); // refresh cart so cleared state shows
         setStatus('success');
         setMessage('Payment successful! Your order has been placed.');

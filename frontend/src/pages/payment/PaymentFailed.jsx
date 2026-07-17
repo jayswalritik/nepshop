@@ -1,9 +1,7 @@
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 const PaymentFailed = () => {
-  const navigate     = useNavigate();
-  const [searchParams] = useSearchParams();
-  const orderId      = searchParams.get('orderId');
+  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -13,8 +11,9 @@ const PaymentFailed = () => {
         </div>
         <h2 className="text-xl font-bold text-gray-900 mb-2">Payment Failed</h2>
         <p className="text-gray-500 text-sm mb-6">
-          Your payment could not be processed. Your order has been saved —
-          you can retry the payment from your orders page.
+          Your payment was not completed, so no order was placed and nothing
+          was charged. Your cart is still saved — you can return to it and
+          try again.
         </p>
         <button
           onClick={() => navigate('/customer/dashboard')}

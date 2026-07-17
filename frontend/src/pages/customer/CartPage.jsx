@@ -440,8 +440,8 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
           deliveryAddress: address,
           customerNote,
           couponCode: appliedCoupon?.code || null,
+          source: 'web',
         });
-        sessionStorage.setItem('khalti_order_data', JSON.stringify(khaltiRes.data.orderData));
         window.location.href = khaltiRes.data.paymentUrl;
         return;
       }
@@ -451,6 +451,7 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
           deliveryAddress: address,
           customerNote,
           couponCode: appliedCoupon?.code || null,
+          source: 'web',
         });
         const { gatewayUrl, formData: esewaFormData } = esewaRes.data;
         const form = document.createElement('form');

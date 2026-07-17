@@ -13,8 +13,7 @@ const EsewaVerify = () => {
   }, []);
 
   const verifyPayment = async () => {
-    const data    = searchParams.get('data');
-    const orderId = searchParams.get('orderId');
+    const data = searchParams.get('data');
 
     if (!data) {
       setStatus('failed');
@@ -23,7 +22,7 @@ const EsewaVerify = () => {
     }
 
     try {
-      const res = await API.post('/payment/esewa/verify', { data, orderId });
+      const res = await API.post('/payment/esewa/verify', { data });
 
       if (res.data.success) {
         setStatus('success');
