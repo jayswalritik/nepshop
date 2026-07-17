@@ -9,17 +9,30 @@ import ScreenHeader from './ScreenHeader';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
 // Shared by both customer and delivery Account tabs — exercises the real
-// auth plumbing (logout, role switch). Wishlist/Offers rows are customer
-// -only, both navigating to real hidden-route screens (app/(customer)/
-// wishlist.js, app/(customer)/offers.js).
+// auth plumbing (logout, role switch, role-switcher visibility). Edit
+// Profile/Wishlist/Offers rows are customer-only, each navigating to a real
+// hidden-route screen (app/(customer)/profile.js, wishlist.js, offers.js).
 export default function AccountScreen() {
   const { user, logout, switchRole } = useAuth();
   const [switching, setSwitching] = useState(false);
 
   const roles = user?.roles && user.roles.length ? user.roles : [user?.role];
   const activeRole = user?.activeRole || user?.role;
-  const switchableRoles = roles.filter((r) => ROLE_NAV_CONFIG[r] && r !== activeRole);
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
+
+  // Mirrors frontend/src/components/common/RoleSwitcher.jsx exactly: hidden
+  // entirely for single-role accounts or anyone holding admin (regardless
+  // of what other roles they also have), never just filtered per-row. Web's
+  // dropdown lists every role the account holds (seller included — its
+  // roleConfig map has a seller entry) — mobile has no seller tab set, so
+  // that one row falls through handleSwitch's `|| '/unsupported'` fallback
+  // below (same fallback login.js already uses) and lands on the existing
+  // "not yet available in the app" screen instead of a broken tab set.
+  const showSwitcher = roles.length >= 2 && !roles.includes('admin');
+  const switchableRoles = showSwitcher
+    ? roles.filter((r) => r !== activeRole && (ROLE_NAV_CONFIG[r] || r === 'seller'))
+    : [];
+  const roleLabel = (r) => ROLE_NAV_CONFIG[r]?.label || r.charAt(0).toUpperCase() + r.slice(1);
 
   const handleLogout = async () => {
     await logout();
@@ -30,7 +43,7 @@ export default function AccountScreen() {
     setSwitching(true);
     try {
       await switchRole(role);
-      router.replace(homeRouteForRole(role));
+      router.replace(homeRouteForRole(role) || '/unsupported');
     } catch (err) {
       Alert.alert('Could not switch role', err.data?.message || 'Please try again.');
     } finally {
@@ -55,6 +68,7 @@ export default function AccountScreen() {
 
         {activeRole === 'customer' && (
           <View style={styles.section}>
+            <AccountRow icon="create-outline" label="Edit Profile" onPress={() => router.push('/(customer)/profile')} />
             <AccountRow icon="heart-outline" label="Wishlist" onPress={() => router.push('/(customer)/wishlist')} />
             <AccountRow icon="pricetag-outline" label="Offers" onPress={() => router.push('/(customer)/offers')} last />
           </View>
@@ -66,7 +80,7 @@ export default function AccountScreen() {
               <AccountRow
                 key={role}
                 icon="swap-horizontal-outline"
-                label={`Switch to ${ROLE_NAV_CONFIG[role].label}`}
+                label={`Switch to ${roleLabel(role)}`}
                 onPress={() => handleSwitch(role)}
                 disabled={switching}
                 last={i === switchableRoles.length - 1}

@@ -76,8 +76,17 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
+  // Same PUT /auth/customer/profile endpoint as web's ProfilePage.jsx — the
+  // response doesn't include a new token, so this persists the returned
+  // user against the EXISTING token the same way switchRole above does.
+  const updateProfile = async (updates) => {
+    const { data } = await API.put('/auth/customer/profile', updates);
+    await login(data.user, token);
+    return data.user;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, switchRole }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, switchRole, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );
