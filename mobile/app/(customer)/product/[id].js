@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import API from '../../../src/utils/api';
 import { addToCart } from '../../../src/utils/cart';
 import ScreenHeader from '../../../src/components/ScreenHeader';
@@ -30,11 +31,16 @@ import { getDisplayPrice, formatRs } from '../../../src/utils/format';
 // [id]-keyed effect that already fetches the product and reviews, so
 // tapping into another product's rec card (which pushes a new /product/:id)
 // refreshes everything for the new id the same way the existing
-// product/reviews fetch already does. Not converted to useFocusEffect: this
-// screen's data (product/reviews/recs) isn't mutated by OTHER screens the
-// way cart/orders/wishlist are, so the standing rule's "stays mounted,
-// refetch on focus" concern doesn't apply here — this predates this task
-// and isn't being restructured.
+// product/reviews fetch already does.
+//
+// Reviews ARE now mutated by another screen (order/[id].js's "⭐ Review"
+// flow, POST /reviews) while this screen can still be sitting mounted in
+// the background (same href:null-stays-mounted behavior as every other
+// hidden route) — so the standing rule applies here for that one slice of
+// data: fetchReviews is also re-run via useFocusEffect on every refocus,
+// on top of the existing [id]-keyed effect that still covers product/recs/
+// view-tracking and the initial reviews load (so switching directly between
+// products via a rec card, which never triggers a focus event, still works).
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams();
   // useWindowDimensions (not Dimensions.get, captured once at module load)
@@ -58,6 +64,23 @@ export default function ProductDetailScreen() {
   const [alsoBought, setAlsoBought] = useState([]);
   const [alsoBoughtLoading, setAlsoBoughtLoading] = useState(true);
 
+  const fetchReviews = useCallback(() => {
+    let cancelled = false;
+    setReviewsLoading(true);
+    API.get(`/reviews/${id}`)
+      .then(({ data }) => { if (!cancelled) setReviews(data.reviews || []); })
+      .catch(() => { if (!cancelled) setReviews([]); })
+      .finally(() => { if (!cancelled) setReviewsLoading(false); });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const cancel = fetchReviews();
+      return cancel;
+    }, [fetchReviews])
+  );
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -74,12 +97,6 @@ export default function ProductDetailScreen() {
     // (frontend/src/pages/customer/ProductsPage.jsx trackView()). Recording
     // happens server-side from this call; nothing else to do client-side.
     API.post(`/recommendations/track-view/${id}`).catch(() => {});
-
-    setReviewsLoading(true);
-    API.get(`/reviews/${id}`)
-      .then(({ data }) => { if (!cancelled) setReviews(data.reviews || []); })
-      .catch(() => { if (!cancelled) setReviews([]); })
-      .finally(() => { if (!cancelled) setReviewsLoading(false); });
 
     // Three rec rows — same endpoints/limits as web's ProductDetailModal.
     setSimilarLoading(true);

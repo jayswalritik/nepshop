@@ -10,6 +10,7 @@ import Toast from '../../../src/components/Toast';
 import OrderStatusStepper, { StatusBadge } from '../../../src/components/OrderStatusStepper';
 import CancelPackageModal from '../../../src/components/CancelPackageModal';
 import ReturnItemsModal from '../../../src/components/ReturnItemsModal';
+import ReviewModal from '../../../src/components/ReviewModal';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../../src/constants/colors';
 import { formatRs } from '../../../src/utils/format';
 import {
@@ -63,6 +64,8 @@ export default function OrderDetailScreen() {
   const [cancelTarget, setCancelTarget] = useState(null); // shipment
   const [cancellingShipmentId, setCancellingShipmentId] = useState(null);
   const [returnTarget, setReturnTarget] = useState(null); // shipment
+  const [reviewItem, setReviewItem] = useState(null);
+  const [reviewOrderId, setReviewOrderId] = useState(null);
   const [toast, setToast] = useState(null);
 
   const fetchOrder = useCallback(async () => {
@@ -240,6 +243,14 @@ export default function OrderDetailScreen() {
                         <Text style={styles.voucherText}>voucher −{formatRs(item.couponAllocation)}</Text>
                       )}
                     </View>
+                    {shipment.status === 'delivered' && (
+                      <Pressable
+                        style={styles.reviewButton}
+                        onPress={() => { setReviewItem(item); setReviewOrderId(order._id); }}
+                      >
+                        <Text style={styles.reviewButtonText}>⭐ Review</Text>
+                      </Pressable>
+                    )}
                   </View>
                 ))}
 
@@ -398,6 +409,22 @@ export default function OrderDetailScreen() {
         />
       )}
 
+      {reviewItem && (
+        <ReviewModal
+          item={reviewItem}
+          orderId={reviewOrderId}
+          onClose={() => {
+            setReviewItem(null);
+            setReviewOrderId(null);
+          }}
+          onSuccess={() => {
+            setReviewItem(null);
+            setReviewOrderId(null);
+            setToast({ type: 'success', message: 'Review submitted successfully! Thank you.' });
+          }}
+        />
+      )}
+
       <Toast toast={toast} onHide={() => setToast(null)} />
     </SafeAreaView>
   );
@@ -433,12 +460,14 @@ const styles = StyleSheet.create({
   packageHeader: { fontSize: 12.5, fontWeight: '600', color: COLORS.text, marginBottom: SPACING.sm },
   packageHeaderSeller: { fontWeight: '400', color: COLORS.tabInactive },
   stepperWrap: { marginBottom: SPACING.md },
-  itemRow: { flexDirection: 'row', gap: SPACING.sm + 2, marginBottom: SPACING.sm },
+  itemRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm + 2, marginBottom: SPACING.sm },
   itemImage: { width: 44, height: 44, borderRadius: RADII.sm, backgroundColor: COLORS.surface },
   itemImageFallback: { alignItems: 'center', justifyContent: 'center' },
   itemInfo: { flex: 1, justifyContent: 'center' },
   itemName: { fontSize: 12.5, fontWeight: '600', color: COLORS.text },
   itemMeta: { fontSize: 11, color: COLORS.textMuted, marginTop: 1 },
+  reviewButton: { borderWidth: 1, borderColor: COLORS.warningSoft, borderRadius: RADII.sm, paddingHorizontal: 10, paddingVertical: 6 },
+  reviewButtonText: { fontSize: 11, fontWeight: '600', color: COLORS.warning },
   moneyLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: SPACING.sm, paddingTop: SPACING.sm, borderTopWidth: 1, borderTopColor: COLORS.border },
   moneyLineText: { fontSize: 11.5, color: COLORS.textMuted },
   moneyDot: { fontSize: 11.5, color: COLORS.border },

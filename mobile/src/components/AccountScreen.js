@@ -10,9 +10,8 @@ import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
 // Shared by both customer and delivery Account tabs — exercises the real
 // auth plumbing (logout, role switch). Wishlist/Offers rows are customer
-// -only. Wishlist now navigates to the real hidden-route screen
-// (app/(customer)/wishlist.js); Offers remains a visible-but-disabled
-// "coming soon" entry — out of scope for this task.
+// -only, both navigating to real hidden-route screens (app/(customer)/
+// wishlist.js, app/(customer)/offers.js).
 export default function AccountScreen() {
   const { user, logout, switchRole } = useAuth();
   const [switching, setSwitching] = useState(false);
@@ -57,7 +56,7 @@ export default function AccountScreen() {
         {activeRole === 'customer' && (
           <View style={styles.section}>
             <AccountRow icon="heart-outline" label="Wishlist" onPress={() => router.push('/(customer)/wishlist')} />
-            <AccountRow icon="pricetag-outline" label="Offers" badge="Coming soon" disabled last />
+            <AccountRow icon="pricetag-outline" label="Offers" onPress={() => router.push('/(customer)/offers')} last />
           </View>
         )}
 

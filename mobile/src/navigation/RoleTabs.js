@@ -12,6 +12,16 @@ export default function RoleTabs({ role }) {
 
   return (
     <Tabs
+      // Hidden routes (href:null screens below) are registered as tab
+      // routes in this same navigator, not stack-pushed screens — so both
+      // Android hardware back and in-app back buttons (router.back()) go
+      // through the tab router's GO_BACK handling. The default
+      // backBehavior ('firstRoute') only ever remembers "current + first
+      // tab", so back always lands on the first tab (Home) no matter where
+      // you came from. 'history' makes the router track real visit order,
+      // so back correctly returns to whichever tab/hidden-route was
+      // actually active before.
+      backBehavior="history"
       screenOptions={{
         // Every tab screen renders its own header (ScreenHeader, or Home's
         // gradient hero) — the default react-navigation title bar never
