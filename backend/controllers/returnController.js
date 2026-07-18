@@ -8,6 +8,13 @@ const { RETURN_WINDOW_MINUTES } = require('../config/settlementConfig');
 const { computeReturnReversal, isShipmentFullyReturned } = require('../utils/returnMath');
 const { round2 }    = require('../utils/orderPricing');
 const { recomputeOrder } = require('../utils/orderAggregate');
+const {
+  notifyReturnRequestForSeller,
+  notifyReturnDecision,
+  notifyReturnPickupAssigned,
+  notifyRefundIssued,
+  notifyReturnCompletedForSeller,
+} = require('../utils/notificationService');
 
 // Recomputes a shipment's returnHold from its currently-open Return documents.
 // Self-healing/idempotent by design — safe to call after any request/reject/
@@ -282,7 +289,10 @@ const requestReturn = asyncHandler(async (req, res) => {
 
   // Notify only THIS shipment's seller — not co-sellers on the same order.
   const seller = await User.findById(shipment.seller);
-  if (seller) sendReturnRequestToSeller(seller, returnRequest, order);
+  if (seller) {
+    sendReturnRequestToSeller(seller, returnRequest, order);
+    notifyReturnRequestForSeller(seller, returnRequest, order);
+  }
 
   const admin = await User.findOne({ role: 'admin' });
   if (admin) sendNewReturnToAdmin(admin.email, returnRequest, order);
@@ -399,7 +409,10 @@ const processReturn = asyncHandler(async (req, res) => {
 
     const { sendReturnRejectedEmail } = require('../utils/emailService');
     const customer = await User.findById(returnRequest.customer._id);
-    if (customer) sendReturnRejectedEmail(customer, returnRequest, returnRequest.order);
+    if (customer) {
+      sendReturnRejectedEmail(customer, returnRequest, returnRequest.order);
+      notifyReturnDecision(customer, returnRequest, returnRequest.order, 'rejected');
+    }
 
     return res.status(200).json({
       success: true,
@@ -430,7 +443,10 @@ const processReturn = asyncHandler(async (req, res) => {
   // Email the customer — return approved, pickup coming
   const { sendReturnApprovedEmail, sendReturnPickupAssignedEmail } = require('../utils/emailService');
   const customer = await User.findById(returnRequest.customer._id);
-  if (customer) sendReturnApprovedEmail(customer, returnRequest, returnRequest.order);
+  if (customer) {
+    sendReturnApprovedEmail(customer, returnRequest, returnRequest.order);
+    notifyReturnDecision(customer, returnRequest, returnRequest.order, 'approved');
+  }
 
   // Email the assigned return agent — pickup address comes from THIS
   // shipment (order.pickupAddress only mirrors a single-shipment order; a
@@ -443,6 +459,7 @@ const processReturn = asyncHandler(async (req, res) => {
       pickupAddress: shipment.pickupAddress,
     };
     sendReturnPickupAssignedEmail(returnAgentUser, returnRequest, emailOrderView);
+    notifyReturnPickupAssigned(returnAgentUser, returnRequest, emailOrderView);
   }
 
   res.status(200).json({
@@ -808,11 +825,17 @@ const completeReturn = asyncHandler(async (req, res) => {
   } = require('../utils/emailService');
 
   const customer = await User.findById(returnRequest.customer._id);
-  if (customer) sendRefundProcessedToCustomer(customer, updatedOrder, reversal.refundToCustomer, fault);
+  if (customer) {
+    sendRefundProcessedToCustomer(customer, updatedOrder, reversal.refundToCustomer, fault);
+    notifyRefundIssued(customer, updatedOrder, reversal.refundToCustomer);
+  }
 
   // Only THIS shipment's seller — not co-sellers on the same order.
   const seller = await User.findById(shipment.seller);
-  if (seller) sendReturnCompletedToSeller(seller, updatedOrder, fault);
+  if (seller) {
+    sendReturnCompletedToSeller(seller, updatedOrder, fault);
+    notifyReturnCompletedForSeller(seller, updatedOrder, fault);
+  }
 
   const agent = await User.findById(returnRequest.returnAgent);
   if (agent) sendReturnEarningToAgent(agent, returnRequest, updatedOrder);

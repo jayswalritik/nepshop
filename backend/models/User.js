@@ -124,6 +124,12 @@ shopAddress: {
       default: null,
     },
 
+    // ── Push notifications (Expo push token, mobile app) ──
+    expoPushToken: {
+      type: String,
+      default: null,
+    },
+
     // Wishlist — products the customer saved
     wishlist: [{
       type: mongoose.Schema.Types.ObjectId,

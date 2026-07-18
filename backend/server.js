@@ -76,7 +76,13 @@ cron.schedule(RELEASE_CRON, async () => {
       const seller = await UserModel.findById(shipment.seller);
       if (seller) {
         const order = await Order.findById(shipment.order);
-        if (order) sendSettlementReleasedEmail(seller, buildShipmentEmailView(order, shipment));
+        if (order) {
+          const shipmentView = buildShipmentEmailView(order, shipment);
+          sendSettlementReleasedEmail(seller, shipmentView);
+          // No req context in a cron callback — pass the bare seller id.
+          const { notifyEarningsReleased } = require('./utils/notificationService');
+          notifyEarningsReleased(shipment.seller, shipmentView);
+        }
       }
       released++;
     }
@@ -134,6 +140,7 @@ app.use('/api/wishlist', require('./routes/wishlistRoutes'));
 app.use('/api/recommendations', require('./routes/recommendationRoutes'));
 app.use('/api/search', require('./routes/searchRoutes')); 
 app.use('/api/chatbot', require('./routes/chatbotRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 
 // ── 404 handler (unknown routes) ─────────────────────────

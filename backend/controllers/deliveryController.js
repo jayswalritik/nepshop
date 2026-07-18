@@ -6,6 +6,10 @@ const {
   sendOrderStatusEmail,
   sendOrderDeliveredToSeller,
 } = require('../utils/emailService');
+const {
+  notifyOrderStatus,
+  notifyOrderDeliveredForSeller,
+} = require('../utils/notificationService');
 const { round2 } = require('../utils/orderPricing');
 const { recomputeOrder, buildShipmentEmailView, computeCustomerPayable } = require('../utils/orderAggregate');
 const { ESCROW_LOCK_MINUTES } = require('../config/settlementConfig');
@@ -120,11 +124,18 @@ const markDelivered = asyncHandler(async (req, res) => {
 
   // Send delivered email to customer
   const customer = await User.findById(order.customer);
-  if (customer) sendOrderStatusEmail(customer, order, 'delivered');
+  if (customer) {
+    sendOrderStatusEmail(customer, order, 'delivered');
+    notifyOrderStatus(customer, order, 'delivered');
+  }
 
   // Send delivered email to this shipment's seller only
   const seller = await User.findById(shipment.seller);
-  if (seller) sendOrderDeliveredToSeller(seller, buildShipmentEmailView(order, shipment));
+  if (seller) {
+    const shipmentView = buildShipmentEmailView(order, shipment);
+    sendOrderDeliveredToSeller(seller, shipmentView);
+    notifyOrderDeliveredForSeller(seller, shipmentView);
+  }
 
   res.status(200).json({
     success: true,

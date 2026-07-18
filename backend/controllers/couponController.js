@@ -1,5 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const Coupon = require('../models/Coupon');
+const { notifyCouponPublished } = require('../utils/notificationService');
 
 // ─────────────────────────────────────────────────────────
 // @desc    Create a coupon
@@ -49,6 +50,9 @@ const createCoupon = asyncHandler(async (req, res) => {
     expiresAt:   expiresAt || null,
     createdBy:   req.user._id,
   });
+
+  // Broadcast — no email touchpoint exists for this event.
+  notifyCouponPublished(coupon);
 
   res.status(201).json({
     success: true,

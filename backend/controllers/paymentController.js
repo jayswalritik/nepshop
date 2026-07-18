@@ -8,6 +8,10 @@ const PendingPayment = require('../models/PendingPayment');
 const {
   sendOrderStatusEmail,
 } = require('../utils/emailService');
+const {
+  notifyOrderPlaced,
+  notifyNewOrderForSeller,
+} = require('../utils/notificationService');
 
 const Cart    = require('../models/Cart');
 const Product = require('../models/Product');
@@ -489,9 +493,14 @@ const verifyKhalti = asyncHandler(async (req, res) => {
     } = require('../utils/emailService');
 
     sendOrderPlacedEmail(customer, order);
+    notifyOrderPlaced(customer, order);
     for (const shipment of shipments) {
       const seller = await User.findById(shipment.seller);
-      if (seller) sendNewOrderToSeller(seller, buildShipmentEmailView(order, shipment));
+      if (seller) {
+        const shipmentView = buildShipmentEmailView(order, shipment);
+        sendNewOrderToSeller(seller, shipmentView);
+        notifyNewOrderForSeller(seller, shipmentView);
+      }
     }
 
     return res.status(200).json({
@@ -720,9 +729,14 @@ const verifyEsewa = asyncHandler(async (req, res) => {
     const customer = await User.findById(req.user._id);
     const { sendOrderPlacedEmail, sendNewOrderToSeller } = require('../utils/emailService');
     sendOrderPlacedEmail(customer, order);
+    notifyOrderPlaced(customer, order);
     for (const shipment of shipments) {
       const seller = await User.findById(shipment.seller);
-      if (seller) sendNewOrderToSeller(seller, buildShipmentEmailView(order, shipment));
+      if (seller) {
+        const shipmentView = buildShipmentEmailView(order, shipment);
+        sendNewOrderToSeller(seller, shipmentView);
+        notifyNewOrderForSeller(seller, shipmentView);
+      }
     }
 
     return res.status(200).json({

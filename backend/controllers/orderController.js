@@ -20,6 +20,14 @@ const {
   sendLowStockEmail,
 } = require('../utils/emailService');
 
+const {
+  notifyOrderPlaced,
+  notifyOrderStatus,
+  notifyRefundIssued,
+  notifyNewOrderForSeller,
+  notifyDeliveryAssigned,
+} = require('../utils/notificationService');
+
 
 
 // ─────────────────────────────────────────────────────────
@@ -157,11 +165,16 @@ for (const item of selectedItems) {
   // Send emails
   const customer = await User.findById(req.user._id);
   sendOrderPlacedEmail(customer, order);
+  notifyOrderPlaced(customer, order);
 
   // Notify each seller — their own shipment (items/amounts) only, not the whole order
   for (const shipment of shipments) {
     const seller = await User.findById(shipment.seller);
-    if (seller) sendNewOrderToSeller(seller, buildShipmentEmailView(order, shipment));
+    if (seller) {
+      const shipmentView = buildShipmentEmailView(order, shipment);
+      sendNewOrderToSeller(seller, shipmentView);
+      notifyNewOrderForSeller(seller, shipmentView);
+    }
   }
 
   // For COD — clear ONLY the ordered (selected) items immediately; unselected
@@ -369,10 +382,14 @@ const cancelOrder = asyncHandler(async (req, res) => {
   // Send emails
   const customer = await User.findById(req.user._id);
   if (orderFullyCancelled) {
-    if (customer) sendOrderStatusEmail(customer, updatedOrder, 'cancelled');
+    if (customer) {
+      sendOrderStatusEmail(customer, updatedOrder, 'cancelled');
+      notifyOrderStatus(customer, updatedOrder, 'cancelled');
+    }
     if (refunded && customer) {
       const { sendCancelRefundToCustomer } = require('../utils/emailService');
       sendCancelRefundToCustomer(customer, updatedOrder);
+      notifyRefundIssued(customer, updatedOrder, updatedOrder.total);
     }
   }
 
@@ -507,18 +524,26 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
 
   // Send status email to customer
   const customer = await User.findById(updatedOrder.customer);
-  if (customer) sendOrderStatusEmail(customer, updatedOrder, status);
+  if (customer) {
+    sendOrderStatusEmail(customer, updatedOrder, status);
+    notifyOrderStatus(customer, updatedOrder, status);
+  }
 
   // Send delivery assignment email — scoped to this shipment
   if (status === 'dispatched' && deliveryAgentId) {
     const agent = await User.findById(deliveryAgentId);
-    if (agent) sendDeliveryAssignedEmail(agent, buildShipmentEmailView(updatedOrder, shipment));
+    if (agent) {
+      const shipmentView = buildShipmentEmailView(updatedOrder, shipment);
+      sendDeliveryAssignedEmail(agent, shipmentView);
+      notifyDeliveryAssigned(agent, shipmentView);
+    }
   }
 
   // If this cancellation refunded the paid order in full, confirm the refund
   if (orderFullyCancelled && updatedOrder.paymentStatus === 'refunded' && customer) {
     const { sendCancelRefundToCustomer } = require('../utils/emailService');
     sendCancelRefundToCustomer(customer, updatedOrder);
+    notifyRefundIssued(customer, updatedOrder, updatedOrder.total);
   }
 
   res.status(200).json({
@@ -577,10 +602,14 @@ const cancelShipmentByCustomer = asyncHandler(async (req, res) => {
   // cancelOrder uses.
   const customer = await User.findById(req.user._id);
   if (orderFullyCancelled) {
-    if (customer) sendOrderStatusEmail(customer, updatedOrder, 'cancelled');
+    if (customer) {
+      sendOrderStatusEmail(customer, updatedOrder, 'cancelled');
+      notifyOrderStatus(customer, updatedOrder, 'cancelled');
+    }
     if (refunded && customer) {
       const { sendCancelRefundToCustomer } = require('../utils/emailService');
       sendCancelRefundToCustomer(customer, updatedOrder);
+      notifyRefundIssued(customer, updatedOrder, updatedOrder.total);
     }
   }
 

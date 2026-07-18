@@ -6,6 +6,10 @@ const {
   sendAccountApprovedEmail,
   sendAccountRejectedEmail,
 } = require('../utils/emailService');
+const {
+  notifyOrderStatus,
+  notifyPayoutProcessed,
+} = require('../utils/notificationService');
 
 // @desc  Get all users
 // @route GET /api/admin/users
@@ -456,6 +460,7 @@ const adminUpdateOrderStatus = asyncHandler(async (req, res) => {
   if (customer) {
     const { sendOrderStatusEmail } = require('../utils/emailService');
     sendOrderStatusEmail(customer, updatedOrder, status);
+    notifyOrderStatus(customer, updatedOrder, status);
   }
 
   res.status(200).json({
@@ -909,6 +914,7 @@ const paySeller = asyncHandler(async (req, res) => {
     const { sendPayoutProcessedEmail } = require('../utils/emailService');
     const method = seller.payoutDetails?.preferredMethod || 'registered payout method';
     sendPayoutProcessedEmail(seller, paidAmount, method);
+    notifyPayoutProcessed(seller, paidAmount, method);
   }
 
   res.status(200).json({
@@ -975,6 +981,7 @@ const payAgent = asyncHandler(async (req, res) => {
     const { sendPayoutProcessedEmail } = require('../utils/emailService');
     const method = agent.payoutDetails?.preferredMethod || 'registered payout method';
     sendPayoutProcessedEmail(agent, paidAmount, method);
+    notifyPayoutProcessed(agent, paidAmount, method);
   }
 
   res.status(200).json({

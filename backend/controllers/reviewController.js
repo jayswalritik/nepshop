@@ -3,6 +3,7 @@ const Review   = require('../models/Review');
 const Order    = require('../models/Order');
 const Product  = require('../models/Product');
 const Shipment = require('../models/Shipment');
+const { notifyNewReviewForSeller } = require('../utils/notificationService');
 
 // ─────────────────────────────────────────────────────────
 // @desc    Add a review
@@ -68,6 +69,16 @@ const addReview = asyncHandler(async (req, res) => {
   });
 
   await review.populate('customer', 'firstName lastName');
+
+  // No email exists for this event — notification only. Seller id comes
+  // from the shipment already loaded above (same lookup pattern the rest of
+  // this controller uses — see canReview/addReview's delivery-eligibility check).
+  notifyNewReviewForSeller(shipment.seller, {
+    productName: itemInOrder.name,
+    rating:      Number(rating),
+    orderId,
+    productId,
+  });
 
   res.status(201).json({
     success: true,
