@@ -248,14 +248,38 @@ const updateSellerSettings = asyncHandler(async (req, res) => {
     throw new Error('User not found');
   }
 
-  if (user.role !== 'seller') {
+  // Roles-array/legacy-role fallback (same pattern as authMiddleware's
+  // authorizeRoles) — the old `user.role !== 'seller'` check used only the
+  // legacy single-role field, which never updates once a second role is
+  // added (e.g. a customer-first account later approved as seller keeps
+  // `user.role === 'customer'` forever, wrongly locking them out of their
+  // own seller settings).
+  const heldRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  if (!heldRoles.includes('seller')) {
     res.status(403);
     throw new Error('Only sellers can update shop settings');
   }
 
+  // Sellers are identity-verified in person (documents checked at office
+  // visit) — name is locked platform-wide, in every active role, from every
+  // endpoint. Reject a genuine change attempt rather than silently
+  // dropping it, so nothing fails silently. Resubmitting the SAME name is
+  // NOT a change — the web/mobile forms always send the full payload
+  // (including their own disabled name fields), so this must stay a no-op
+  // or sellers could never save phone/shop/payout edits either.
+  // Whitespace-insensitive: trim both sides before comparing so a purely
+  // cosmetic resubmission (e.g. a trailing space the form/keyboard added)
+  // isn't misread as an identity-change attempt. undefined/null submitted
+  // fields are "not a change" (`!= null` catches both).
+  const nameChanged =
+    (firstName != null && firstName.trim() !== (user.firstName ?? '').trim()) ||
+    (lastName != null && lastName.trim() !== (user.lastName ?? '').trim());
+  if (nameChanged) {
+    res.status(403);
+    throw new Error('Your name is verified and locked. Contact support to change verified identity details.');
+  }
+
   // Update fields if provided
-  if (firstName)   user.firstName = firstName;
-  if (lastName)    user.lastName  = lastName;
   if (phone)       user.phone     = phone;
   if (shopName)    user.shopName  = shopName;
   if (shopAddress) user.shopAddress = {
@@ -299,9 +323,21 @@ const updateCustomerProfile = asyncHandler(async (req, res) => {
     throw new Error('User not found');
   }
 
-  if (user.role !== 'customer') {
+  // Route middleware (authorizeRoles('customer')) already guarantees this
+  // account holds the customer role via the same roles-array/legacy-role
+  // fallback — this check is the identity-lock policy, not a role gate: an
+  // account that holds seller OR delivery in ADDITION to customer is
+  // blocked from this endpoint entirely, even for name-unrelated edits and
+  // even while active in customer mode. `user.role` alone can't express
+  // this — it's the legacy single-role field, frozen at whatever role the
+  // account first registered as, never updated when addCustomerRole later
+  // appends 'customer' to `roles`. A seller who added customer as a SECOND
+  // role would have `user.role === 'customer'` (unchanged) forever, so the
+  // old `user.role !== 'customer'` check let them straight through here.
+  const heldRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  if (heldRoles.includes('seller') || heldRoles.includes('delivery')) {
     res.status(403);
-    throw new Error('Only customers can update their profile here');
+    throw new Error("Verified seller/delivery accounts can't edit profile details from the customer profile.");
   }
 
   if (firstName) user.firstName = firstName;
@@ -332,13 +368,35 @@ const updateDeliveryProfile = asyncHandler(async (req, res) => {
     throw new Error('User not found');
   }
 
-  if (user.role !== 'delivery') {
+  // Roles-array/legacy-role fallback — same reasoning as
+  // updateSellerSettings above (a customer-first account later approved as
+  // delivery would keep `user.role === 'customer'` forever under the old
+  // check, wrongly locking them out of their own delivery profile).
+  const heldRoles = user.roles && user.roles.length ? user.roles : [user.role];
+  if (!heldRoles.includes('delivery')) {
     res.status(403);
     throw new Error('Only delivery agents can update their profile here');
   }
 
-  if (firstName)     user.firstName = firstName;
-  if (lastName)      user.lastName  = lastName;
+  // Delivery agents are identity-verified in person — name is locked
+  // platform-wide, in every active role, from every endpoint. Reject a
+  // genuine change attempt rather than silently dropping it, so nothing
+  // fails silently. Resubmitting the SAME name is NOT a change — the
+  // web/mobile forms always send the full payload (including their own
+  // disabled name fields), so this must stay a no-op or agents could never
+  // save phone/payout edits either.
+  // Whitespace-insensitive: trim both sides before comparing so a purely
+  // cosmetic resubmission (e.g. a trailing space the form/keyboard added)
+  // isn't misread as an identity-change attempt. undefined/null submitted
+  // fields are "not a change" (`!= null` catches both).
+  const nameChanged =
+    (firstName != null && firstName.trim() !== (user.firstName ?? '').trim()) ||
+    (lastName != null && lastName.trim() !== (user.lastName ?? '').trim());
+  if (nameChanged) {
+    res.status(403);
+    throw new Error('Your name is verified and locked. Contact support to change verified identity details.');
+  }
+
   if (phone)         user.phone     = phone;
   if (payoutDetails) {
     user.payoutDetails = {

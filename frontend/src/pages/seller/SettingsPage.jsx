@@ -124,23 +124,22 @@ const SettingsPage = () => {
               <input
                 name="firstName"
                 value={formData.firstName}
-                onChange={handleChange}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                  ${errors.firstName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+                disabled
+                className="w-full px-3 py-2.5 border border-gray-100 rounded-lg text-sm bg-gray-50 text-gray-400 cursor-not-allowed"
               />
-              {errors.firstName && <p className="text-red-500 text-xs mt-1">{errors.firstName}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
               <input
                 name="lastName"
                 value={formData.lastName}
-                onChange={handleChange}
-                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                  ${errors.lastName ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+                disabled
+                className="w-full px-3 py-2.5 border border-gray-100 rounded-lg text-sm bg-gray-50 text-gray-400 cursor-not-allowed"
               />
-              {errors.lastName && <p className="text-red-500 text-xs mt-1">{errors.lastName}</p>}
             </div>
+            <p className="text-xs text-gray-400 -mt-3 col-span-2">
+              Contact support to change verified identity details.
+            </p>
           </div>
 
           <div>

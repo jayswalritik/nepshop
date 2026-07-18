@@ -12,21 +12,27 @@ import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 // row — mirrors frontend/src/pages/delivery/ProfilePage.jsx exactly:
 // <RoleUpgrade/> (reused as-is — it already handles the delivery-agent
 // "become a customer" case generically, no fork needed, see the component's
-// own header comment), editable First/Last name + Phone, read-only Email,
-// Payout Details (preferred method + conditional fields), then Account
-// Information (vehicle type/status/member since). Same single PUT
-// /auth/delivery/profile call web's handleSave makes — profile AND payout
-// fields submitted together in one request, not two.
+// own header comment), LOCKED First/Last name (delivery agents are
+// identity-verified in person — backend/controllers/authController.js's
+// updateDeliveryProfile rejects any genuine name change; this UI lock is a
+// courtesy, not the guard) + editable Phone, read-only Email, Payout
+// Details (preferred method + conditional fields), then Account Information
+// (vehicle type/status/member since). Same single PUT /auth/delivery/profile
+// call web's handleSave makes — the locked name fields still ride along in
+// the payload unchanged (a no-op server-side), profile AND payout fields
+// submitted together in one request, not two.
 const PAYOUT_METHODS = [
   { key: 'bank', label: 'Bank Transfer', icon: '🏦' },
   { key: 'khalti', label: 'Khalti', icon: '💜' },
   { key: 'esewa', label: 'eSewa', icon: '💚' },
 ];
 
+// firstName/lastName are locked (not user-editable), so they can never fail
+// validation here — checking them would risk silently blocking a legitimate
+// phone/payout-only save with no visible error, since neither field renders
+// an error message anymore.
 const validate = (form) => {
   const errs = {};
-  if (!form.firstName.trim()) errs.firstName = 'First name is required';
-  if (!form.lastName.trim()) errs.lastName = 'Last name is required';
   if (!form.phone.trim()) errs.phone = 'Phone is required';
   return errs;
 };
@@ -115,25 +121,18 @@ export default function DeliveryProfileScreen() {
           <View style={styles.row}>
             <View style={styles.fieldHalf}>
               <Text style={styles.label}>First name</Text>
-              <TextInput
-                style={[styles.input, errors.firstName && styles.inputError]}
-                value={form.firstName}
-                onChangeText={(v) => handleChange('firstName', v)}
-                placeholderTextColor={COLORS.tabInactive}
-              />
-              {errors.firstName ? <Text style={styles.fieldError}>{errors.firstName}</Text> : null}
+              <View style={styles.disabledInput}>
+                <Text style={styles.disabledInputText}>{form.firstName}</Text>
+              </View>
             </View>
             <View style={styles.fieldHalf}>
               <Text style={styles.label}>Last name</Text>
-              <TextInput
-                style={[styles.input, errors.lastName && styles.inputError]}
-                value={form.lastName}
-                onChangeText={(v) => handleChange('lastName', v)}
-                placeholderTextColor={COLORS.tabInactive}
-              />
-              {errors.lastName ? <Text style={styles.fieldError}>{errors.lastName}</Text> : null}
+              <View style={styles.disabledInput}>
+                <Text style={styles.disabledInputText}>{form.lastName}</Text>
+              </View>
             </View>
           </View>
+          <Text style={styles.helperText}>Contact support to change verified identity details.</Text>
 
           <View style={styles.fieldWrap}>
             <Text style={styles.label}>Phone number</Text>
