@@ -16,7 +16,8 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "package": "com.nepshop.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -26,6 +27,12 @@
       "expo-secure-store",
       "expo-font",
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5e322859-8fa6-4dd5-a325-07a3a71e5964"
+      }
+    }
   }
 }

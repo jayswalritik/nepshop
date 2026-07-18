@@ -72,8 +72,6 @@ const MobileReturn = () => {
   useEffect(() => {
     if (!deepLink) return;
     const query = target === 'failed' ? '' : reencodeQuery(window.location.search);
-    // TEMPORARY DIAGNOSTIC LOG — remove after eSewa-stuck-on-verifying investigation.
-    console.log('[DIAG MobileReturn]', 'target=', target, 'window.location.href=', window.location.href, 'window.location.search=', window.location.search, 'constructed=', `${deepLink}${query}`);
     window.location.replace(`${deepLink}${query}`);
   }, [deepLink, target]);
 
