@@ -53,8 +53,11 @@ const fakeRes = () => {
   const res = {
     statusCode: 200,
     body: null,
+    contentType: null,
     status(code) { this.statusCode = code; return this; },
     json(payload) { this.body = payload; return this; },
+    type(t) { this.contentType = t; return this; },
+    send(payload) { this.body = payload; return this; },
   };
   return res;
 };
@@ -78,9 +81,12 @@ const run = async () => {
 
   const {
     verifyKhalti,
+    esewaForm,
     RETURN_URLS,
     resolveSource,
     findInitiatedPendingPayment,
+    buildEsewaSignature,
+    buildEsewaFormData,
   } = require('../controllers/paymentController');
   const PendingPayment = require('../models/PendingPayment');
   const User    = require('../models/User');
@@ -162,14 +168,26 @@ const run = async () => {
     }
   });
 
-  await test('allowlist: mobile+khalti returns the nepshop:// deep link, independent of FRONTEND_URL', () => {
-    assert.strictEqual(RETURN_URLS.mobile.khalti(), 'nepshop://payment/khalti/verify');
+  await test('allowlist: mobile+khalti returns the FRONTEND_URL-based https bridge page (Khalti rejects non-http return_url)', () => {
+    const original = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = 'https://web.example.com';
+    try {
+      assert.strictEqual(RETURN_URLS.mobile.khalti(), 'https://web.example.com/payment/mobile-return/khalti');
+    } finally {
+      process.env.FRONTEND_URL = original;
+    }
   });
 
-  await test('allowlist: mobile+esewa returns nepshop:// success/failure deep links', () => {
-    const urls = RETURN_URLS.mobile.esewa();
-    assert.strictEqual(urls.success, 'nepshop://payment/esewa/verify');
-    assert.strictEqual(urls.failure, 'nepshop://payment/failed');
+  await test('allowlist: mobile+esewa returns FRONTEND_URL-based https bridge success/failure pages', () => {
+    const original = process.env.FRONTEND_URL;
+    process.env.FRONTEND_URL = 'https://web.example.com';
+    try {
+      const urls = RETURN_URLS.mobile.esewa();
+      assert.strictEqual(urls.success, 'https://web.example.com/payment/mobile-return/esewa');
+      assert.strictEqual(urls.failure, 'https://web.example.com/payment/mobile-return/failed');
+    } finally {
+      process.env.FRONTEND_URL = original;
+    }
   });
 
   await test('resolveSource: "web" and "mobile" pass through unchanged', () => {
@@ -305,6 +323,81 @@ const run = async () => {
     } finally {
       axios.post = originalPost;
     }
+  }, cleanup);
+
+  // ── 4. eSewa signing + mobile form-rebuild endpoint ──────────────────
+  await test('buildEsewaSignature: HMAC-SHA256 over total_amount,transaction_uuid,product_code matches manual computation', () => {
+    const crypto = require('crypto');
+    const original = { merchant: process.env.ESEWA_MERCHANT_ID, secret: process.env.ESEWA_SECRET_KEY };
+    process.env.ESEWA_MERCHANT_ID = 'EPAYTEST';
+    process.env.ESEWA_SECRET_KEY  = 'test-secret-key';
+    try {
+      const signature = buildEsewaSignature(1100, 'NEPSHOP-abc-123');
+      const message  = 'total_amount=1100,transaction_uuid=NEPSHOP-abc-123,product_code=EPAYTEST';
+      const expected = crypto.createHmac('sha256', 'test-secret-key').update(message).digest('base64');
+      assert.strictEqual(signature, expected);
+    } finally {
+      process.env.ESEWA_MERCHANT_ID = original.merchant;
+      process.env.ESEWA_SECRET_KEY  = original.secret;
+    }
+  });
+
+  await test('buildEsewaFormData: same inputs (as at initiate time vs. rebuild time) produce an identical signature — cannot drift, both call the one shared helper', () => {
+    const original = { merchant: process.env.ESEWA_MERCHANT_ID, secret: process.env.ESEWA_SECRET_KEY, frontend: process.env.FRONTEND_URL };
+    process.env.ESEWA_MERCHANT_ID = 'EPAYTEST';
+    process.env.ESEWA_SECRET_KEY  = 'test-secret-key';
+    process.env.FRONTEND_URL      = 'https://web.example.com';
+    try {
+      const atInitiate = buildEsewaFormData({ total: 1100, transactionUuid: 'NEPSHOP-abc-123', source: 'mobile' });
+      const atRebuild  = buildEsewaFormData({ total: 1100, transactionUuid: 'NEPSHOP-abc-123', source: 'mobile' });
+      assert.strictEqual(atInitiate.signature, atRebuild.signature);
+      assert.strictEqual(atInitiate.total_amount, 1100);
+      assert.strictEqual(atInitiate.success_url, 'https://web.example.com/payment/mobile-return/esewa');
+      assert.strictEqual(atInitiate.failure_url, 'https://web.example.com/payment/mobile-return/failed');
+    } finally {
+      process.env.ESEWA_MERCHANT_ID = original.merchant;
+      process.env.ESEWA_SECRET_KEY  = original.secret;
+      process.env.FRONTEND_URL      = original.frontend;
+    }
+  });
+
+  await test('esewaForm: initiated PendingPayment found → 200 html page containing the signed hidden fields', async () => {
+    const customer = await mkUser('EsewaFormOK');
+    const pp = await PendingPayment.create({
+      gateway: 'esewa', gatewayRef: `esewa-form-ok-${customer._id}`, customer: customer._id,
+      orderData: { deliveryAddress: address, customerNote: '', paymentMethod: 'esewa', couponCode: null, total: 1100 },
+      source: 'mobile',
+    });
+    cleanupIds.pendingPayments.push(pp._id);
+
+    const { res, err } = await invoke(esewaForm, { params: { transactionUuid: pp.gatewayRef } });
+    assert.strictEqual(err, null, `esewaForm threw: ${err && err.message}`);
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.contentType, 'html');
+    assert.ok(res.body.includes('name="transaction_uuid" value="' + pp.gatewayRef + '"'));
+    assert.ok(res.body.includes('name="total_amount" value="1100"'));
+    assert.ok(res.body.includes("document.getElementById('esewaForm').submit()"));
+  }, cleanup);
+
+  await test('esewaForm: unknown transactionUuid → 404 html "not found or expired" page (not JSON)', async () => {
+    const { res, err } = await invoke(esewaForm, { params: { transactionUuid: 'does-not-exist' } });
+    assert.strictEqual(err, null);
+    assert.strictEqual(res.statusCode, 404);
+    assert.strictEqual(res.contentType, 'html');
+    assert.ok(res.body.includes('not found or expired'));
+  });
+
+  await test('esewaForm: a completed (already-used) PendingPayment is not re-servable → 404, same as unknown', async () => {
+    const customer = await mkUser('EsewaFormCompleted');
+    const pp = await PendingPayment.create({
+      gateway: 'esewa', gatewayRef: `esewa-form-done-${customer._id}`, customer: customer._id,
+      orderData: { deliveryAddress: address, customerNote: '', paymentMethod: 'esewa', couponCode: null, total: 1100 },
+      source: 'mobile', status: 'completed',
+    });
+    cleanupIds.pendingPayments.push(pp._id);
+
+    const { res } = await invoke(esewaForm, { params: { transactionUuid: pp.gatewayRef } });
+    assert.strictEqual(res.statusCode, 404);
   }, cleanup);
 
   await mongoose.disconnect();

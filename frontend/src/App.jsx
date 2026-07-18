@@ -16,6 +16,7 @@ import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import KhaltiVerify  from './pages/payment/KhaltiVerify';
 import EsewaVerify   from './pages/payment/EsewaVerify';
 import PaymentFailed from './pages/payment/PaymentFailed';
+import MobileReturn  from './pages/payment/MobileReturn';
 import { WishlistProvider } from './context/WishlistContext';
 
 function App() {
@@ -34,7 +35,8 @@ function App() {
               <Route path="/reset-password/:token" element={<ResetPasswordPage />} /> 
               <Route path="/payment/khalti/verify"  element={<KhaltiVerify />} />
               <Route path="/payment/esewa/verify"   element={<EsewaVerify />} />
-              <Route path="/payment/failed"         element={<PaymentFailed />} />  
+              <Route path="/payment/failed"         element={<PaymentFailed />} />
+              <Route path="/payment/mobile-return/:target" element={<MobileReturn />} />
 
               {/* Protected — Customer */}
               <Route path="/customer/dashboard" element={
