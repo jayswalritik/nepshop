@@ -181,11 +181,17 @@ const computeCartPricing = (cartItems, couponResult) => {
 
 // ── Return-URL allowlist ────────────────────────────────────────────────
 // The client may request which "source" it's returning to (web browser vs.
-// a future mobile app deep link) but can NEVER supply a URL itself — every
-// return URL handed to a gateway comes from this fixed map. The mobile
-// entries aren't wired to any live screen yet (mobile/ is untouched by this
-// change) — they exist so the initiate endpoints already speak the
-// (source, gateway) contract mobile will need later.
+// mobile app) but can NEVER supply a URL itself — every return URL handed
+// to a gateway comes from this fixed map.
+//
+// mobile entries point at this backend's own https bridge pages
+// (frontend/src/pages/payment/MobileReturn.jsx, routed at
+// /payment/mobile-return/:target), NOT directly at nepshop://... — proven
+// live that Khalti's /epayment/initiate/ rejects a non-http return_url
+// ({"return_url":["Enter a valid URL."]}), and eSewa's success/failure URLs
+// have the same http(s)-only requirement. MobileReturn's only job is to
+// bounce the browser straight to the real nepshop:// deep link, carrying
+// the gateway's query string through unchanged.
 const RETURN_URLS = {
   web: {
     khalti: () => `${process.env.FRONTEND_URL}/payment/khalti/verify`,
@@ -195,12 +201,77 @@ const RETURN_URLS = {
     }),
   },
   mobile: {
-    khalti: () => 'nepshop://payment/khalti/verify',
+    khalti: () => `${process.env.FRONTEND_URL}/payment/mobile-return/khalti`,
     esewa: () => ({
-      success: 'nepshop://payment/esewa/verify',
-      failure: 'nepshop://payment/failed',
+      success: `${process.env.FRONTEND_URL}/payment/mobile-return/esewa`,
+      failure: `${process.env.FRONTEND_URL}/payment/mobile-return/failed`,
     }),
   },
+};
+
+// Pure — HMAC-SHA256 signature eSewa requires over these three fields, in
+// this exact order/format. Extracted so the mobile form-rebuild endpoint
+// (esewaForm, below) and initiate-time signing can never drift apart from
+// each other — both call this, neither duplicates the HMAC construction.
+const buildEsewaSignature = (total, transactionUuid) => {
+  const message = `total_amount=${total},transaction_uuid=${transactionUuid},product_code=${process.env.ESEWA_MERCHANT_ID}`;
+  return crypto.createHmac('sha256', process.env.ESEWA_SECRET_KEY).update(message).digest('base64');
+};
+
+// Pure — the full eSewa gateway formData object. Used both by initiateEsewa
+// (returned to web, which submits it as a DOM form) and esewaForm (rendered
+// server-side as an auto-submitting HTML page for mobile). `total` must
+// come from stored PendingPayment.orderData at rebuild time — never
+// recomputed from the cart — so the amount eSewa is asked to charge can
+// never drift from what was quoted at initiation.
+const buildEsewaFormData = ({ total, transactionUuid, source }) => {
+  const { success: successUrl, failure: failureUrl } = RETURN_URLS[source].esewa();
+  return {
+    amount:                    total,
+    tax_amount:                0,
+    total_amount:              total,
+    transaction_uuid:          transactionUuid,
+    product_code:              process.env.ESEWA_MERCHANT_ID,
+    product_service_charge:    0,
+    product_delivery_charge:   0,
+    success_url: successUrl,
+    failure_url: failureUrl,
+    signed_field_names:        'total_amount,transaction_uuid,product_code',
+    signature: buildEsewaSignature(total, transactionUuid),
+  };
+};
+
+// Minimal HTML-attribute escaping for the server-rendered eSewa bridge form
+// below — every value going through it is server-derived (stored total,
+// generated transactionUuid, env-configured merchant id/URLs), never raw
+// user input, but this is a PUBLIC unauthenticated endpoint so it's escaped
+// defensively anyway.
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+
+const esewaFormNotFoundHtml = () => `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Payment session not found</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:48px 16px;">
+<h2>Payment session not found or expired</h2>
+<p>This payment link is no longer valid. Please return to the NepShop app and try again.</p>
+</body></html>`;
+
+const esewaFormHtml = (formData) => {
+  const inputs = Object.entries(formData)
+    .map(([name, value]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`)
+    .join('\n    ');
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Redirecting to eSewa…</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:48px 16px;">
+  <p>Redirecting to eSewa…</p>
+  <form id="esewaForm" method="POST" action="${escapeHtml(process.env.ESEWA_GATEWAY_URL)}/api/epay/main/v2/form">
+    ${inputs}
+    <noscript><button type="submit">Continue to eSewa</button></noscript>
+  </form>
+  <script>document.getElementById('esewaForm').submit();</script>
+</body></html>`;
 };
 
 const VALID_SOURCES = ['web', 'mobile'];
@@ -309,16 +380,27 @@ const initiateKhalti = asyncHandler(async (req, res) => {
     },
   };
 
-  const response = await axios.post(
-    `${process.env.KHALTI_GATEWAY_URL}/epayment/initiate/`,
-    payload,
-    {
-      headers: {
-        Authorization: `Key ${process.env.KHALTI_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    }
-  );
+  let response;
+  try {
+    response = await axios.post(
+      `${process.env.KHALTI_GATEWAY_URL}/epayment/initiate/`,
+      payload,
+      {
+        headers: {
+          Authorization: `Key ${process.env.KHALTI_SECRET_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  } catch (err) {
+    // Log-and-rethrow only — does not change the error or the status code
+    // the client ultimately receives. Kept (not just DIAG) because a Khalti-
+    // side rejection would otherwise be silently swallowed into a bare 500
+    // with no visibility into why (this is how the non-http return_url
+    // rejection was originally diagnosed).
+    console.error('Khalti initiate rejected:', err.response?.status, err.response?.data);
+    throw err;
+  }
 
   // Server-side pending-payment record — verify looks orderData up from
   // here by pidx instead of trusting anything the client sends back. If
@@ -495,14 +577,6 @@ const initiateEsewa = asyncHandler(async (req, res) => {
   };
 
   const transactionUuid = `NEPSHOP-${req.user._id}-${Date.now()}`;
-  const crypto = require('crypto');
-  const message = `total_amount=${total},transaction_uuid=${transactionUuid},product_code=${process.env.ESEWA_MERCHANT_ID}`;
-  const signature = crypto
-    .createHmac('sha256', process.env.ESEWA_SECRET_KEY)
-    .update(message)
-    .digest('base64');
-
-  const { success: successUrl, failure: failureUrl } = RETURN_URLS[source].esewa();
 
   // Server-side pending-payment record — verify looks orderData up from
   // here by transaction_uuid instead of trusting anything the client sends
@@ -517,25 +591,74 @@ const initiateEsewa = asyncHandler(async (req, res) => {
     source,
   });
 
+  // Public GET bridge — mobile opens this URL directly (a browser
+  // address-bar navigation can't carry a JWT, so it has to be a plain URL,
+  // not an API call the app makes itself). Built from the incoming
+  // request rather than a dedicated env var — no BACKEND_PUBLIC_URL (or
+  // equivalent) exists in this project's env today. CAVEAT: Render (and
+  // most reverse-proxy deploys) terminates TLS in front of the app and
+  // forwards plain HTTP internally — req.protocol only reflects the
+  // original HTTPS request if Express has `app.set('trust proxy', ...)`
+  // enabled, which server.js does not currently set. Until that's added,
+  // this can render as http:// in production even though the real public
+  // URL is https://. Flagged here rather than silently assuming either way.
+  const formUrl = `${req.protocol}://${req.get('host')}/api/payment/esewa/form/${transactionUuid}`;
+
   res.status(200).json({
     success:    true,
     gatewayUrl: `${process.env.ESEWA_GATEWAY_URL}/api/epay/main/v2/form`,
     transactionUuid,
     orderData, // Kept for backward compatibility this deploy — web frontend no longer reads it.
-    formData: {
-      amount:                    total,
-      tax_amount:                0,
-      total_amount:              total,
-      transaction_uuid:          transactionUuid,
-      product_code:              process.env.ESEWA_MERCHANT_ID,
-      product_service_charge:    0,
-      product_delivery_charge:   0,
-      success_url: successUrl,
-      failure_url: failureUrl,
-      signed_field_names:        'total_amount,transaction_uuid,product_code',
-      signature,
-    },
+    formData: buildEsewaFormData({ total, transactionUuid, source }),
+    formUrl,
   });
+});
+
+// ─────────────────────────────────────────────────────────
+// @desc    Rebuild + serve the eSewa gateway form as a self-submitting
+//          HTML page, for clients that can't perform the form POST
+//          themselves (mobile — see formUrl above)
+// @route   GET /api/payment/esewa/form/:transactionUuid
+// @access  PUBLIC — see security note below
+// ─────────────────────────────────────────────────────────
+//
+// Why this exists: eSewa requires a real browser form POST of signed
+// fields; expo-web-browser's openAuthSessionAsync can only GET-navigate to
+// a URL (no method/body option), and browsers block top-level navigation to
+// data: URIs — so mobile has nothing that can build+submit this form
+// itself. initiateEsewa instead hands mobile a GET url (formUrl) to THIS
+// endpoint, which renders the identical form web builds inline in the DOM,
+// server-side, and auto-submits it.
+//
+// Security: this is a bare browser GET, so no Authorization header is
+// possible — the access control is knowledge of a live, not-yet-used
+// transactionUuid (unguessable: `NEPSHOP-${userId}-${Date.now()}`) whose
+// PendingPayment is still status:'initiated' (same idempotency gate verify
+// already relies on) and not past its 30-min TTL. The rendered form
+// contains only fields eSewa itself receives on submit — nothing more
+// sensitive than what initiateEsewa's JSON response already hands the web
+// client today.
+const esewaForm = asyncHandler(async (req, res) => {
+  const { transactionUuid } = req.params;
+
+  const pendingPayment = await PendingPayment.findOne({
+    gateway: 'esewa',
+    gatewayRef: transactionUuid,
+    status: 'initiated',
+  });
+
+  if (!pendingPayment) {
+    res.status(404).type('html').send(esewaFormNotFoundHtml());
+    return;
+  }
+
+  const formData = buildEsewaFormData({
+    total: pendingPayment.orderData.total, // stored at initiation — never recomputed here
+    transactionUuid,
+    source: pendingPayment.source,
+  });
+
+  res.type('html').send(esewaFormHtml(formData));
 });
 
 // ─────────────────────────────────────────────────────────
@@ -622,10 +745,13 @@ module.exports = {
   verifyKhalti,
   initiateEsewa,
   verifyEsewa,
+  esewaForm,
   // Exported additionally (not part of the HTTP surface) so the return-URL
-  // allowlist and the PendingPayment lookup can be unit-tested directly —
-  // see backend/tests/pendingPayment.test.js.
+  // allowlist, the PendingPayment lookup, and eSewa signing can be
+  // unit-tested directly — see backend/tests/pendingPayment.test.js.
   RETURN_URLS,
   resolveSource,
   findInitiatedPendingPayment,
+  buildEsewaSignature,
+  buildEsewaFormData,
 };
