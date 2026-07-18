@@ -16,11 +16,13 @@ const statusColors = {
 
 const round2 = (n) => +Number(n).toFixed(2);
 
-// What the customer actually owes for THIS package — voucher-aware. Mirrors
-// backend/utils/shipmentCancellation.js's exact formula (sellerSubtotal +
-// deliveryCharge - couponAllocation); see backend/utils/orderAggregate.js's
-// buildShipmentEmailView.customerPayable for the email-side twin of this.
-const collectAmount = (shipment) =>
+// FALLBACK ONLY — GET /api/delivery/orders now returns shipment.customerPayable
+// directly (backend/controllers/deliveryController.js's getDeliveryOrders, via
+// the shared backend/utils/orderAggregate.js formula), and that's what's used
+// everywhere below. This is the same expression, kept only so a shipment that
+// somehow lacks the field (shouldn't happen — same deploy) still renders a
+// number instead of crashing.
+const collectAmountFallback = (shipment) =>
   round2((shipment.sellerSubtotal || 0) + (shipment.deliveryCharge || 0) - (shipment.couponAllocation || 0));
 
 const DeliveryDashboard = () => {
@@ -74,12 +76,12 @@ const DeliveryDashboard = () => {
 
       const active    = all.filter(o => o.status === 'dispatched');
       const delivered = all.filter(o => o.status === 'delivered');
-      const deliveryEarnings = delivered.reduce((sum, o) => sum + o.deliveryEarning, 0);
+      const deliveryEarnings = data.deliveryEarnings || 0;
       const returnEarnings   = data.returnEarnings || 0;
 
       setStats({
         active:    active.length,
-        delivered: delivered.length,
+        delivered: data.deliveredCount || 0,
         earnings:  deliveryEarnings + returnEarnings,
         deliveryEarnings,
         returnEarnings,
@@ -354,13 +356,13 @@ const DeliveryDashboard = () => {
                         </span>
                         <div className="text-right">
                           <p className="text-xs text-gray-400">Package value</p>
-                          <p className="text-sm font-bold text-gray-900">Rs {(order.sellerSubtotal + order.deliveryCharge).toLocaleString()}</p>
+                          <p className="text-sm font-bold text-gray-900">Rs {order.packageValue.toLocaleString()}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-xs text-gray-400">Collect</p>
                           <p className={`text-sm font-bold ${order.order?.paymentMethod === 'cash_on_delivery' ? 'text-red-600' : 'text-gray-400'}`}>
                             {order.order?.paymentMethod === 'cash_on_delivery'
-                              ? `Rs ${collectAmount(order).toLocaleString()}`
+                              ? `Rs ${(order.customerPayable ?? collectAmountFallback(order)).toLocaleString()}`
                               : 'Paid online'}
                           </p>
                         </div>
@@ -411,7 +413,7 @@ const DeliveryDashboard = () => {
             {selected.order?.paymentMethod === 'cash_on_delivery' ? (
               <div className="bg-red-50 border border-red-100 rounded-xl p-3 mb-4 text-center">
                 <p className="text-xs text-red-600 mb-0.5">Collect from customer</p>
-                <p className="text-lg font-bold text-red-700">Rs {collectAmount(selected).toLocaleString()}</p>
+                <p className="text-lg font-bold text-red-700">Rs {(selected.customerPayable ?? collectAmountFallback(selected)).toLocaleString()}</p>
               </div>
             ) : (
               <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-4 text-center">

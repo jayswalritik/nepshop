@@ -7,20 +7,40 @@ const {
   sendOrderDeliveredToSeller,
 } = require('../utils/emailService');
 const { round2 } = require('../utils/orderPricing');
-const { recomputeOrder, buildShipmentEmailView } = require('../utils/orderAggregate');
+const { recomputeOrder, buildShipmentEmailView, computeCustomerPayable } = require('../utils/orderAggregate');
 const { ESCROW_LOCK_MINUTES } = require('../config/settlementConfig');
 
 // @desc  Get all shipments assigned to delivery agent
 // @route GET /api/delivery/orders
 // @access Delivery agent only
 const getDeliveryOrders = asyncHandler(async (req, res) => {
-  const shipments = await Shipment.find({ deliveryAgent: req.user._id })
+  const shipmentDocs = await Shipment.find({ deliveryAgent: req.user._id })
     .sort({ createdAt: -1 })
     .populate({
       path:   'order',
       select: 'customer deliveryAddress paymentMethod paymentStatus createdAt',
       populate: { path: 'customer', select: 'firstName lastName phone email' },
     });
+
+  // Derived, voucher-aware money fields — computed here (via the shared
+  // orderAggregate helper, same formula the assignment email already uses)
+  // and attached to the RESPONSE only. Never written back to the Shipment
+  // documents — these are read-only projections, not persisted state.
+  const shipments = shipmentDocs.map(s => ({
+    ...s.toObject(),
+    customerPayable: computeCustomerPayable(s),
+    packageValue:    round2(s.sellerSubtotal + s.deliveryCharge),
+  }));
+
+  // Delivery-leg earnings — pre-aggregated server-side, same $match/$group
+  // shape as the return-earnings aggregation below. Only 'delivered'
+  // shipments count as earned (mirrors returnEarningsAgg's 'refunded' gate).
+  const deliveryEarningsAgg = await Shipment.aggregate([
+    { $match: { deliveryAgent: req.user._id, status: 'delivered' } },
+    { $group: { _id: null, total: { $sum: '$deliveryEarning' }, count: { $sum: 1 } } },
+  ]);
+  const deliveryEarnings = deliveryEarningsAgg[0]?.total || 0;
+  const deliveredCount   = deliveryEarningsAgg[0]?.count || 0;
 
   // Return-pickup leg earnings — a SEPARATE job (and possibly a different
   // agent) than this agent's own delivery shipments above, so it's not
@@ -36,7 +56,14 @@ const getDeliveryOrders = asyncHandler(async (req, res) => {
   const returnEarnings    = returnEarningsAgg[0]?.total || 0;
   const returnPickupCount = returnEarningsAgg[0]?.count || 0;
 
-  res.status(200).json({ success: true, shipments, returnEarnings, returnPickupCount });
+  res.status(200).json({
+    success: true,
+    shipments,
+    returnEarnings,
+    returnPickupCount,
+    deliveryEarnings,
+    deliveredCount,
+  });
 });
 
 // @desc  Mark a shipment as delivered

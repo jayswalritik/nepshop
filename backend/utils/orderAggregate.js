@@ -84,6 +84,14 @@ const recomputeOrder = async (orderId) => {
   return order;
 };
 
+// Voucher-aware amount the customer owes for ONE package (shipment) — the
+// single source of truth for this formula. Reused by buildShipmentEmailView
+// below and by deliveryController.getDeliveryOrders; shipmentCancellation.js
+// computes the same formula inline for its refund math (verified to agree,
+// not yet switched to call this — out of scope for this change).
+const computeCustomerPayable = (shipment) =>
+  round2(shipment.sellerSubtotal + shipment.deliveryCharge - (shipment.couponAllocation || 0));
+
 // Builds an order-shaped view scoped to one shipment, for seller/agent-facing
 // emails that expect order.items/subtotal/commissionAmount/total etc.
 const buildShipmentEmailView = (order, shipment) => ({
@@ -98,7 +106,7 @@ const buildShipmentEmailView = (order, shipment) => ({
   // distinct from `total` above, which is gross package value used by
   // seller-facing "Order Value"/"Your Earnings" lines. Only this field is
   // safe to show as a COD collection amount (see sendDeliveryAssignedEmail).
-  customerPayable:  round2(shipment.sellerSubtotal + shipment.deliveryCharge - (shipment.couponAllocation || 0)),
+  customerPayable:  computeCustomerPayable(shipment),
   // What the SELLER actually earns on this shipment — sellerSubtotal minus
   // commission, NEVER including deliveryCharge (that pays the agent/margin,
   // matches settlement.sellerShare exactly — see deliveryController.markDelivered).
@@ -119,6 +127,7 @@ module.exports = {
   deriveOrderStatus,
   recomputeOrder,
   buildShipmentEmailView,
+  computeCustomerPayable,
   ACTIVE_STATUS_ORDER,
   TERMINAL_STATUSES,
 };
