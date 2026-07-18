@@ -55,22 +55,32 @@ const RoleSwitcher = ({ openDirection = 'down' }) => {
   const current = roleConfig[activeRole] || roleConfig.customer;
 
   return (
-    <div className="relative w-full min-w-[110px] md:min-w-[180px]" ref={dropdownRef}>
+    // Compact below `sm:` — icon + chevron only, fixed 36px square, no
+    // min-width floor (that 110px floor was crowding narrow mobile
+    // headers). Full icon+label+chevron with the original min-width floors
+    // returns at `sm:` and up — this is what the desktop sidebar footer and
+    // customer top navbar render, unchanged.
+    <div className="relative flex-shrink-0 w-9 sm:flex-shrink sm:w-full sm:min-w-[110px] md:min-w-[180px]" ref={dropdownRef}>
       <button
         onClick={() => setOpen(!open)}
         disabled={loading}
-        className="w-full flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-60"
+        title={current.label}
+        className="w-9 h-9 sm:w-full sm:h-auto flex items-center justify-center sm:justify-start gap-0.5 sm:gap-2 p-0 sm:px-3 sm:py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-all disabled:opacity-60"
       >
-        <span>{current.icon}</span>
-        <span>{current.label}</span>
-        <svg className={`w-3.5 h-3.5 text-gray-400 ml-auto transition-transform ${open ? 'rotate-180' : ''}`}
+        <span className="text-base sm:text-sm leading-none">{current.icon}</span>
+        <span className="hidden sm:inline">{current.label}</span>
+        <svg className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-gray-400 sm:ml-auto flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
 
       {open && (
-        <div className={`absolute left-0 right-0 min-w-[110px] bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50
+        // Compact trigger is only 36px wide — the panel must NOT stretch to
+        // match it (unreadably narrow). Anchor right + fixed width below
+        // `sm:`; revert to the original left-0/right-0 stretch-to-trigger
+        // behavior at `sm:` and up (trigger is wide enough there).
+        <div className={`absolute right-0 sm:left-0 sm:right-0 w-56 sm:w-auto min-w-[200px] sm:min-w-[110px] bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50
           ${openDirection === 'up' ? 'bottom-full mb-2' : 'mt-2'}`}>
           <div className="px-3 py-2 border-b border-gray-100">
             <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Switch Mode</p>

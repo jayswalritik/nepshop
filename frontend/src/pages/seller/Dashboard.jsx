@@ -7,19 +7,46 @@ import SettingsPage from './SettingsPage';
 import EarningsPage from './EarningsPage';
 import ReviewsPage from './ReviewsPage';
 import RoleSwitcher from '../../components/common/RoleSwitcher';
+import NotificationsPage from '../../components/NotificationsPage';
+import NotificationBell from '../../components/NotificationBell';
+import UnreadBadge from '../../components/UnreadBadge';
+import { useNotifications } from '../../hooks/useNotifications';
 
 const SellerDashboard = () => {
   const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState('products');
   const [showAddProduct, setShowAddProduct] = useState(false);
 
+  // Single poller for this whole dashboard instance — the nav-tab badge,
+  // the mobile-header bell badge, and NotificationsPage all read from this
+  // one useNotifications() call. Do not call the hook again anywhere else
+  // in this component tree, or the 45s poll duplicates.
+  const notif = useNotifications();
+
+  // Orders/returns/earnings-released/payout notifications all carry an
+  // orderId and belong on the Orders tab (returns show inline there too, no
+  // separate seller returns view); a new-review notification carries only a
+  // productId and belongs on Reviews. Payout-only notifications (no ids) are
+  // a no-op — nothing to jump to.
+  const handleNotificationNavigate = ({ data }) => {
+    if (data?.orderId || data?.returnId) { setActiveTab('orders'); return; }
+    if (data?.productId) { setActiveTab('reviews'); return; }
+  };
+
   const navItems = [
-    { key: 'products',  label: 'My Products',  icon: '📦' },
-    { key: 'orders',    label: 'Orders',        icon: '🧾' },
-    { key: 'earnings',  label: 'Earnings',      icon: '💰' },
-    { key: 'reviews',   label: 'Reviews',       icon: '⭐' },
-    { key: 'settings',  label: 'Settings',      icon: '⚙️' },
+    { key: 'products',      label: 'My Products',   icon: '📦' },
+    { key: 'orders',        label: 'Orders',         icon: '🧾' },
+    { key: 'earnings',      label: 'Earnings',       icon: '💰' },
+    { key: 'reviews',       label: 'Reviews',        icon: '⭐' },
+    { key: 'notifications', label: 'Notifications',  icon: '🔔' },
+    { key: 'settings',      label: 'Settings',       icon: '⚙️' },
   ];
+
+  // The mobile bottom tab strip is this dashboard's primary mobile nav
+  // today (every existing tab is on it) — Notifications is deliberately
+  // left off it per this task's scope (mobile keeps only the header bell,
+  // which jumps to the tab). See summary for why.
+  const mobileStripItems = navItems.filter((i) => i.key !== 'notifications');
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -39,12 +66,12 @@ const SellerDashboard = () => {
         {/* Seller info */}
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-sm">
+            <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-sm flex-shrink-0">
               {user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}
             </div>
-            <div>
-              <p className="text-sm font-medium text-gray-900">{user?.firstName} {user?.lastName}</p>
-              <p className="text-xs text-gray-400">{user?.shopName}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-900 truncate">{user?.firstName} {user?.lastName}</p>
+              <p className="text-xs text-gray-400 truncate">{user?.shopName}</p>
             </div>
           </div>
         </div>
@@ -65,6 +92,9 @@ const SellerDashboard = () => {
               {item.key === 'orders' && (
                 <span className="ml-auto bg-orange-500 text-white text-xs px-1.5 py-0.5 rounded-full">New</span>
               )}
+              {item.key === 'notifications' && (
+                <UnreadBadge count={notif.unreadCount} className="ml-auto min-w-[20px] h-5 px-1.5 text-xs" />
+              )}
             </button>
           ))}
         </nav>
@@ -83,13 +113,14 @@ const SellerDashboard = () => {
         </div>
       </div>
 
-      {/* ── Mobile header (logo + role switcher + logout) ── */}
+      {/* ── Mobile header (logo + notifications bell + role switcher + logout) ── */}
       <div className="md:hidden fixed top-0 inset-x-0 z-40 bg-white border-b border-gray-200 px-3 py-2.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center text-white font-bold text-xs flex-shrink-0">N</div>
-          <span className="font-bold text-gray-900 text-sm">Nep<span className="text-orange-500">Shop</span></span>
+          <span className="font-bold text-gray-900 text-sm truncate">Nep<span className="text-orange-500">Shop</span></span>
         </div>
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <NotificationBell notif={notif} onNavigate={handleNotificationNavigate} />
           <RoleSwitcher openDirection="down" />
           <button onClick={logout} className="text-xs text-red-500 hover:text-red-700 font-medium flex-shrink-0">
             Logout
@@ -99,7 +130,7 @@ const SellerDashboard = () => {
 
       {/* ── Mobile bottom tab strip ── */}
       <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-gray-100 flex overflow-x-auto">
-        {navItems.map((item) => (
+        {mobileStripItems.map((item) => (
           <button
             key={item.key}
             onClick={() => { setActiveTab(item.key); setShowAddProduct(false); }}
@@ -132,6 +163,7 @@ const SellerDashboard = () => {
                 : activeTab === 'orders' ? 'View and process customer orders'
                 : activeTab === 'earnings' ? 'Track your sales and earnings'
                 : activeTab === 'reviews' ? 'See what customers are saying'
+                : activeTab === 'notifications' ? 'Updates on your orders, returns, and reviews'
                 : 'Manage your shop settings'}
             </p>
           </div>
@@ -163,6 +195,7 @@ const SellerDashboard = () => {
         {activeTab === 'orders' && <SellerOrdersPage />}
         {activeTab === 'earnings' && <EarningsPage />}
         {activeTab === 'reviews' && <ReviewsPage />}
+        {activeTab === 'notifications' && <NotificationsPage {...notif} onNavigate={handleNotificationNavigate} />}
         {activeTab === 'settings' && <SettingsPage />}
       </div>
     </div>

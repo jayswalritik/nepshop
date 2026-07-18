@@ -11,6 +11,7 @@ import RoleSwitcher from '../../components/common/RoleSwitcher';
 import OffersPage from './OffersPage';
 import WishlistPage from './WishlistPage';
 import ChatWidget from '../../components/chatbot/ChatWidget';
+import NotificationBell from '../../components/NotificationBell';
 
 const MAX_HISTORY = 8;
 
@@ -173,6 +174,15 @@ const CustomerDashboard = () => {
     setActiveTab('shop');
   };
 
+  // Where a clicked notification takes the customer — orders/returns both
+  // live inside OrdersPage (no separate returns view), coupons inside
+  // OffersPage. No product-detail view exists for customers, so a
+  // productId-only notification (none exist for this role today) is a no-op.
+  const handleNotificationNavigate = ({ type, data }) => {
+    if (data?.orderId || data?.returnId) { setActiveTab('orders'); return; }
+    if (type === 'COUPON_PUBLISHED' || data?.couponCode) { setActiveTab('offers'); return; }
+  };
+
   // Commit (Enter) → remember in history, fire immediately (bypass debounce).
   const handleSearchCommit = (q) => {
     setSearchQuery(q);
@@ -241,6 +251,7 @@ const CustomerDashboard = () => {
 
           {/* Right side */}
           <div className="flex items-center gap-3 flex-shrink-0 whitespace-nowrap">
+            <NotificationBell onNavigate={handleNotificationNavigate} />
             <RoleSwitcher />
             <span className="hidden lg:block text-sm text-gray-500">
               Hi, {user?.firstName}
