@@ -20,13 +20,60 @@ const TARGET_DEEP_LINKS = {
   failed: 'nepshop://payment/failed',
 };
 
+// expo-router's linking parser (query-string v7, used internally by
+// @react-navigation/core's getStateFromPath) converts every literal '+' in
+// a deep-link query value to a space before decoding — confirmed at
+// mobile/node_modules/query-string/index.js:324, unconditional whenever its
+// default decode:true option is in effect (it is, here). eSewa's `data`
+// param is base64 — commonly contains literal '+', and always ends in '='
+// padding — so a raw passthrough of window.location.search lets those
+// characters survive to the deep link, where the app-side parser then
+// corrupts them (this is what left mobile's eSewa verify screen stuck on
+// "verifying" forever, with no request ever sent).
+//
+// Fix: decode each raw key/value pair ourselves (NOT via URLSearchParams —
+// its decoding has the exact same '+'-to-space behavior we're avoiding),
+// then re-encode with encodeURIComponent. That turns literal '+' into
+// '%2B' and literal '=' padding into '%3D' — both of which
+// decodeURIComponent restores correctly on the other end, since neither
+// query-string's pre-decode '+'-replace nor any standard parser touches an
+// already-percent-encoded sequence. Round-trip-safe through any parser.
+const reencodeQuery = (rawSearch) => {
+  if (!rawSearch || rawSearch === '?') return '';
+
+  const safeDecode = (component) => {
+    try {
+      return decodeURIComponent(component);
+    } catch {
+      return component; // malformed percent-sequence — forward as-is rather than crash the bridge
+    }
+  };
+
+  const pairs = rawSearch.slice(1).split('&').filter(Boolean);
+  const rebuilt = pairs.map((pair) => {
+    const eqIndex = pair.indexOf('='); // FIRST '=' only — eSewa's base64 value may itself contain '='
+    const rawKey = eqIndex === -1 ? pair : pair.slice(0, eqIndex);
+    const key = encodeURIComponent(safeDecode(rawKey));
+
+    if (eqIndex === -1) return key; // key with no '=' at all — forward as a bare key
+
+    const rawValue = pair.slice(eqIndex + 1);
+    const value = encodeURIComponent(safeDecode(rawValue));
+    return `${key}=${value}`;
+  });
+
+  return rebuilt.length ? `?${rebuilt.join('&')}` : '';
+};
+
 const MobileReturn = () => {
   const { target } = useParams();
   const deepLink = TARGET_DEEP_LINKS[target];
 
   useEffect(() => {
     if (!deepLink) return;
-    const query = target === 'failed' ? '' : window.location.search;
+    const query = target === 'failed' ? '' : reencodeQuery(window.location.search);
+    // TEMPORARY DIAGNOSTIC LOG — remove after eSewa-stuck-on-verifying investigation.
+    console.log('[DIAG MobileReturn]', 'target=', target, 'window.location.href=', window.location.href, 'window.location.search=', window.location.search, 'constructed=', `${deepLink}${query}`);
     window.location.replace(`${deepLink}${query}`);
   }, [deepLink, target]);
 
@@ -41,7 +88,7 @@ const MobileReturn = () => {
     );
   }
 
-  const fullDeepLink = `${deepLink}${target === 'failed' ? '' : window.location.search}`;
+  const fullDeepLink = `${deepLink}${target === 'failed' ? '' : reencodeQuery(window.location.search)}`;
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
