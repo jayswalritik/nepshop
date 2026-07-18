@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_NAV_CONFIG, homeRouteForRole } from '../navigation/roleNavConfig';
+import { updateAvailability } from '../utils/delivery';
 import ScreenHeader from './ScreenHeader';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
@@ -12,9 +13,14 @@ import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 // auth plumbing (logout, role switch, role-switcher visibility). Edit
 // Profile/Wishlist/Offers rows are customer-only, each navigating to a real
 // hidden-route screen (app/(customer)/profile.js, wishlist.js, offers.js).
+// Delivery's own rows (availability toggle, Edit Profile & Payout) are the
+// same pattern extended, not forked — mirrors frontend/src/pages/delivery/
+// Dashboard.jsx's sidebar (availability toggle) + ProfilePage.jsx (profile
+// editing entry point).
 export default function AccountScreen() {
-  const { user, logout, switchRole } = useAuth();
+  const { user, logout, switchRole, updateUser } = useAuth();
   const [switching, setSwitching] = useState(false);
+  const [availLoading, setAvailLoading] = useState(false);
 
   const roles = user?.roles && user.roles.length ? user.roles : [user?.role];
   const activeRole = user?.activeRole || user?.role;
@@ -51,6 +57,24 @@ export default function AccountScreen() {
     }
   };
 
+  // Availability toggle — UI/sorting signal only (backend/models/User.js —
+  // never gates assignment, deliveries, or settlements). Optimistic, with
+  // reconcile-on-failure (revert + alert) — mirrors web's Dashboard.jsx
+  // toggleAvailability exactly (lines ~42-55).
+  const toggleAvailability = async () => {
+    const next = !user?.isAvailable;
+    await updateUser({ isAvailable: next });
+    setAvailLoading(true);
+    const result = await updateAvailability(next);
+    setAvailLoading(false);
+    if (result.success) {
+      await updateUser({ isAvailable: result.isAvailable });
+    } else {
+      await updateUser({ isAvailable: !next });
+      Alert.alert('Could not update availability', result.message || 'Please try again.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       <ScreenHeader title="Account" />
@@ -66,11 +90,35 @@ export default function AccountScreen() {
           </View>
         </View>
 
+        {activeRole === 'delivery' && (
+          <View style={styles.availabilityCard}>
+            <View style={styles.availabilityTextWrap}>
+              <Text style={styles.availabilityLabel}>Availability</Text>
+              <Text style={styles.availabilitySub}>
+                {user?.isAvailable ? 'Showing as available for new assignments' : 'Showing as offline'}
+              </Text>
+            </View>
+            <Switch
+              value={!!user?.isAvailable}
+              onValueChange={toggleAvailability}
+              disabled={availLoading}
+              trackColor={{ false: COLORS.border, true: COLORS.successSoft }}
+              thumbColor={user?.isAvailable ? COLORS.success : '#fff'}
+            />
+          </View>
+        )}
+
         {activeRole === 'customer' && (
           <View style={styles.section}>
             <AccountRow icon="create-outline" label="Edit Profile" onPress={() => router.push('/(customer)/profile')} />
             <AccountRow icon="heart-outline" label="Wishlist" onPress={() => router.push('/(customer)/wishlist')} />
             <AccountRow icon="pricetag-outline" label="Offers" onPress={() => router.push('/(customer)/offers')} last />
+          </View>
+        )}
+
+        {activeRole === 'delivery' && (
+          <View style={styles.section}>
+            <AccountRow icon="create-outline" label="Edit Profile & Payout" onPress={() => router.push('/(delivery)/profile')} last />
           </View>
         )}
 
@@ -187,6 +235,21 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
     ...SHADOWS.card,
   },
+  availabilityCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.card,
+    borderRadius: RADII.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.card,
+  },
+  availabilityTextWrap: { flex: 1, marginRight: SPACING.md },
+  availabilityLabel: { fontSize: 14, fontWeight: '700', color: COLORS.text },
+  availabilitySub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

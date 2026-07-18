@@ -33,16 +33,23 @@ export const ROLE_NAV_CONFIG = {
   delivery: {
     label: 'Delivery Agent',
     group: '(delivery)',
+    // Four tabs — Option A (push-assignment): agents only ever see jobs
+    // already assigned to them by a seller (deliveries) or admin (return
+    // pickups); there is no browse/claim endpoint anywhere in the backend
+    // (confirmed against deliveryController.js/returnController.js), so the
+    // earlier "Available Jobs" tab this config used to list was scaffolding
+    // for a model that was never built server-side. Removed rather than
+    // kept as a dead tab — app/(delivery)/jobs.js (its placeholder route)
+    // removed with it.
     tabs: [
-      // Icon names match what each screen's own PlaceholderScreen already
-      // uses (app/(delivery)/*.js) — same choice, just also surfaced in the
-      // tab bar now.
-      { name: 'jobs', title: 'Available Jobs', icon: 'briefcase-outline' },
-      { name: 'deliveries', title: 'My Deliveries', icon: 'navigate-outline' },
+      { name: 'deliveries', title: 'Deliveries', icon: 'navigate-outline' },
       { name: 'returns', title: 'Return Pickups', icon: 'return-down-back-outline' },
       { name: 'earnings', title: 'Earnings', icon: 'cash-outline' },
       { name: 'account', title: 'Account', icon: 'person-outline' },
     ],
+    // Mirrors customer's hidden-route pattern above — reached from the
+    // Account tab's "Edit Profile & Payout" row, not a permanent tab.
+    hiddenRoutes: ['profile'],
   },
 };
 

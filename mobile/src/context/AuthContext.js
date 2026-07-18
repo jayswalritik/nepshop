@@ -76,17 +76,33 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
-  // Same PUT /auth/customer/profile endpoint as web's ProfilePage.jsx — the
+  // Same PUT /auth/customer/profile (default) or /auth/delivery/profile
+  // endpoint as web's ProfilePage.jsx/delivery ProfilePage.jsx — the
   // response doesn't include a new token, so this persists the returned
   // user against the EXISTING token the same way switchRole above does.
-  const updateProfile = async (updates) => {
-    const { data } = await API.put('/auth/customer/profile', updates);
+  // Role-conditional via the endpoint argument (matches how logout() above
+  // extends role-conditionally rather than forking) — customer's call site
+  // is unchanged, delivery's profile screen passes the second argument.
+  const updateProfile = async (updates, endpoint = '/auth/customer/profile') => {
+    const { data } = await API.put(endpoint, updates);
     await login(data.user, token);
     return data.user;
   };
 
+  // Merges a partial patch into the in-memory user + persisted storage
+  // without a full re-login round trip — mirrors web's AuthContext.jsx
+  // updateUser exactly. Used for optimistic UI (e.g. delivery agent
+  // availability toggle) where the server call's own response is the
+  // eventual source of truth, but the UI shouldn't wait for it to update.
+  const updateUser = async (partial) => {
+    if (!user) return;
+    const next = { ...user, ...partial };
+    setUser(next);
+    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(next));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, switchRole, updateProfile }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, switchRole, updateProfile, updateUser }}>
       {children}
     </AuthContext.Provider>
   );
