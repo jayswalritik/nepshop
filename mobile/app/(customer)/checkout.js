@@ -13,10 +13,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import * as WebBrowser from 'expo-web-browser';
 import { useAuth } from '../../src/context/AuthContext';
 import { getCartSummary } from '../../src/utils/cart';
 import { getAvailableCoupons } from '../../src/utils/coupons';
 import { placeOrder } from '../../src/utils/orders';
+import { initiateKhalti } from '../../src/utils/payment';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import Dropdown from '../../src/components/Dropdown';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
@@ -28,12 +30,31 @@ import { formatRs } from '../../src/utils/format';
 // POST /orders COD payload. Order Summary numbers come ENTIRELY from
 // GET /api/cart/summary (backend/controllers/cartController.js's
 // getCartSummary) — nothing here computes delivery, coupon, or totals.
-// Khalti/eSewa are shown disabled — no logo image asset exists in this
-// project (the web's are static files served by the website itself), so
-// they're represented with an icon + label instead; noted in the PR.
+// Khalti/eSewa are represented with an icon + label instead of the web's
+// static logo images (no such asset exists in this project).
+//
+// Khalti is enabled: POST /payment/khalti/initiate with source:'mobile'
+// returns a paymentUrl, opened via WebBrowser.openAuthSessionAsync watching
+// for the nepshop://payment/khalti/verify deep link the backend's
+// return-URL allowlist already produces for source:'mobile' — that's a
+// plain GET-style browser navigation, which openAuthSessionAsync handles
+// natively.
+//
+// eSewa stays disabled. Web submits a real HTML <form method="POST"> with
+// signed hidden fields (amount, transaction_uuid, product_code, signature,
+// success_url, failure_url) directly to eSewa's gateway. expo-web-browser's
+// openAuthSessionAsync/openBrowserAsync only accept a URL string for a GET
+// navigation — there is no way to specify a method or body, and browsers
+// block top-level navigation to data: URIs (so an inline self-submitting
+// HTML page can't be loaded that way either). Solving this needs either a
+// small backend-rendered bridge page (GET endpoint returning the
+// auto-submitting form HTML, so the browser can GET-navigate to a real URL
+// that itself POSTs to eSewa) or react-native-webview — the former needs a
+// backend change and the latter isn't an approved dependency, so neither
+// was implemented here. Flagged in the task summary for a decision.
 const PAYMENT_METHODS = [
   { value: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'cash-outline', desc: 'Pay when your order arrives', enabled: true },
-  { value: 'khalti', label: 'Khalti', icon: 'wallet-outline', desc: 'Pay with Khalti wallet', enabled: false },
+  { value: 'khalti', label: 'Khalti', icon: 'wallet-outline', desc: 'Pay with Khalti wallet', enabled: true },
   { value: 'esewa', label: 'eSewa', icon: 'wallet-outline', desc: 'Pay with eSewa wallet', enabled: false },
 ];
 
@@ -60,6 +81,7 @@ export default function CheckoutScreen() {
   const [availableCoupons, setAvailableCoupons] = useState([]);
 
   const [placing, setPlacing] = useState(false);
+  const [awaitingGateway, setAwaitingGateway] = useState(false);
   const [placeError, setPlaceError] = useState('');
   const [orderResult, setOrderResult] = useState(null);
 
@@ -144,6 +166,42 @@ export default function CheckoutScreen() {
     }
     setPlaceError('');
     setPlacing(true);
+
+    if (paymentMethod === 'khalti') {
+      const result = await initiateKhalti({
+        deliveryAddress: address,
+        customerNote,
+        couponCode: appliedCode,
+      });
+      if (!result.success) {
+        setPlacing(false);
+        setPlaceError(result.message);
+        return;
+      }
+      setPlacing(false);
+      setAwaitingGateway(true);
+      try {
+        const browserResult = await WebBrowser.openAuthSessionAsync(
+          result.paymentUrl,
+          'nepshop://payment/khalti/verify'
+        );
+        if (browserResult.type !== 'success') {
+          // User swiped the sheet away / cancelled before completing —
+          // nothing was created or charged (PendingPayment stays
+          // 'initiated' until TTL-reaped), cart and checkout are untouched.
+          setPlaceError('Payment was not completed. You can try again.');
+        }
+        // On 'success', the OS is already routing the app to
+        // nepshop://payment/khalti/verify via the standard deep-link
+        // mechanism — that screen owns the actual verify call from here.
+      } catch {
+        setPlaceError('Could not open the payment page. Please try again.');
+      } finally {
+        setAwaitingGateway(false);
+      }
+      return;
+    }
+
     const result = await placeOrder({
       deliveryAddress: address,
       customerNote,
@@ -162,7 +220,7 @@ export default function CheckoutScreen() {
   }
 
   const packages = summary?.packages || [];
-  const canPlaceOrder = !summaryLoading && packages.length > 0 && !placing;
+  const canPlaceOrder = !summaryLoading && packages.length > 0 && !placing && !awaitingGateway;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
@@ -377,7 +435,9 @@ export default function CheckoutScreen() {
           disabled={!canPlaceOrder}
           onPress={handlePlaceOrder}
         >
-          <Text style={styles.placeOrderButtonText}>{placing ? 'Placing order…' : 'Place Order'}</Text>
+          <Text style={styles.placeOrderButtonText}>
+            {placing ? 'Placing order…' : awaitingGateway ? 'Waiting for Khalti…' : 'Place Order'}
+          </Text>
         </Pressable>
       </View>
     </SafeAreaView>

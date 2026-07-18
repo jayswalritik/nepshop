@@ -20,7 +20,15 @@ export const ROLE_NAV_CONFIG = {
     // with the tabs navigator via href:null in RoleTabs.js. Search moved
     // here from `tabs`: it's now reached only via Home's header search bar,
     // not a permanent bottom-bar entry.
-    hiddenRoutes: ['products', 'product/[id]', 'search', 'checkout', 'order/[id]', 'wishlist', 'offers', 'profile'],
+    hiddenRoutes: [
+      'products', 'product/[id]', 'search', 'checkout', 'order/[id]',
+      'wishlist', 'offers', 'profile',
+      // Deep-link landing screens for nepshop:// payment gateway returns
+      // (backend/controllers/paymentController.js's RETURN_URLS, source:
+      // 'mobile' entries) — same nested-route registration as product/[id]
+      // and order/[id] above, just one level deeper.
+      'payment/khalti/verify', 'payment/esewa/verify', 'payment/failed',
+    ],
   },
   delivery: {
     label: 'Delivery Agent',
