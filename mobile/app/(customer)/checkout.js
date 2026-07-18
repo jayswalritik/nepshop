@@ -18,7 +18,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { getCartSummary } from '../../src/utils/cart';
 import { getAvailableCoupons } from '../../src/utils/coupons';
 import { placeOrder } from '../../src/utils/orders';
-import { initiateKhalti } from '../../src/utils/payment';
+import { initiateKhalti, initiateEsewa } from '../../src/utils/payment';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import Dropdown from '../../src/components/Dropdown';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
@@ -33,29 +33,28 @@ import { formatRs } from '../../src/utils/format';
 // Khalti/eSewa are represented with an icon + label instead of the web's
 // static logo images (no such asset exists in this project).
 //
-// Khalti is enabled: POST /payment/khalti/initiate with source:'mobile'
-// returns a paymentUrl, opened via WebBrowser.openAuthSessionAsync watching
-// for the nepshop://payment/khalti/verify deep link the backend's
-// return-URL allowlist already produces for source:'mobile' — that's a
-// plain GET-style browser navigation, which openAuthSessionAsync handles
-// natively.
+// Both gateways are enabled, and both open through the same
+// openGatewayAndWait helper below (WebBrowser.openAuthSessionAsync, waiting
+// for the OS to deliver the matching nepshop://... deep link):
 //
-// eSewa stays disabled. Web submits a real HTML <form method="POST"> with
-// signed hidden fields (amount, transaction_uuid, product_code, signature,
-// success_url, failure_url) directly to eSewa's gateway. expo-web-browser's
-// openAuthSessionAsync/openBrowserAsync only accept a URL string for a GET
-// navigation — there is no way to specify a method or body, and browsers
-// block top-level navigation to data: URIs (so an inline self-submitting
-// HTML page can't be loaded that way either). Solving this needs either a
-// small backend-rendered bridge page (GET endpoint returning the
-// auto-submitting form HTML, so the browser can GET-navigate to a real URL
-// that itself POSTs to eSewa) or react-native-webview — the former needs a
-// backend change and the latter isn't an approved dependency, so neither
-// was implemented here. Flagged in the task summary for a decision.
+// - Khalti: POST /payment/khalti/initiate with source:'mobile' returns a
+//   paymentUrl straight from Khalti — a plain GET-style browser navigation,
+//   which openAuthSessionAsync handles natively.
+// - eSewa needs a real HTML <form method="POST"> of signed hidden fields
+//   (amount, transaction_uuid, product_code, signature, success_url,
+//   failure_url) submitted to eSewa's gateway, same as web builds inline as
+//   a DOM <form>. openAuthSessionAsync only accepts a URL string for a GET
+//   navigation — no method/body option — and browsers block top-level
+//   navigation to data: URIs, so mobile can't build+submit that form
+//   itself. Solved with a backend bridge: POST /payment/esewa/initiate
+//   (source:'mobile') now also returns formUrl, a GET endpoint
+//   (backend/controllers/paymentController.js's esewaForm) that
+//   server-renders + auto-submits the identical signed form. Mobile just
+//   opens formUrl exactly like Khalti's paymentUrl.
 const PAYMENT_METHODS = [
   { value: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'cash-outline', desc: 'Pay when your order arrives', enabled: true },
   { value: 'khalti', label: 'Khalti', icon: 'wallet-outline', desc: 'Pay with Khalti wallet', enabled: true },
-  { value: 'esewa', label: 'eSewa', icon: 'wallet-outline', desc: 'Pay with eSewa wallet', enabled: false },
+  { value: 'esewa', label: 'eSewa', icon: 'wallet-outline', desc: 'Pay with eSewa wallet', enabled: true },
 ];
 
 export default function CheckoutScreen() {
@@ -157,6 +156,29 @@ export default function CheckoutScreen() {
     return errs;
   };
 
+  // Shared by both gateways — open the gateway URL in the browser sheet and
+  // wait for it to resolve. openAuthSessionAsync resolves 'success' when the
+  // OS delivers the matching nepshop://... deep link (that verify screen
+  // owns the actual verify call from here); 'cancel'/'dismiss' means the
+  // user swiped the sheet away or backed out before completing — nothing
+  // was created or charged (PendingPayment stays 'initiated' until
+  // TTL-reaped), cart and checkout are untouched, so this just surfaces a
+  // non-alarming notice and lets them try again.
+  const openGatewayAndWait = async (url, redirectUrl) => {
+    setPlacing(false);
+    setAwaitingGateway(true);
+    try {
+      const browserResult = await WebBrowser.openAuthSessionAsync(url, redirectUrl);
+      if (browserResult.type !== 'success') {
+        setPlaceError('Payment was not completed. You can try again.');
+      }
+    } catch {
+      setPlaceError('Could not open the payment page. Please try again.');
+    } finally {
+      setAwaitingGateway(false);
+    }
+  };
+
   const handlePlaceOrder = async () => {
     const errs = validateAddress();
     setFieldErrors(errs);
@@ -178,27 +200,31 @@ export default function CheckoutScreen() {
         setPlaceError(result.message);
         return;
       }
-      setPlacing(false);
-      setAwaitingGateway(true);
-      try {
-        const browserResult = await WebBrowser.openAuthSessionAsync(
-          result.paymentUrl,
-          'nepshop://payment/khalti/verify'
-        );
-        if (browserResult.type !== 'success') {
-          // User swiped the sheet away / cancelled before completing —
-          // nothing was created or charged (PendingPayment stays
-          // 'initiated' until TTL-reaped), cart and checkout are untouched.
-          setPlaceError('Payment was not completed. You can try again.');
-        }
-        // On 'success', the OS is already routing the app to
-        // nepshop://payment/khalti/verify via the standard deep-link
-        // mechanism — that screen owns the actual verify call from here.
-      } catch {
-        setPlaceError('Could not open the payment page. Please try again.');
-      } finally {
-        setAwaitingGateway(false);
+      await openGatewayAndWait(result.paymentUrl, 'nepshop://payment/khalti/verify');
+      return;
+    }
+
+    if (paymentMethod === 'esewa') {
+      const result = await initiateEsewa({
+        deliveryAddress: address,
+        customerNote,
+        couponCode: appliedCode,
+      });
+      if (!result.success) {
+        setPlacing(false);
+        setPlaceError(result.message);
+        return;
       }
+      if (!result.formUrl) {
+        // Backend contract violation — initiateEsewa's response is missing
+        // formUrl (backend/controllers/paymentController.js should always
+        // include it). Fail loudly rather than silently, since there is no
+        // fallback way to open eSewa's form from mobile.
+        setPlacing(false);
+        setPlaceError('Could not start eSewa payment. Please try again.');
+        return;
+      }
+      await openGatewayAndWait(result.formUrl, 'nepshop://payment/esewa/verify');
       return;
     }
 
@@ -436,7 +462,11 @@ export default function CheckoutScreen() {
           onPress={handlePlaceOrder}
         >
           <Text style={styles.placeOrderButtonText}>
-            {placing ? 'Placing order…' : awaitingGateway ? 'Waiting for Khalti…' : 'Place Order'}
+            {placing
+              ? 'Placing order…'
+              : awaitingGateway
+                ? `Waiting for ${paymentMethod === 'esewa' ? 'eSewa' : 'Khalti'}…`
+                : 'Place Order'}
           </Text>
         </Pressable>
       </View>

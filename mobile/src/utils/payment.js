@@ -15,18 +15,28 @@ export const initiateKhalti = async ({ deliveryAddress, customerNote, couponCode
     });
     return { success: true, paymentUrl: data.paymentUrl, pidx: data.pidx };
   } catch (err) {
-    // TEMPORARY DIAGNOSTIC LOG — remove after mobile-Khalti-400 investigation.
-    console.log('[DIAG initiateKhalti mobile]', 'status=', err.status, 'data=', JSON.stringify(err.data), 'message=', err.message);
     return { success: false, message: err.data?.message || 'Failed to start Khalti payment' };
   }
 };
 
+// formUrl (added alongside gatewayUrl/formData/transactionUuid) is what
+// mobile actually opens — GET /api/payment/esewa/form/:transactionUuid,
+// which server-renders + auto-submits the same signed form web builds as a
+// DOM <form>. gatewayUrl/formData are kept for parity with web's response
+// shape but mobile has no way to perform the form POST itself (see
+// checkout.js's comment on openAuthSessionAsync's GET-only limitation).
 export const initiateEsewa = async ({ deliveryAddress, customerNote, couponCode }) => {
   try {
     const { data } = await API.post('/payment/esewa/initiate', {
       deliveryAddress, customerNote, couponCode: couponCode || null, source: 'mobile',
     });
-    return { success: true, gatewayUrl: data.gatewayUrl, formData: data.formData, transactionUuid: data.transactionUuid };
+    return {
+      success: true,
+      gatewayUrl: data.gatewayUrl,
+      formData: data.formData,
+      formUrl: data.formUrl,
+      transactionUuid: data.transactionUuid,
+    };
   } catch (err) {
     return { success: false, message: err.data?.message || 'Failed to start eSewa payment' };
   }

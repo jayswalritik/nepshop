@@ -593,16 +593,17 @@ const initiateEsewa = asyncHandler(async (req, res) => {
 
   // Public GET bridge — mobile opens this URL directly (a browser
   // address-bar navigation can't carry a JWT, so it has to be a plain URL,
-  // not an API call the app makes itself). Built from the incoming
-  // request rather than a dedicated env var — no BACKEND_PUBLIC_URL (or
-  // equivalent) exists in this project's env today. CAVEAT: Render (and
-  // most reverse-proxy deploys) terminates TLS in front of the app and
-  // forwards plain HTTP internally — req.protocol only reflects the
-  // original HTTPS request if Express has `app.set('trust proxy', ...)`
-  // enabled, which server.js does not currently set. Until that's added,
-  // this can render as http:// in production even though the real public
-  // URL is https://. Flagged here rather than silently assuming either way.
-  const formUrl = `${req.protocol}://${req.get('host')}/api/payment/esewa/form/${transactionUuid}`;
+  // not an API call the app makes itself). Prefers BACKEND_PUBLIC_URL (now
+  // set in Render env + backend/.env) since it's authoritative and side
+  // -steps the proxy issue below entirely. Falls back to the req-derived
+  // construction when unset (e.g. an env that predates this var). CAVEAT on
+  // the fallback only: Render (and most reverse-proxy deploys) terminates
+  // TLS in front of the app and forwards plain HTTP internally —
+  // req.protocol only reflects the original HTTPS request if Express has
+  // `app.set('trust proxy', ...)` enabled, which server.js does not
+  // currently set, so the fallback can render as http:// in production even
+  // though the real public URL is https://.
+  const formUrl = `${process.env.BACKEND_PUBLIC_URL || `${req.protocol}://${req.get('host')}`}/api/payment/esewa/form/${transactionUuid}`;
 
   res.status(200).json({
     success:    true,
