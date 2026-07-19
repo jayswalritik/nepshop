@@ -4,7 +4,17 @@ import { navigateForNotification } from '../utils/notificationRouting';
 import { markOneRead } from '../utils/notifications';
 import { isExpoGo, getNotifications } from '../utils/push';
 
-// Mounted once at the root (mobile/app/_layout.js), inside AuthProvider.
+// A HOOK, not a component — called from mobile/app/_layout.js's AppShell
+// (rendered inside AuthProvider so useAuth() resolves), not rendered as its
+// own JSX element. This fixes a Fabric New Architecture crash the previous
+// component form caused on role switch in the APK build (IllegalStateException:
+// addViewAt / "child already has a parent"): the earlier version was mounted
+// as `<Stack /><NotificationTapRouter />` — two siblings where the root
+// layout previously rendered `<Stack />` alone. As a hook with zero JSX
+// footprint, the render tree is byte-identical to before this file existed:
+// AppShell still renders only `<Stack />`. No leftover render-tree risk to
+// reason about, regardless of the exact Fabric mechanism.
+//
 // Routes a tapped push notification exactly like an in-app row tap
 // (mobile/src/components/NotificationsScreen.js's handlePressRow) via the
 // same navigateForNotification mapping. Mark-read: backend/utils/
@@ -35,7 +45,7 @@ import { isExpoGo, getNotifications } from '../utils/push';
 // guard. mobile/src/utils/push.js's getNotifications() lazy-require is the
 // only way this file touches the package, and only inside the
 // `!isExpoGo()` branch below.
-export default function NotificationTapRouter() {
+export default function useNotificationTapRouter() {
   const { token, user } = useAuth();
   const pendingRef = useRef(null);
   const handledRef = useRef(false);
@@ -101,6 +111,4 @@ export default function NotificationTapRouter() {
       pendingRef.current = null;
     }
   }, [token, routeFromResponse]);
-
-  return null;
 }

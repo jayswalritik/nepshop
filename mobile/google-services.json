@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "96015538839",
+    "project_id": "nepshop-e1627",
+    "storage_bucket": "nepshop-e1627.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:96015538839:android:4de937513a5b63103ee7d2",
+        "android_client_info": {
+          "package_name": "com.nepshop.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjNKoks3bt_pnuhwG3R4qCxjiYKpV0FVU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
