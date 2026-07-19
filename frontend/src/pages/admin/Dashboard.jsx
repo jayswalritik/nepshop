@@ -28,7 +28,11 @@ const AdminDashboard = () => {
   // No notification type currently targets admin (v1 backend only notifies
   // customer/seller/agent + the customer-role broadcast) — this map is
   // future-proofing so the tab isn't dead weight the day one does.
-  const handleNotificationNavigate = ({ data }) => {
+  const handleNotificationNavigate = ({ type, data }) => {
+    // Checked first: PAYOUT_PROCESSED/EARNINGS_RELEASED carry no orderId/
+    // returnId/couponCode, so the data-field rules below would never match
+    // them — this type rule is what actually routes them anywhere.
+    if (type === 'PAYOUT_PROCESSED' || type === 'EARNINGS_RELEASED') { setActiveTab('payouts'); return; }
     if (data?.orderId) { setActiveTab('orders'); return; }
     if (data?.returnId) { setActiveTab('returns'); return; }
     if (data?.couponCode) { setActiveTab('coupons'); return; }

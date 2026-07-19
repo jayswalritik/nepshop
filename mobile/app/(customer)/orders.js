@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getMyOrders, cancelOrder, cancelShipment, getOrderSummary } from '../../src/utils/orders';
 import { getMyReturns } from '../../src/utils/returns';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import NotificationBellIcon from '../../src/components/NotificationBellIcon';
 import Dropdown from '../../src/components/Dropdown';
 import Toast from '../../src/components/Toast';
 import OrderStatusStepper, { StatusBadge } from '../../src/components/OrderStatusStepper';
@@ -158,7 +159,10 @@ export default function OrdersScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="My Orders" />
+      <ScreenHeader
+        title="My Orders"
+        rightSlot={<NotificationBellIcon onPress={() => router.push('/(customer)/notifications')} />}
+      />
 
       <View style={styles.filterRow}>
         <Dropdown value={filterLabel} onChange={setFilterLabel} options={STATUS_FILTERS} placeholder="Filter" />

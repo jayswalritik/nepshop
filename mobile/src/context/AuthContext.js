@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import API, { setAuthToken } from '../utils/api';
+import { setPushToken } from '../utils/notifications';
+import { registerForPushNotifications } from '../utils/push';
 
 const AuthContext = createContext(null);
 
@@ -29,6 +31,12 @@ export const AuthProvider = ({ children }) => {
         setAuthToken(savedToken);
         setUser(JSON.parse(savedUser));
 
+        // Fire-and-forget, same posture as the /auth/me refresh below — a
+        // denied permission or Expo Go's unsupported remote push shouldn't
+        // block session restore. Registers again on every restore (not just
+        // first login) since the underlying Expo push token can rotate.
+        registerForPushNotifications();
+
         try {
           const { data } = await API.get('/auth/me');
           if (data?.user) {
@@ -50,16 +58,21 @@ export const AuthProvider = ({ children }) => {
     setAuthToken(userToken);
     await SecureStore.setItemAsync(TOKEN_KEY, userToken);
     await SecureStore.setItemAsync(USER_KEY, JSON.stringify(userData));
+    // Fire-and-forget — same posture as the restore-effect's call above.
+    registerForPushNotifications();
   };
 
   const logout = async () => {
     // No backend session/logout endpoint exists — JWTs are stateless and
-    // logout is client-side token-clearing. Best-effort: for a delivery
-    // agent, flip them offline server-side BEFORE the token is cleared (the
-    // request needs it to authenticate). Fire-and-forget, same as web.
+    // logout is client-side token-clearing. Best-effort, BEFORE the token is
+    // cleared (both these calls need auth): flip a delivery agent offline
+    // server-side, and clear the push token so a stale token on this device
+    // doesn't linger against the account after logout. Fire-and-forget, same
+    // as web.
     if (user?.activeRole === 'delivery' || (!user?.activeRole && user?.role === 'delivery')) {
       API.put('/delivery/availability', { isAvailable: false }).catch(() => {});
     }
+    setPushToken(null).catch(() => {});
 
     setUser(null);
     setToken(null);

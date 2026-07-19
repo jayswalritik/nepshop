@@ -28,7 +28,11 @@ const SellerDashboard = () => {
   // separate seller returns view); a new-review notification carries only a
   // productId and belongs on Reviews. Payout-only notifications (no ids) are
   // a no-op — nothing to jump to.
-  const handleNotificationNavigate = ({ data }) => {
+  const handleNotificationNavigate = ({ type, data }) => {
+    // Checked first: PAYOUT_PROCESSED/EARNINGS_RELEASED carry no orderId/
+    // returnId/productId, so the data-field rules below would never match
+    // them — this type rule is what actually routes them anywhere.
+    if (type === 'PAYOUT_PROCESSED' || type === 'EARNINGS_RELEASED') { setActiveTab('earnings'); return; }
     if (data?.orderId || data?.returnId) { setActiveTab('orders'); return; }
     if (data?.productId) { setActiveTab('reviews'); return; }
   };

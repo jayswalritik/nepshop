@@ -1,9 +1,11 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyReturnPickups, markReturnPickedUp, completeReturn } from '../../src/utils/delivery';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import NotificationBellIcon from '../../src/components/NotificationBellIcon';
 import Toast from '../../src/components/Toast';
 import ReturnPickupConfirmModal from '../../src/components/ReturnPickupConfirmModal';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
@@ -66,7 +68,10 @@ export default function ReturnsScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Return Pickups" />
+      <ScreenHeader
+        title="Return Pickups"
+        rightSlot={<NotificationBellIcon onPress={() => router.push('/(delivery)/notifications')} />}
+      />
 
       {loading ? (
         <View style={styles.centerFill}>

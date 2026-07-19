@@ -10,6 +10,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import API from '../../src/utils/api';
 import { addToCart } from '../../src/utils/cart';
 import RecommendationRail from '../../src/components/RecommendationRail';
+import NotificationBellIcon from '../../src/components/NotificationBellIcon';
 import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 import { CATEGORIES } from '../../src/constants/categories';
@@ -111,8 +112,13 @@ export default function Home() {
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: insets.top + SPACING.md }]}
       >
-        <Text style={styles.greetingText}>Hi, {user?.firstName} 👋</Text>
-        <Text style={styles.greetingSubtext}>Discover products picked for you</Text>
+        <View style={styles.greetingRow}>
+          <View style={styles.greetingTextWrap}>
+            <Text style={styles.greetingText}>Hi, {user?.firstName} 👋</Text>
+            <Text style={styles.greetingSubtext}>Discover products picked for you</Text>
+          </View>
+          <NotificationBellIcon color="#fff" onPress={() => router.push('/(customer)/notifications')} />
+        </View>
 
         <Pressable style={styles.searchBar} onPress={() => router.push('/(customer)/search')}>
           <Ionicons name="search" size={18} color={COLORS.textMuted} />
@@ -216,6 +222,15 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.lg,
+  },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+  },
+  greetingTextWrap: {
+    flex: 1,
   },
   greetingText: {
     fontSize: 19,

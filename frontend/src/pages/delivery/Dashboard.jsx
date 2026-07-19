@@ -69,7 +69,11 @@ const DeliveryDashboard = () => {
   // A return-pickup assignment carries a returnId and belongs on the
   // Returns tab; a delivery assignment carries only an orderId and belongs
   // on Active Deliveries. Payout notifications carry neither — no-op.
-  const handleNotificationNavigate = ({ data }) => {
+  const handleNotificationNavigate = ({ type, data }) => {
+    // Checked first: PAYOUT_PROCESSED/EARNINGS_RELEASED carry no orderId/
+    // returnId, so the data-field rules below would never match them — this
+    // type rule is what actually routes them anywhere.
+    if (type === 'PAYOUT_PROCESSED' || type === 'EARNINGS_RELEASED') { setActiveTab('earnings'); return; }
     if (data?.returnId) { setActiveTab('returns'); return; }
     if (data?.orderId) { setActiveTab('active'); return; }
   };

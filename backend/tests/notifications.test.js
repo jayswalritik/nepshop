@@ -25,6 +25,9 @@
  *   11-13. Push send attempted only when push=true AND a token is present —
  *        covers doc-form (token on the doc already) and bare-id form
  *        (re-queried), plus push=false never sending regardless of token.
+ *        The doc-form case also asserts the push payload's data.notificationId
+ *        matches the created Notification doc's own _id (mobile's push
+ *        tap-router uses this to mark the tapped notification read).
  *   14.  Addendum: notifyNewReviewForSeller creates a doc for the seller,
  *        not the reviewer.
  *   15.  notifyOrderDeliveredForSeller / notifyReturnCompletedForSeller
@@ -296,6 +299,14 @@ const run = async () => {
       assert.strictEqual(calls.length, 1, 'a push must have been sent');
       const body = JSON.parse(calls[0].opts.body);
       assert.strictEqual(body.to, 'ExponentPushToken[has-token]');
+
+      // notificationId must be the created doc's own _id — this is what
+      // lets mobile/src/components/NotificationTapRouter.js mark the
+      // tapped notification read (it has no other way to know the doc id;
+      // the rest of `data` only ever carries orderId/returnId/etc.).
+      const created = await Notification.findOne({ user: agent._id, type: 'DELIVERY_ASSIGNED' });
+      assert.ok(created, 'the Notification doc must exist');
+      assert.strictEqual(String(body.data.notificationId), String(created._id));
     });
   }, cleanup);
 

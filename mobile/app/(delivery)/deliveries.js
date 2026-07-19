@@ -1,10 +1,12 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getDeliveryOrders, markDelivered } from '../../src/utils/delivery';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import NotificationBellIcon from '../../src/components/NotificationBellIcon';
 import Toast from '../../src/components/Toast';
 import DeliveryConfirmModal from '../../src/components/DeliveryConfirmModal';
 import { StatusBadge } from '../../src/components/OrderStatusStepper';
@@ -69,7 +71,10 @@ export default function DeliveriesScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Deliveries" />
+      <ScreenHeader
+        title="Deliveries"
+        rightSlot={<NotificationBellIcon onPress={() => router.push('/(delivery)/notifications')} />}
+      />
 
       <View style={styles.segmentRow}>
         {SEGMENTS.map((s) => (

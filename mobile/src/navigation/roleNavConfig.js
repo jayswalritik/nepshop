@@ -22,7 +22,7 @@ export const ROLE_NAV_CONFIG = {
     // not a permanent bottom-bar entry.
     hiddenRoutes: [
       'products', 'product/[id]', 'search', 'checkout', 'order/[id]',
-      'wishlist', 'offers', 'profile',
+      'wishlist', 'offers', 'profile', 'notifications',
       // Deep-link landing screens for nepshop:// payment gateway returns
       // (backend/controllers/paymentController.js's RETURN_URLS, source:
       // 'mobile' entries) — same nested-route registration as product/[id]
@@ -49,7 +49,7 @@ export const ROLE_NAV_CONFIG = {
     ],
     // Mirrors customer's hidden-route pattern above — reached from the
     // Account tab's "Edit Profile & Payout" row, not a permanent tab.
-    hiddenRoutes: ['profile'],
+    hiddenRoutes: ['profile', 'notifications'],
   },
 };
 
@@ -64,4 +64,13 @@ export const homeRouteForRole = (role) => {
   const config = ROLE_NAV_CONFIG[role];
   if (!config) return null;
   return `/${config.group}/${config.tabs[0].name}`;
+};
+
+// AccountScreen (shared by both roles) needs to push the current role's own
+// "notifications" hidden route — each role registers it inside its own tab
+// group, so the path differs per role even though the screen is identical.
+export const notificationsRouteForRole = (role) => {
+  const config = ROLE_NAV_CONFIG[role];
+  if (!config) return null;
+  return `/${config.group}/notifications`;
 };

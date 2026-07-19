@@ -4,9 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { ROLE_NAV_CONFIG, homeRouteForRole } from '../navigation/roleNavConfig';
+import { ROLE_NAV_CONFIG, homeRouteForRole, notificationsRouteForRole } from '../navigation/roleNavConfig';
 import { updateAvailability } from '../utils/delivery';
 import ScreenHeader from './ScreenHeader';
+import NotificationBellIcon from './NotificationBellIcon';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
 // Shared by both customer and delivery Account tabs — exercises the real
@@ -77,7 +78,14 @@ export default function AccountScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Account" />
+      <ScreenHeader
+        title="Account"
+        rightSlot={
+          <NotificationBellIcon
+            onPress={() => router.push(notificationsRouteForRole(activeRole) || '/(customer)/notifications')}
+          />
+        }
+      />
       <View style={styles.container}>
         <View style={styles.profile}>
           <View style={styles.avatar}>

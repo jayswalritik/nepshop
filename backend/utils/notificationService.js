@@ -42,7 +42,11 @@ const notifyUser = async ({ user, type, title, body, data = {}, push = false }) 
     const userId = isDoc(user) ? user._id : user;
     if (!userId) return;
 
-    await Notification.create({ user: userId, type, title, body, data });
+    // Created before the push send below (not after) specifically so its
+    // _id is available to stamp onto the push payload as notificationId —
+    // that's what lets a tapped push mark the right doc read on the mobile
+    // side (mobile/src/components/NotificationTapRouter.js).
+    const notificationDoc = await Notification.create({ user: userId, type, title, body, data });
 
     if (push) {
       let token = isDoc(user) ? user.expoPushToken : null;
@@ -51,7 +55,7 @@ const notifyUser = async ({ user, type, title, body, data = {}, push = false }) 
         const doc  = await User.findById(userId).select('expoPushToken');
         token = doc?.expoPushToken || null;
       }
-      if (token) await sendPush(token, title, body, data);
+      if (token) await sendPush(token, title, body, { ...data, notificationId: notificationDoc._id });
     }
   } catch (err) {
     console.error(`❌ Notification failed → user ${isDoc(user) ? user._id : user} | ${err.message}`);
