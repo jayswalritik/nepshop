@@ -1,0 +1,48 @@
+QUERY: "shoes"  totalFound=4 isZeroResult=false
+  1. 6a46680b23d151d45d96a0bc | score=121 | Sports Sneakers Off White & Red
+  2. 6a46680b23d151d45d96a0c1 | score=120 | Sports Sneakers Off White Red
+  3. 6a46680b23d151d45d96a0ad | score=110 | Nike Air Jordan 1 Red And Black
+  4. 6a46680b23d151d45d96a0b2 | score=107 | Nike Baseball Cleats
+
+QUERY: "cam"  totalFound=3 isZeroResult=false
+  1. 6a4e66f509440a87fa5f1914 | score=125 | Canon EOS R50 Mirrorless Camera Kit
+  2. 6a4e6a7209440a87fa5f19ce | score=116 | GoPro HERO13 Black Action Camera
+  3. 6a4e678909440a87fa5f193a | score=91 | DJI Mini 4 Pro Drone
+
+QUERY: "laptop"  totalFound=6 isZeroResult=false
+  1. 6a46680b23d151d45d96a0ce | score=112 | Huawei Matebook X Pro
+  2. 6a46680b23d151d45d96a0d6 | score=110 | New DELL XPS 13 9300 Laptop
+  3. 6a46680b23d151d45d96a0c6 | score=108 | Apple MacBook Pro 14 Inch Space Grey
+  4. 6a46680b23d151d45d96a0d2 | score=107 | Lenovo Yoga 920
+  5. 6a46680b23d151d45d96a0ca | score=106 | Asus Zenbook Pro Dual Screen
+  6. 6a492258102567e87577bdcb | score=93 | Acer Nitro V15
+
+QUERY: "watch"  totalFound=1 isZeroResult=false
+  1. 6a4e69bd09440a87fa5f1992 | score=123 | Apple Watch Series 9 GPS 45mm
+
+QUERY: "shampoo"  totalFound=2 isZeroResult=false
+  1. 6a5048b56c171852d979a251 | score=127 | Pantene Pro-V Smooth & Silky Shampoo 340 ml
+  2. 6a5046cf6c171852d979a21f | score=93 | Dove Daily Moisture Hair Cleanser 340 ml
+
+QUERY: "apple"  totalFound=8 isZeroResult=false
+  1. 6a46680b23d151d45d96a0e5 | score=138 | Apple HomePod Mini Cosmic Grey
+  2. 6a46680b23d151d45d96a0c6 | score=136 | Apple MacBook Pro 14 Inch Space Grey
+  3. 6a46680b23d151d45d96a0dd | score=135 | Apple Airpods
+  4. 6a46680b23d151d45d96a0e1 | score=134 | Apple AirPods Max Silver
+  5. 6a46680b23d151d45d96a0e3 | score=133 | Apple Airpower Wireless Charger
+  6. 6a5e0434e28edc949915c2d1 | score=128 | Apple iPhone 16 (128GB)
+  7. 6a4e69bd09440a87fa5f1992 | score=121 | Apple Watch Series 9 GPS 45mm
+  8. 6a46680b23d151d45d96a0e7 | score=103 | Apple
+
+QUERY: "apple fruit"  totalFound=1 isZeroResult=false
+  1. 6a46680b23d151d45d96a0e7 | score=87 | Apple
+
+QUERY: "headphones"  totalFound=4 isZeroResult=false
+  1. 6a4e657609440a87fa5f1876 | score=102 | Sony WH-1000XM5 Wireless Noise Cancelling Headphones
+  2. 6a4861b6167c29a89b3a01eb | score=101 | Boat Airdopes 141 Wireless Earbuds
+  3. 6a54cf19d1b031e618d48465 | score=74 | [GFTP] Headphone
+  4. 6a511a4c9f7c03b0982f802e | score=64 | Headphone
+
+QUERY: "tshirt"  totalFound=2 isZeroResult=false
+  1. 6a46680b23d151d45d96a099 | score=123 | Gigabyte Aorus Men Tshirt
+  2. 6a46680b23d151d45d96a09e | score=105 | Man Plaid Shirt

@@ -87,6 +87,13 @@ const applyResultFilter = async (stage, query, searchResult) => {
   const filterMs = Date.now() - tFilter0;
 
   if (!filterInfo.fired) {
+    // [Task: search-relevance] tinyPool gets its own explicit wording
+    // (matches the "n=" phrasing used elsewhere for pool-size guards) rather
+    // than the generic skipped(reason) label below.
+    if (filterInfo.skipReason === 'tinyPool') {
+      console.log(`[search:filter] ${stage} skipped tiny pool n=${searchResult.results.length}`);
+      return { result: searchResult, filterMs };
+    }
     const label = filterInfo.failedOpen ? `failedOpen(${filterInfo.skipReason})` : `skipped(${filterInfo.skipReason})`;
     console.log(`[search:filter] ${stage} ${label} kept=${searchResult.results.length} dropped=0`);
     return { result: searchResult, filterMs };

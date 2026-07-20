@@ -19,6 +19,20 @@
  *     out-of-range index) fails OPEN: every candidate is kept, exactly as if
  *     the filter had never run. A broken judge must never make results worse.
  *
+ * [Task: search-relevance] GUARDS added on top of the above (nondeterminism
+ * observed live: Groq vetoed the top-2 semantic scorers — the only two real
+ * phones in the catalog — on different runs of "phone"/"mobile"/"phones"/
+ * "mobiles"):
+ *   - TINY POOL SKIP: pools of <= TINY_POOL_MAX items never reach the LLM at
+ *     all. Below this size there's essentially nothing to lose a comparison
+ *     against, and the downside of a bad veto (a scarce result gone) is far
+ *     worse than the upside (catching a rare single-item noise leak) — this
+ *     supersedes the older single-item-pool rationale below step 1.
+ *   - TOP-SCORER PROTECTION: items within `filterProtectMargin` (searchConfig.js)
+ *     of the pool's top `_searchSemantic` score are excluded from the prompt
+ *     entirely — the LLM never sees them as an option, so it structurally
+ *     cannot veto them, regardless of what it returns.
+ *
  * EXPORTS
  *   filterResults(query, products) -> Promise<{
  *     keptIds: string[], fired: boolean, droppedCount: number,
@@ -28,9 +42,11 @@
  */
 
 const { generate } = require('./chatbot/ollamaService');
+const config = require('./searchConfig');
 
 const MAX_CANDIDATES  = 15; // sane cap on what we ever send the LLM
 const DESC_WORD_LIMIT = 15; // "first ~15 words of description"
+const TINY_POOL_MAX   = 3;  // [Task: search-relevance] pools this size or smaller skip the LLM entirely
 
 const SYSTEM_PROMPT =
   `You are a strict relevance judge for an e-commerce shop search. You will ` +
@@ -77,22 +93,48 @@ const failOpen = (products, skipReason) => ({
 const filterResults = async (query, products) => {
   const pool = Array.isArray(products) ? products : [];
 
-  // Nothing to judge — a truly empty pool, never worth an LLM call. A
-  // SINGLE-item pool is still judged: "is this one item relevant?" is a
-  // meaningful yes/no question with no comparison needed, and it's exactly
-  // the shape of the flagship bug this filter exists to catch (a lone
-  // semantic-only noise item with nothing to be measured against, e.g. "ac"
-  // -> one wireless charger).
+  // Nothing to judge — a truly empty pool, never worth an LLM call.
   if (pool.length === 0) return failOpen(pool, 'trivialPool');
+
+  // [Task: search-relevance] Tiny-pool skip. Below TINY_POOL_MAX there's too
+  // little to meaningfully compare, and a bad veto here is disastrous — e.g.
+  // "phone"/"mobile" queries hit exactly this shape (only 2 real phones in
+  // the whole catalog, so the pool IS the 2-item answer), and Groq
+  // nondeterministically vetoed one of the two on different runs. This
+  // supersedes the older per-item judging this filter used to do down to a
+  // single item — the risk/reward no longer favors it at this scale.
+  if (pool.length <= TINY_POOL_MAX) return failOpen(pool, 'tinyPool');
 
   const q = (query || '').trim();
   if (!q) return failOpen(pool, 'emptyQuery');
 
-  // Judge only the TOP N by current ranking; anything beyond that is kept
-  // untouched (never dropped, never even shown to the LLM) — a sane
-  // cost/latency cap that still covers what a user will actually see first.
-  const judged    = pool.slice(0, MAX_CANDIDATES);
-  const untouched = pool.slice(MAX_CANDIDATES);
+  // [Task: search-relevance] Top-scorer protection. Items within
+  // filterProtectMargin (searchConfig.js) of the pool's top _searchSemantic
+  // score are excluded from the candidate list sent to the LLM entirely —
+  // preferred over "ask the LLM, then ignore a veto against them" because it
+  // structurally guarantees they can never be dropped (the LLM literally has
+  // no index to vote against). Items with no _searchSemantic (runSearch
+  // called without semanticScores) are unprotected — there's no score to
+  // compare, so they fall through to the normal judged/untouched split below.
+  const semScores = pool.map((p) => p._searchSemantic).filter((s) => typeof s === 'number');
+  const topSem = semScores.length ? Math.max(...semScores) : null;
+  const margin = config.filterProtectMargin != null ? config.filterProtectMargin : 4;
+  const protectedItems = topSem == null
+    ? []
+    : pool.filter((p) => typeof p._searchSemantic === 'number' && p._searchSemantic >= topSem - margin);
+  const protectedIds = new Set(protectedItems.map(idOf));
+  const unprotectedPool = pool.filter((p) => !protectedIds.has(idOf(p)));
+
+  // Judge only the TOP N (of the unprotected remainder) by current ranking;
+  // anything beyond that is kept untouched (never dropped, never even shown
+  // to the LLM) — a sane cost/latency cap that still covers what a user will
+  // actually see first.
+  const judged    = unprotectedPool.slice(0, MAX_CANDIDATES);
+  const untouched = unprotectedPool.slice(MAX_CANDIDATES);
+
+  // Nothing left to judge once protection removes everything worth asking
+  // about — skip the LLM call rather than send it an empty candidate list.
+  if (judged.length === 0) return failOpen(pool, 'allProtected');
 
   let raw;
   try {
@@ -117,7 +159,7 @@ const filterResults = async (query, products) => {
 
   const keptFromJudged = [...new Set(parsed.relevant)].map((n) => judged[n - 1]);
   const droppedCount   = judged.length - keptFromJudged.length;
-  const keptIds        = [...keptFromJudged, ...untouched].map(idOf);
+  const keptIds        = [...protectedItems, ...keptFromJudged, ...untouched].map(idOf);
 
   return { keptIds, fired: true, droppedCount, failedOpen: false, skipReason: null };
 };

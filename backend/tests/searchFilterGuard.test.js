@@ -1,0 +1,123 @@
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * searchFilterGuard.test.js — run with: node backend/tests/searchFilterGuard.test.js
+ * ─────────────────────────────────────────────────────────────────────────────
+ * [Task: search-relevance] Pure-function tests for the two guards on the LLM
+ * result filter (backend/services/resultFilter.js). No DB connection, no real
+ * LLM call — ollamaService.generate is replaced with an in-process mock
+ * BEFORE resultFilter.js is first required, so its own top-level
+ * `const { generate } = require('./chatbot/ollamaService')` destructures our
+ * mock instead of the real implementation.
+ *
+ * Background: live logs showed Groq nondeterministically vetoing the top-2
+ * semantic scorers (the only 2 real phones in the catalog) on different runs
+ * of "phone"/"mobile"/"phones"/"mobiles". Two guards fix this:
+ *   1. Tiny-pool skip: pools of <= 3 items never reach the LLM.
+ *   2. Top-scorer protection: items within filterProtectMargin (searchConfig.js)
+ *      of the pool's top _searchSemantic score are excluded from the prompt
+ *      entirely, so the LLM structurally cannot veto them.
+ *
+ * Covers:
+ *   (a) pool of 2 -> filter skipped, LLM never invoked.
+ *   (b) top-2 near-equal semantic scorers protected -> excluded from the
+ *       prompt, survive even when the mock vetoes everything it WAS shown.
+ *   (c) weak-tail item vetoed by the mocked LLM is still removed.
+ *   (d) items without semantic scores remain vetoable (not auto-protected).
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+const assert = require('assert');
+
+// Install the mock BEFORE resultFilter.js is ever required in this process —
+// its `const { generate } = require(...)` destructure happens at that
+// require, so the mutation must land first.
+const ollamaService = require('../services/chatbot/ollamaService');
+let generateCalls = 0;
+let capturedUserPrompt = null;
+let mockRelevant = null; // array of 1-based indices the mock "keeps", or null to simulate no response
+ollamaService.generate = async (systemPrompt, userPrompt) => {
+  generateCalls++;
+  capturedUserPrompt = userPrompt;
+  if (mockRelevant === null) return null;
+  return JSON.stringify({ relevant: mockRelevant });
+};
+
+const { filterResults } = require('../services/resultFilter');
+
+let passed = 0;
+let failed = 0;
+
+const test = async (name, fn) => {
+  try {
+    await fn();
+    console.log(`✅ ${name}`);
+    passed++;
+  } catch (err) {
+    console.error(`❌ ${name}`);
+    console.error(`   ${err.message}`);
+    failed++;
+  }
+};
+
+const product = (id, name, category, description, searchSemantic) => {
+  const p = { _id: id, name, category, description };
+  if (typeof searchSemantic === 'number') p._searchSemantic = searchSemantic;
+  return p;
+};
+
+(async () => {
+  // ── (a) Tiny pool (<= 3 items) -> skipped, LLM never invoked ─────────────
+  generateCalls = 0;
+  const tinyPool = [
+    product('t1', 'Phone A', 'Electronics', 'Smartphone', 32),
+    product('t2', 'Phone B', 'Electronics', 'Smartphone', 30),
+  ];
+  const tinyResult = await filterResults('phone', tinyPool);
+
+  await test('(a) pool of 2: filter skipped, LLM never invoked', async () => {
+    assert.strictEqual(generateCalls, 0, `expected generate() never called, got ${generateCalls} call(s)`);
+    assert.strictEqual(tinyResult.fired, false);
+    assert.strictEqual(tinyResult.skipReason, 'tinyPool');
+    assert.deepStrictEqual([...tinyResult.keptIds].sort(), ['t1', 't2']);
+  });
+
+  // ── (b)/(c)/(d): pool of 5 (above the tiny-pool threshold) ────────────────
+  // ph1/ph2: near-equal top semantic scorers (32, 30) -> protected (default
+  // filterProtectMargin=4, so the cut is 32-4=28; both clear it).
+  // acc1/acc2: weak-tail items (20, 18) -> below the cut, judged normally.
+  // noScore: no _searchSemantic at all -> unprotected by definition, judged.
+  const pool = [
+    product('ph1',     'Phone A',           'Electronics', 'Smartphone', 32),
+    product('ph2',     'Phone B',           'Electronics', 'Smartphone', 30),
+    product('acc1',    'Phone Case',        'Accessories', 'Protective case', 20),
+    product('acc2',    'Screen Protector',  'Accessories', 'Tempered glass', 18),
+    product('noScore', 'Mystery Accessory', 'Accessories', 'No semantic score at all'),
+  ];
+  // Mock: even when asked to judge, keep ONLY the first judged candidate —
+  // an intentionally aggressive veto that drops everything else IT WAS SHOWN.
+  // judged = unprotected pool in order = [acc1, acc2, noScore] -> keeps acc1.
+  mockRelevant = [1];
+  generateCalls = 0;
+  capturedUserPrompt = null;
+  const guardResult = await filterResults('phone', pool);
+
+  await test('(b) top-2 near-equal semantic scorers (ph1, ph2) excluded from the prompt and survive despite an aggressive veto', async () => {
+    assert.strictEqual(generateCalls, 1, `expected exactly 1 generate() call, got ${generateCalls}`);
+    assert.ok(!capturedUserPrompt.includes('Phone A'), `expected protected "Phone A" excluded from the prompt, got: ${capturedUserPrompt}`);
+    assert.ok(!capturedUserPrompt.includes('Phone B'), `expected protected "Phone B" excluded from the prompt, got: ${capturedUserPrompt}`);
+    assert.ok(guardResult.keptIds.includes('ph1'), `expected ph1 to survive, got ${JSON.stringify(guardResult.keptIds)}`);
+    assert.ok(guardResult.keptIds.includes('ph2'), `expected ph2 to survive, got ${JSON.stringify(guardResult.keptIds)}`);
+  });
+
+  await test('(c) weak-tail item (acc2) vetoed by the mocked LLM is still removed', async () => {
+    assert.ok(!guardResult.keptIds.includes('acc2'), `expected acc2 dropped, got ${JSON.stringify(guardResult.keptIds)}`);
+  });
+
+  await test('(d) item with no semantic score (noScore) is vetoable, not auto-protected', async () => {
+    assert.ok(capturedUserPrompt.includes('Mystery Accessory'), `expected noScore to have been shown to the LLM, got: ${capturedUserPrompt}`);
+    assert.ok(!guardResult.keptIds.includes('noScore'), `expected noScore dropped, got ${JSON.stringify(guardResult.keptIds)}`);
+  });
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  process.exit(failed > 0 ? 1 : 0);
+})();

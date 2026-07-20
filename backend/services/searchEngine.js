@@ -67,13 +67,58 @@ const normalizeText = (text) =>
   (text || '').toLowerCase().trim().replace(/\s+/g, ' ');
 
 // ─────────────────────────────────────────────────────────────────────────────
+// stemCandidates — [Task: search-relevance] light, GENERAL inflectional-suffix
+// stripping (plurals, past tense) — never a per-word list. Returns the word
+// itself plus any stemmed variant(s), so callers can compare candidate sets
+// instead of raw strings. Deliberately conservative:
+//   • words under 5 chars are returned unchanged (too short to safely strip
+//     anything without mangling unrelated short words — "gas"/"bed"/"red").
+//   • "-es" is only stripped after s/x/z/ch/sh (box*es*, watch*es*) — a bare
+//     "-s" after other letters is stripped by the plain rule below instead.
+//   • "-ies" -> "-y" ("categor*ies*" -> "category").
+//   • a trailing "s" is stripped UNLESS the word ends "ss" (so "glass"/
+//     "class" are never touched by the plain rule; genuine "-ses"/"-ses"
+//     plurals like "glasses" are still caught by the -es rule above).
+//   • "-ed" is ambiguous in English (silent-e verbs drop the e before -ed,
+//     regular verbs don't), so BOTH candidates are added: "phon*ed*" ->
+//     "phone" (drop just the "d") AND "jump*ed*" -> "jump" (drop "ed").
+// This is symmetric — the same function stems both the QUERY term and each
+// PRODUCT word, so "phones" (query) ~ "phone" (product) and "phoned"
+// (query) ~ "phone" (product) match in either direction without any
+// phone-specific code.
+// ─────────────────────────────────────────────────────────────────────────────
+const stemCandidates = (word) => {
+  const candidates = new Set([word]);
+  if (word.length < 5) return [...candidates];
+
+  if (/[^aeiou]ies$/.test(word)) {
+    candidates.add(word.slice(0, -3) + 'y');
+  } else if (/([sxz]|[cs]h)es$/.test(word)) {
+    candidates.add(word.slice(0, -2));
+  } else if (word.endsWith('s') && !word.endsWith('ss')) {
+    candidates.add(word.slice(0, -1));
+  }
+
+  if (word.endsWith('ed')) {
+    candidates.add(word.slice(0, -1)); // silent-e verbs: "phoned" -> "phone"
+    candidates.add(word.slice(0, -2)); // regular verbs: "jumped" -> "jump"
+  }
+
+  return [...candidates];
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // wordMatch
 // ─────────────────────────────────────────────────────────────────────────────
 // Whole-word (with light plural tolerance) matching — replaces raw substring
 // `.includes()`. A term matches a haystack if any WORD in the haystack equals
 // the term, or begins with it by at most 2 extra letters (so "headphone" still
 // matches "headphones", but "ring" no longer matches inside "touring" and
-// "charge" no longer matches inside "rechargeable").
+// "charge" no longer matches inside "rechargeable") — OR if the term's and
+// the word's stemCandidates (above) overlap, catching the reverse direction
+// (a longer/inflected QUERY term matching a shorter/base PRODUCT word, e.g.
+// "phones"/"phoned" matching "phone") that the prefix-tolerance rule alone
+// can't reach.
 // ─────────────────────────────────────────────────────────────────────────────
 const wordMatch = (haystack, term) => {
   if (!term) return false;
@@ -90,6 +135,7 @@ const wordMatch = (haystack, term) => {
   }
 
   const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
+  const termStems = stemCandidates(term);
   for (const w of words) {
     if (w === term) return true;
     // Prefix/plural tolerance (+2 extra letters) only makes sense once the
@@ -98,6 +144,11 @@ const wordMatch = (haystack, term) => {
     // the same 2 letters ("ac" ~ "Acer", "tv" ~ "TVs"). Short terms require
     // an exact whole-word match instead.
     if (term.length >= 3 && w.startsWith(term) && (w.length - term.length) <= 2) return true;
+    // [Task: search-relevance] General stemming match (see stemCandidates).
+    if (termStems.length > 1 || w.length >= 5) {
+      const wordStems = stemCandidates(w);
+      if (termStems.some(ts => wordStems.includes(ts))) return true;
+    }
   }
   return false;
 };
@@ -209,7 +260,7 @@ const buildProtectedWords = (config) => {
 //   • length difference must also be within that budget
 //   • ties broken by higher catalog frequency (more "real" word wins)
 // ─────────────────────────────────────────────────────────────────────────────
-const fuzzyCorrectToken = (token, vocabularyFreq) => {
+const fuzzyCorrectToken = (token, vocabularyFreq, options = {}) => {
   // Minimum length 5: at 4 chars, edit-distance-1 collisions between ordinary
   // English words and product names are rampant ("hike"→"nike", "read"→"red",
   // "cold"→"gold"). Requiring 5+ chars eliminates that whole class of damage
@@ -217,7 +268,6 @@ const fuzzyCorrectToken = (token, vocabularyFreq) => {
   // "aptop"→"laptop"), which are almost always longer.
   if (token.length < 5) return null;
   if (vocabularyFreq.has(token)) return null;                 // already an exact catalog word
-  if (ENGLISH_WORDS && ENGLISH_WORDS.has(token)) return null; // a valid English word — not a typo
 
   const maxDistance = token.length >= 7 ? 2 : 1; // tight: no distance-2 on short words
 
@@ -250,7 +300,47 @@ const fuzzyCorrectToken = (token, vocabularyFreq) => {
     }
   }
 
+  if (!best) return null;
+
+  // [Task: search-relevance] a valid English word is normally left alone —
+  // not a typo (e.g. "read" must never become "red"). Moved to AFTER the
+  // match search (rather than an early bailout on the input token) so it can
+  // be bypassed in ONE narrow case: the best match is a curated SYNONYM-GROUP
+  // word (options.synonymWords — a small, deliberately-chosen set of product-
+  // concept canonical terms, not the whole catalog). A near-miss against one
+  // of those is much more likely to be an intentional shopping typo than an
+  // incidental English-word collision — e.g. "mobie" is itself, surprisingly,
+  // a recognized dictionary word, which would otherwise permanently block it
+  // from ever correcting to "mobile" no matter how the catalog/synonyms are
+  // configured. Every OTHER English word (not a synonym-group match) keeps
+  // the original protection unchanged.
+  const bypassGuard = options.synonymWords && options.synonymWords.has(best);
+  if (!bypassGuard && ENGLISH_WORDS && ENGLISH_WORDS.has(token)) return null;
+
   return best;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSynonymVocabulary — [Task: search-relevance] every word across every
+// synonymGroups entry, as a Map<word, freq> in the same shape
+// buildCatalogVocabulary produces, so fuzzyCorrectToken can correct a typo
+// TOWARD a synonym-group word even when no product's name/category literally
+// contains it (e.g. "monile"/"mobie" -> "mobile", even though the catalog
+// only ever spells it "iPhone"/"Galaxy"). Frequency is a flat 1 for every
+// word — there's no real "popularity" signal for a linguistic-only entry;
+// it's only used as a last-resort tie-breaker in fuzzyCorrectToken.
+// ─────────────────────────────────────────────────────────────────────────────
+const buildSynonymVocabulary = (synonymGroups) => {
+  const freq = new Map();
+  for (const group of (synonymGroups || [])) {
+    for (const phrase of group) {
+      for (const w of phrase.split(/\s+/)) {
+        if (w.length < 3) continue;
+        freq.set(w, Math.max(freq.get(w) || 0, 1));
+      }
+    }
+  }
+  return freq;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,7 +364,15 @@ const spellCorrect = (normalized, config, catalogVocabulary) => {
   }
 
   // 2) Conservative fuzzy correction
-  const vocab = catalogVocabulary || new Map();
+  // [Task: search-relevance] correction target set = catalog vocabulary
+  // (name/category text) UNION synonym-group canonical words — see
+  // buildSynonymVocabulary. fuzzyCorrectToken itself is unchanged; only the
+  // vocabulary it searches within grows.
+  const synonymVocab = buildSynonymVocabulary(config.synonymGroups);
+  const vocab = new Map(catalogVocabulary || new Map());
+  for (const [w, f] of synonymVocab) {
+    vocab.set(w, Math.max(vocab.get(w) || 0, f));
+  }
   const protectedWords = buildProtectedWords(config);
   const tokens = corrected.split(' ');
 
@@ -282,7 +380,7 @@ const spellCorrect = (normalized, config, catalogVocabulary) => {
     if (!token) return token;
     if (protectedWords.has(token)) return token;   // valid query vocabulary
     if (/^\d[\d,]*$/.test(token))   return token;   // pure numbers (budget, sizes)
-    const fix = fuzzyCorrectToken(token, vocab);
+    const fix = fuzzyCorrectToken(token, vocab, { synonymWords: synonymVocab });
     if (fix) {
       made.push({ from: token, to: fix });
       return fix;
@@ -681,6 +779,13 @@ const scoreSearchResult = (product, intent, config) => {
   return {
     ...product,
     _score: Math.round(finalScore),
+    // [Task: search-relevance] unrounded score, sort-only (never displayed) —
+    // two items whose ROUNDED _score happens to coincide can still have a
+    // real, if small, relevance difference that rounding would otherwise
+    // hide, wrongly treating them as an exact tie for the _qualityRaw
+    // tiebreaker (step 11) to decide instead. Sorting on the exact value
+    // first means quality only ever tiebreaks a GENUINE tie.
+    _scoreExact: finalScore,
     _searchParts: {
       base:      product._score || 0,
       textMatch: Math.round(tMatch),
@@ -855,7 +960,18 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   }
   // A product is "semantically relevant" if it clears the floor AND is within
   // the margin of this query's best match.
-  const semCut = Math.max(semFloor, topSem - semMargin);
+  //
+  // [Task: search-relevance] semanticFloorDelta near-miss relax. semanticFloor
+  // itself is NEVER lowered — semCutFloor is a small, fixed shave off the
+  // floor used ONLY for this admission check, so a genuine near-tie sibling
+  // of the top score (e.g. "iPhone 16" at 0.4939 vs a 0.50 floor for "phone")
+  // isn't excluded by a few thousandths while still comfortably above true
+  // noise. Still gated by the SAME relative margin as before — this never
+  // widens the window beyond topSem - semMargin, it only softens the
+  // absolute floor side of the max(). See searchConfig.js for the derivation.
+  const semFloorDelta = config.semanticFloorDelta != null ? config.semanticFloorDelta : 0;
+  const semCutFloor = semFloor - semFloorDelta;
+  const semCut = Math.max(semCutFloor, topSem - semMargin);
 
   // A weak (description-only) match is corroborated only if it ALSO clears
   // the same semantic relevance bar — a bare description mention isn't
@@ -937,10 +1053,36 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   };
   const basedPool = pool.map(p => scoreProduct(p, recSignals));
 
+  // 8b. [Task: search-relevance] De-weight quality signals (rating/
+  // popularity/recency) for SEARCH ranking specifically. Relevance (text/
+  // semantic/category) must dominate; quality may only tiebreak. This reads
+  // the _scoreParts scoreProduct already returned and adjusts the COPY used
+  // for search scoring only — recommendationEngine.js and
+  // recommendationConfig.js are never touched, so scoreProduct's own output
+  // (and every recommendation-carousel caller of it) is byte-for-byte
+  // unaffected. See searchConfig.js's qualitySignalScale for the derivation.
+  // Live-verified against the actual catalog: even a heavy 0.1 scale still
+  // let rated junk (Huawei Matebook, "Apple" the fruit, Baseball Ball,
+  // Durango/Charger SXT RWD) outrank the two real (zero-rating) phones on
+  // "phones"/"mobile"/"mobiles" — the relevance gap between them and the
+  // phones is only a few points, comfortably inside even a heavily-scaled
+  // quality edge. Per the approved plan's escalation path, qualitySignalScale
+  // is 0 (quality contributes NOTHING to the additive _score); _qualityRaw is
+  // still tracked on every item so quality can act as a PURE tiebreaker — see
+  // the final sort in step 11 — used only when two items are already tied on
+  // every relevance signal, never to override a real relevance gap.
+  const qScale = config.qualitySignalScale != null ? config.qualitySignalScale : 1;
+  const qualityAdjustedPool = basedPool.map(p => {
+    const parts = p._scoreParts || {};
+    const rawQuality = (parts.rating || 0) + (parts.popularity || 0) + (parts.recency || 0);
+    const delta = (rawQuality * qScale) - rawQuality;
+    return { ...p, _score: (p._score || 0) + delta, _qualityRaw: rawQuality };
+  });
+
   // 9. (Phase 2) Blend semantic similarity into the score for everything in pool
-  let withSemantic = basedPool;
+  let withSemantic = qualityAdjustedPool;
   if (semanticScores) {
-    withSemantic = basedPool.map(p => {
+    withSemantic = qualityAdjustedPool.map(p => {
       const sim = semanticScores[p._id?.toString()] || 0;
       const semScore = sim * (config.searchWeights?.semantic || 40);
       return { ...p, _score: (p._score || 0) + semScore, _searchSemantic: Math.round(semScore) };
@@ -951,7 +1093,13 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   const scored = withSemantic.map(p => scoreSearchResult(p, intent, config));
 
   // 11. Sort, reasons, limit
-  scored.sort((a, b) => b._score - a._score);
+  // [Task: search-relevance] Sort on the UNROUNDED score first (_scoreExact)
+  // so a rounding coincidence (two items whose displayed _score happens to
+  // match) never gets mistaken for a genuine tie. _qualityRaw (rating/
+  // popularity/recency, unscaled) is a pure TIEBREAKER — only consulted when
+  // two items are ACTUALLY relevance-identical. It can never move a less-
+  // relevant item ahead of a more-relevant one.
+  scored.sort((a, b) => (b._scoreExact - a._scoreExact) || ((b._qualityRaw || 0) - (a._qualityRaw || 0)));
   const withReasons = scored.map((p, i) => ({ ...p, _reason: buildSearchReason(p, intent, i + 1) }));
   const results    = withReasons.slice(0, limit);
   const totalFound = scored.length;
@@ -999,4 +1147,7 @@ module.exports = {
   extractBudget,
   extractColor,
   extractProductTerms,
+  stemCandidates,
+  buildSynonymVocabulary,
+  fuzzyCorrectToken,
 };

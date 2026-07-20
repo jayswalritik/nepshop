@@ -15,7 +15,7 @@ module.exports = {
   // ONLY genuinely unambiguous synonyms. Each word in a group must mean the SAME
   // thing in all common contexts.
   synonymGroups: [
-    ['mobile', 'phone', 'smartphone', 'cellphone'],
+    ['mobile', 'mobiles', 'phone', 'phones', 'smartphone', 'smartphones', 'cellphone', 'cellphones'],
     ['pc', 'computer', 'computers', 'laptop', 'laptops', 'desktop'],
     ['tablet', 'tablets', 'ipad'],
     ['headphone', 'headphones', 'earphone', 'earphones', 'earbud', 'earbuds', 'headset'],
@@ -155,4 +155,55 @@ module.exports = {
   defaultLimit:    20,
   maxLimit:        40,
   zeroResultLimit: 8,
+
+  // ── LLM result-filter guard (resultFilter.js) ────────────────────────────────
+  // filterProtectMargin — items within this of the pool's top _searchSemantic
+  // score are excluded from the LLM veto prompt entirely (never at risk of
+  // being dropped). SCALE NOTE: this is on the WEIGHTED _searchSemantic scale
+  // (raw cosine x searchWeights.semantic, so realistically ~20-32 for a real
+  // match, up to 40), NOT the raw 0-1 cosine scale that semanticFloor/
+  // semanticTopMargin above use — those can't be reused directly here. Chosen
+  // as semanticTopMargin (0.09) x searchWeights.semantic (40) = 3.6, rounded
+  // up to 4: the same "basically tied with the leader" margin already tuned
+  // and proven elsewhere in this pipeline, scaled onto this field's units,
+  // with a touch of extra headroom because under-protecting is the exact bug
+  // this guards against (Groq nondeterministically vetoed the top-2 semantic
+  // scorers — the only 2 real phones in the catalog — for "phone"/"mobile").
+  filterProtectMargin: 4,
+
+  // ── Search-path quality-signal de-weight (searchEngine.js runSearch only) ───
+  // qualitySignalScale — scales DOWN the rating/popularity/recency portion of
+  // scoreProduct's output when used for SEARCH ranking specifically (never
+  // touches recommendationEngine.js/recommendationConfig.js, so recommendation
+  // carousels are unaffected — see searchEngine.js for the exact scope).
+  // DERIVATION / ESCALATION (mandatory live check against the real catalog):
+  // rating(15)+popularity(15)+recency(10) = 40-point ceiling for "quality".
+  // numReviews=0 for every sampled product (popularity is a dead signal in
+  // practice); real phones with rating=0 were losing to junk with rating
+  // 2.57-4.98 against only a ~3-point semantic relevance gap. Tried 0.25 (10-
+  // point ceiling), then 0.1 (4-point ceiling) — junk (Matebook, the "Apple"
+  // fruit, Baseball Ball, Durango/Charger SXT RWD) STILL outranked one or
+  // both real phones on live "phones"/"mobile"/"mobiles" runs at both levels
+  // — the relevance gaps involved are that small. Landed at 0: quality
+  // contributes NOTHING to the additive score; it acts as a pure TIEBREAKER
+  // instead (see searchEngine.js runSearch step 11's sort comparator, keyed
+  // off _qualityRaw) — consulted only when two items already have the exact
+  // same relevance-driven _score, so it can nudge a genuine tie but can never
+  // move a less-relevant item ahead of a more-relevant one.
+  qualitySignalScale: 0,
+
+  // ── Semantic floor near-miss relax (searchEngine.js runSearch step 4) ───────
+  // semanticFloorDelta — a sub-floor item is admitted only if it is BOTH (a)
+  // within this delta of semanticFloor (i.e. sim >= semanticFloor - delta) AND
+  // (b) already clearing the existing relative margin (sim >= topSem -
+  // semanticTopMargin) — semanticFloor itself is never changed, this only
+  // shaves a small, fixed amount off the effective cut. DERIVATION: measured
+  // live, "iPhone 16" scores 0.4939 for the query "phone" against a floor of
+  // 0.50 — a 0.0061 miss despite already clearing the relative margin
+  // (topSem 0.5602 - 0.09 = 0.4702). 0.01 comfortably covers that real
+  // near-miss with a little headroom, while the floor's own measured
+  // noise-rejection example ("diamond ring" tops out at 0.468) stays a full
+  // 0.022 below the relaxed floor (0.49) — the floor's protective purpose is
+  // preserved, only genuine near-ties recover.
+  semanticFloorDelta: 0.01,
 };
