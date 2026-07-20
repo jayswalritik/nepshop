@@ -27,7 +27,9 @@
  *        (re-queried), plus push=false never sending regardless of token.
  *        The doc-form case also asserts the push payload's data.notificationId
  *        matches the created Notification doc's own _id (mobile's push
- *        tap-router uses this to mark the tapped notification read).
+ *        tap-router uses this to mark the tapped notification read), and
+ *        that the payload carries priority: 'high' + channelId: 'nepshop-high'
+ *        (heads-up banner delivery on Android, matching mobile's channel).
  *   14.  Addendum: notifyNewReviewForSeller creates a doc for the seller,
  *        not the reviewer.
  *   15.  notifyOrderDeliveredForSeller / notifyReturnCompletedForSeller
@@ -307,6 +309,12 @@ const run = async () => {
       const created = await Notification.findOne({ user: agent._id, type: 'DELIVERY_ASSIGNED' });
       assert.ok(created, 'the Notification doc must exist');
       assert.strictEqual(String(body.data.notificationId), String(created._id));
+
+      // priority/channelId are what make this show as a heads-up banner on
+      // Android instead of landing silently in the tray — channelId must
+      // match mobile/src/utils/push.js's ANDROID_CHANNEL_ID exactly.
+      assert.strictEqual(body.priority, 'high');
+      assert.strictEqual(body.channelId, 'nepshop-high');
     });
   }, cleanup);
 

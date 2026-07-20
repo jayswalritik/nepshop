@@ -41,7 +41,25 @@ export const isExpoGo = () =>
 // call, so this stays cheap on repeat use in a non-Expo-Go build.
 export const getNotifications = () => require('expo-notifications');
 
-const ANDROID_CHANNEL_ID = 'default';
+// DIAGNOSIS: the old channel id was 'default', already created with
+// importance: MAX in this file's code — but Android PINS a channel's
+// importance at the moment that channel id is first created on a given
+// device install, and never re-reads it on subsequent
+// setNotificationChannelAsync calls with the same id. If 'default' was ever
+// created earlier at a lower importance on a test device (e.g. Expo's own
+// auto-created default channel, or an earlier build before this file set
+// MAX explicitly), every later call asking for MAX on that same id was
+// silently ignored — that's why pushes were landing in the tray with no
+// heads-up banner despite the code already requesting MAX. Only a NEW
+// channel id gets a fresh pin. Old low-importance 'default' channels left
+// on already-installed devices are harmless — nothing sends to them anymore
+// once the backend's channelId (see backend/utils/notificationService.js)
+// switches to this new id.
+//
+// MUST match backend/utils/notificationService.js's sendPush `channelId`
+// field exactly — that's what actually routes a given push to this channel
+// on the device; creating the channel here only makes it available/pinned.
+const ANDROID_CHANNEL_ID = 'nepshop-high';
 
 // Matches mobile/src/constants/colors.js's COLORS.accent — used only for
 // the Android channel's LED light color, not imported as a style token
@@ -52,12 +70,18 @@ const COLOR_ACCENT = '#F97316';
 // permission prompt (Android 13+) or any notification can be shown. Only
 // ever called from registerForPushNotifications() below, after its own
 // isExpoGo() early-return.
+//
+// Idempotent by construction: setNotificationChannelAsync with the same id
+// is safe to call on every login/session-restore (as it already is) —
+// Android either creates the channel once or is a no-op against the
+// already-pinned one; it never duplicates or errors on repeat calls.
 const ensureAndroidChannel = async () => {
   if (Platform.OS !== 'android') return;
   const Notifications = getNotifications();
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-    name: 'Default',
+    name: 'High priority',
     importance: Notifications.AndroidImportance.MAX,
+    sound: 'default',
     vibrationPattern: [0, 250, 250, 250],
     lightColor: COLOR_ACCENT,
   });

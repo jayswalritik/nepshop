@@ -6,12 +6,23 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
 // No retry, no token cleanup in v1 — log only, mirrors sendEmail's
 // log-and-continue posture (emailService.js:265+).
+//
+// priority: 'high' + channelId: 'nepshop-high' together are what make this
+// show as a heads-up banner (like Facebook) instead of landing silently in
+// the tray — 'high' asks FCM to wake the device promptly, and channelId
+// must match mobile/src/utils/push.js's ANDROID_CHANNEL_ID exactly (that's
+// the channel the device actually created with importance: MAX; a mismatched
+// id here would silently fall back to Android's default channel/importance).
 const sendPush = async (token, title, body, data) => {
   try {
     const res  = await fetch(EXPO_PUSH_URL, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body:    JSON.stringify({ to: token, title, body, data }),
+      body:    JSON.stringify({
+        to: token, title, body, data,
+        priority: 'high',
+        channelId: 'nepshop-high',
+      }),
     });
     const json   = await res.json().catch(() => null);
     const ticket = json?.data;
