@@ -36,6 +36,40 @@ const sendPush = async (token, title, body, data) => {
   }
 };
 
+// Expo's push endpoint also accepts an ARRAY of messages per call (instead
+// of the single-object body sendPush above posts), capped at 100 messages
+// per request — used only by the broadcast path below, where one HTTP call
+// per recipient would be wasteful. Chunks are independent: a failed chunk
+// logs and continues to the next rather than aborting the whole broadcast,
+// same never-throws posture as sendPush.
+const EXPO_PUSH_BATCH_LIMIT = 100;
+
+const chunk = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+const sendPushBatch = async (messages) => {
+  if (messages.length === 0) return;
+  const chunks = chunk(messages, EXPO_PUSH_BATCH_LIMIT);
+  for (const batch of chunks) {
+    try {
+      const res  = await fetch(EXPO_PUSH_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body:    JSON.stringify(batch),
+      });
+      const json    = await res.json().catch(() => null);
+      const tickets = Array.isArray(json?.data) ? json.data : [];
+      const errored = tickets.filter((t) => t?.status === 'error').length;
+      console.log(`✅ Push batch sent → ${batch.length - errored}/${batch.length} ok`);
+    } catch (err) {
+      console.error(`❌ Push batch failed (${batch.length} messages) | ${err.message}`);
+    }
+  }
+};
+
 // NOT `u && typeof u === 'object' && u._id !== undefined` — a bare
 // mongoose.Types.ObjectId is also `typeof === 'object'` AND has a legacy
 // `._id` getter that returns itself, so that heuristic misclassifies a raw
@@ -85,7 +119,7 @@ const fmt     = (amount) => Number(amount).toLocaleString('en-NP');
 const notifyOrderPlaced = (customer, order) => notifyUser({
   user: customer,
   type: 'ORDER_PLACED',
-  push: false,
+  push: true,
   title: 'Order placed',
   body:  `Your order #${shortId(order._id)} (Rs ${fmt(order.total)}) has been placed.`,
   data:  { orderId: order._id },
@@ -109,7 +143,7 @@ const notifyOrderStatus = (customer, order, status) => {
   return notifyUser({
     user: customer,
     type: 'ORDER_STATUS',
-    push: status === 'delivered' || status === 'confirmed',
+    push: true,
     title: copy.title,
     body:  copy.body(id),
     data:  { orderId: order._id, status },
@@ -155,7 +189,7 @@ const notifyRefundIssued = (customer, order, amount) => notifyUser({
 const notifyNewOrderForSeller = (seller, order) => notifyUser({
   user: seller,
   type: 'SELLER_NEW_ORDER',
-  push: false,
+  push: true,
   title: 'New order received',
   body:  `New order #${shortId(order._id)} — your earnings: Rs ${fmt(order.sellerEarnings)}.`,
   data:  { orderId: order._id },
@@ -165,7 +199,7 @@ const notifyNewOrderForSeller = (seller, order) => notifyUser({
 const notifyReturnRequestForSeller = (seller, returnRequest, order) => notifyUser({
   user: seller,
   type: 'SELLER_RETURN_REQUEST',
-  push: false,
+  push: true,
   title: 'Return request filed',
   body:  `A customer requested a return for order #${shortId(order._id)}: ${returnRequest.reason}.`,
   data:  { returnId: returnRequest._id, orderId: order._id },
@@ -176,7 +210,7 @@ const notifyReturnRequestForSeller = (seller, returnRequest, order) => notifyUse
 const notifyEarningsReleased = (seller, order) => notifyUser({
   user: seller,
   type: 'EARNINGS_RELEASED',
-  push: false,
+  push: true,
   title: 'Earnings released',
   body:  `Rs ${fmt(order.sellerEarnings)} from order #${shortId(order._id)} is now available for payout.`,
   data:  { orderId: order._id, amount: order.sellerEarnings },
@@ -186,7 +220,7 @@ const notifyEarningsReleased = (seller, order) => notifyUser({
 const notifyPayoutProcessed = (recipient, amount, method) => notifyUser({
   user: recipient,
   type: 'PAYOUT_PROCESSED',
-  push: false,
+  push: true,
   title: 'Payout processed',
   body:  `Rs ${fmt(amount)} has been paid out via ${method}.`,
   data:  { amount },
@@ -200,7 +234,7 @@ const notifyPayoutProcessed = (recipient, amount, method) => notifyUser({
 const notifyOrderDeliveredForSeller = (seller, order) => notifyUser({
   user: seller,
   type: 'SELLER_ORDER_DELIVERED',
-  push: false,
+  push: true,
   title: 'Order delivered',
   body:  `Order #${shortId(order._id)} delivered — Rs ${fmt(order.sellerEarnings)} pending release.`,
   data:  { orderId: order._id, amount: order.sellerEarnings },
@@ -213,7 +247,7 @@ const notifyOrderDeliveredForSeller = (seller, order) => notifyUser({
 const notifyReturnCompletedForSeller = (seller, order, fault) => notifyUser({
   user: seller,
   type: 'SELLER_RETURN_COMPLETED',
-  push: false,
+  push: true,
   title: 'Return completed',
   body:  `Return completed for order #${shortId(order._id)} — settlement adjusted${fault === 'seller' ? ' (product issue)' : ''}.`,
   data:  { orderId: order._id, fault },
@@ -251,29 +285,52 @@ const notifyReturnPickupAssigned = (agent, returnRequest, order) => notifyUser({
 // No email touchpoint exists for this event — the diagnosis found none.
 // Loads every user, normalizes roles with the exact roles[]-with-legacy-
 // fallback pattern authMiddleware.js:68-70 uses, then inserts one doc per
-// customer-role user. No push for broadcast.
+// customer-role user, then pushes to whichever of those recipients have an
+// expoPushToken.
+//
+// insertMany is called with its default ordered:true (unchanged from
+// before) specifically because that's what guarantees the returned array
+// is in the exact same order as the `docs` array passed in when every
+// insert succeeds — so `inserted[i]` is always the doc created for
+// `customers[i]`, and each push message below can carry the correct
+// recipient's own notificationId without a second query.
 const notifyCouponPublished = async (coupon) => {
   try {
     const User  = require('../models/User');
-    const users = await User.find({}).select('role roles');
-    const customerIds = users
-      .filter((u) => {
-        const userRoles = u.roles && u.roles.length ? u.roles : [u.role];
-        return userRoles.includes('customer');
-      })
-      .map((u) => u._id);
+    const users = await User.find({}).select('role roles expoPushToken');
+    const customers = users.filter((u) => {
+      const userRoles = u.roles && u.roles.length ? u.roles : [u.role];
+      return userRoles.includes('customer');
+    });
 
-    if (customerIds.length === 0) return;
+    if (customers.length === 0) return;
 
-    const docs = customerIds.map((userId) => ({
-      user:  userId,
-      type:  'COUPON_PUBLISHED',
-      title: 'New coupon available',
-      body:  `Use code ${coupon.code} on your next order.`,
-      data:  { couponCode: coupon.code },
+    const title = 'New coupon available';
+    const body  = `Use code ${coupon.code} on your next order.`;
+
+    const docs = customers.map((u) => ({
+      user: u._id,
+      type: 'COUPON_PUBLISHED',
+      title,
+      body,
+      data: { couponCode: coupon.code },
     }));
 
-    await Notification.insertMany(docs);
+    const inserted = await Notification.insertMany(docs);
+
+    const messages = customers
+      .map((u, i) => ({ token: u.expoPushToken, notificationId: inserted[i]._id }))
+      .filter((m) => m.token)
+      .map(({ token, notificationId }) => ({
+        to: token,
+        title,
+        body,
+        data: { couponCode: coupon.code, notificationId },
+        priority: 'high',
+        channelId: 'nepshop-high',
+      }));
+
+    await sendPushBatch(messages);
   } catch (err) {
     console.error(`❌ Coupon broadcast notification failed | ${err.message}`);
   }
@@ -287,7 +344,7 @@ const notifyCouponPublished = async (coupon) => {
 const notifyNewReviewForSeller = (seller, { productName, rating, orderId, productId }) => notifyUser({
   user: seller,
   type: 'SELLER_NEW_REVIEW',
-  push: false,
+  push: true,
   title: 'New review',
   body:  `New ${rating}★ review on ${productName}`,
   data:  { productId, orderId },

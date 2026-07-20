@@ -24,17 +24,25 @@
  *   9-10. Push-token set and clear (setPushToken).
  *   11-13. Push send attempted only when push=true AND a token is present —
  *        covers doc-form (token on the doc already) and bare-id form
- *        (re-queried), plus push=false never sending regardless of token.
- *        The doc-form case also asserts the push payload's data.notificationId
- *        matches the created Notification doc's own _id (mobile's push
- *        tap-router uses this to mark the tapped notification read), and
- *        that the payload carries priority: 'high' + channelId: 'nepshop-high'
- *        (heads-up banner delivery on Android, matching mobile's channel).
+ *        (re-queried), plus (as of the all-types-push change) a previously
+ *        push=false type (ORDER_PLACED) now sending too. The doc-form case
+ *        also asserts the push payload's data.notificationId matches the
+ *        created Notification doc's own _id (mobile's push tap-router uses
+ *        this to mark the tapped notification read), and that the payload
+ *        carries priority: 'high' + channelId: 'nepshop-high' (heads-up
+ *        banner delivery on Android, matching mobile's channel).
  *   14.  Addendum: notifyNewReviewForSeller creates a doc for the seller,
  *        not the reviewer.
  *   15.  notifyOrderDeliveredForSeller / notifyReturnCompletedForSeller
  *        (the two SELLER_* types added after the requestReturn/completeReturn
  *        gap discussion) create correctly-typed docs.
+ *   16.  Broadcast push batching: notifyCouponPublished pushes ONLY to
+ *        recipients with an expoPushToken, as a single Expo batch call (an
+ *        array-of-messages body, not one call per recipient), and each
+ *        message's data.notificationId matches the Notification doc actually
+ *        created for that specific recipient (not just any doc from the
+ *        broadcast) — 3 token-holding + 2 tokenless recipients -> exactly
+ *        one HTTP call with exactly 3 messages.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 const path = require('path');
@@ -341,14 +349,16 @@ const run = async () => {
     });
   }, cleanup);
 
-  await test('push=false type never sends a push even with a token present', async () => {
+  await test('a previously-unpushed type (ORDER_PLACED) now attempts push when a token exists', async () => {
     await withFetchStub(async (calls) => {
       const customer = await mkUser({ role: 'customer', roles: ['customer'], tag: 'PushSend4' });
-      customer.expoPushToken = 'ExponentPushToken[should-not-be-used]';
+      customer.expoPushToken = 'ExponentPushToken[now-used]';
       await customer.save();
 
       await notifyOrderPlaced(customer, { _id: new mongoose.Types.ObjectId(), total: 500 });
-      assert.strictEqual(calls.length, 0, 'ORDER_PLACED has push=false — must never call fetch');
+      assert.strictEqual(calls.length, 1, 'ORDER_PLACED now has push=true — a push must be sent when a token exists');
+      const body = JSON.parse(calls[0].opts.body);
+      assert.strictEqual(body.to, 'ExponentPushToken[now-used]');
     });
   }, cleanup);
 
@@ -390,6 +400,64 @@ const run = async () => {
     assert.ok(delivered[0].body.includes('800'));
     assert.strictEqual(returned[0].data.fault, 'seller');
   }, cleanup);
+
+  // ── 16. Broadcast push batching — token-holding recipients only ──────────
+  await test('notifyCouponPublished: batches push to token-holding recipients with correct per-recipient notificationIds', async () => {
+    await withFetchStub(async (calls) => {
+      const withToken1 = await mkUser({ role: 'customer', roles: ['customer'], tag: 'Bpush1' });
+      const withToken2 = await mkUser({ role: 'customer', roles: ['customer'], tag: 'Bpush2' });
+      const withToken3 = await mkUser({ role: 'customer', roles: ['customer'], tag: 'Bpush3' });
+      // No-token recipients — created so they're part of the broadcast's
+      // Notification.insertMany, but must be excluded from the push batch.
+      await mkUser({ role: 'customer', roles: ['customer'], tag: 'Bpush4' });
+      await mkUser({ role: 'customer', roles: ['customer'], tag: 'Bpush5' });
+
+      withToken1.expoPushToken = 'ExponentPushToken[bpush1]';
+      withToken2.expoPushToken = 'ExponentPushToken[bpush2]';
+      withToken3.expoPushToken = 'ExponentPushToken[bpush3]';
+      await Promise.all([withToken1.save(), withToken2.save(), withToken3.save()]);
+      // noToken1/noToken2 keep expoPushToken null (default)
+
+      await notifyCouponPublished({ code: 'BATCHCODE5' });
+
+      // notifyCouponPublished broadcasts to every customer-role user in the
+      // whole collection (that's the spec — "every recipient who has an
+      // expoPushToken"), so this shared dev DB may hold other real
+      // customers with a token already registered (e.g. from device push
+      // testing) beyond the 3 created here — assert our 3 are present and
+      // correctly paired, not an exact global total. Under the 100-message
+      // chunk limit this still fits in one call unless the DB holds >97
+      // other token-holding customers, which it doesn't.
+      assert.strictEqual(calls.length, 1, 'well under the 100-message chunk limit — exactly one HTTP call');
+      const messages = JSON.parse(calls[0].opts.body);
+      assert.ok(Array.isArray(messages), 'batch body must be an array of messages');
+      assert.ok(messages.length >= 3, 'at least the 3 token-holding recipients created here must get a push message');
+
+      const byToken = Object.fromEntries(messages.map((m) => [m.to, m]));
+      assert.ok(byToken['ExponentPushToken[bpush1]']);
+      assert.ok(byToken['ExponentPushToken[bpush2]']);
+      assert.ok(byToken['ExponentPushToken[bpush3]']);
+
+      // Each message's notificationId must match the doc actually created
+      // for that specific recipient (not just any doc from the broadcast).
+      const [doc1, doc2, doc3] = await Promise.all([
+        Notification.findOne({ user: withToken1._id, type: 'COUPON_PUBLISHED' }),
+        Notification.findOne({ user: withToken2._id, type: 'COUPON_PUBLISHED' }),
+        Notification.findOne({ user: withToken3._id, type: 'COUPON_PUBLISHED' }),
+      ]);
+      assert.strictEqual(String(byToken['ExponentPushToken[bpush1]'].data.notificationId), String(doc1._id));
+      assert.strictEqual(String(byToken['ExponentPushToken[bpush2]'].data.notificationId), String(doc2._id));
+      assert.strictEqual(String(byToken['ExponentPushToken[bpush3]'].data.notificationId), String(doc3._id));
+
+      messages.forEach((m) => {
+        assert.strictEqual(m.priority, 'high');
+        assert.strictEqual(m.channelId, 'nepshop-high');
+      });
+    });
+  }, async () => {
+    await Notification.deleteMany({ type: 'COUPON_PUBLISHED', user: { $in: cleanupIds.users } });
+    await cleanup();
+  });
 
   await mongoose.disconnect();
 
