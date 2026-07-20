@@ -891,18 +891,36 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   // 6. Category from STRONG literal matches only (keeps the signal clean)
   const { category: derivedCategory } = deriveCategoryFromMatches(hasProductTerms ? strong : []);
 
-  // 6b. Same-category tightening. When the query resolves to ONE dominant
-  // category (derivedCategory is set — deriveCategoryFromMatches only returns
-  // one when it's ≥60% of the strong matches), drop pool items from OTHER
-  // categories. These are cross-category stragglers that matched semantically or
-  // via a stray description word (e.g. a Toys "Fashion Doll" or an "Other"
-  // "Laundry Basket" surfacing for "clothes"). This does NOT touch:
-  //   • multi-category queries ("helmet" → Sports+Automotive) — no dominant
-  //     category, so no category is derived, so nothing is filtered; and
-  //   • pure-semantic queries with no literal match ("something to keep drinks
-  //     cold" → water bottle in "Other") — no derived category either.
+  // 6b. [Task: search-multicategory] Same-category tightening REMOVED as a
+  // blanket pool filter — replaced below with a narrower cut. A genuine
+  // STRONG (name/category) match in the minority category is a real product
+  // the user searched for, not noise (e.g. "apple" → mostly Electronics by
+  // count, but the literal Groceries "Apple" match is the actual fruit the
+  // user typed — it must survive, just ranked below Electronics via
+  // recSignals/categoryMatch, step 8 below). derivedCategory is still
+  // computed above and still feeds the categoryMatch score boost and the
+  // understanding/interpretedAs display either way.
+  //
+  // [Task: search-multicategory refinement] Semantic-only off-category cut.
+  // A LITERAL match (strong OR weak — the item is in `literalMatches`) has
+  // real textual evidence it's what the user meant, even off-category, and
+  // must survive regardless of derivedCategory. But an item that entered the
+  // pool ONLY via `semanticOnly` (step 4 above) — zero literal match, purely
+  // "its embedding happens to sit near this query's cluster" — has no such
+  // evidence. E.g. "iphone": an apple-FRUIT fixture can score deceptively
+  // high semantic similarity to "iphone" (shared brand word "apple" in
+  // embedding space) despite matching not one word of "iphone" literally.
+  // Once a dominant category exists to judge it against, that's exactly the
+  // noise worth cutting — contrast "apple": the Groceries "Apple" survives
+  // there because it's a STRONG literal match, not semantic-only. No
+  // dominant category (derivedCategory null) means there's nothing to judge
+  // "off-category" against, so nothing is cut here either way.
+  // Reuses the semanticOnly classification already computed in step 4 — no
+  // re-run of word matching. semanticOnly is itself the marker; the id Set
+  // below is just a cheap membership check, not a new per-item flag.
   if (derivedCategory) {
-    pool = pool.filter(p => p.category === derivedCategory);
+    const semanticOnlyIds = new Set(semanticOnly.map(p => p._id?.toString()));
+    pool = pool.filter(p => p.category === derivedCategory || !semanticOnlyIds.has(p._id?.toString()));
   }
 
   // 7. Budget filter (no fallback once the user named a product term)

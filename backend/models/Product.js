@@ -107,7 +107,7 @@ const productSchema = new mongoose.Schema(
     },
 
     // ── Semantic search embedding ─────────────────────────
-    // 384-number meaning-vector (all-MiniLM-L6-v2). Hidden from normal queries
+    // 384-number meaning-vector (Xenova/bge-small-en-v1.5). Hidden from normal queries
     // via select:false, so existing code is unaffected; semantic search opts in
     // with .select('+embedding').
     embedding: {
