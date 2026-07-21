@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import BecomeCustomer from '../../components/common/BecomeCustomer';
+import { NEPAL_DISTRICTS } from '../../utils/districts';
 
 const SettingsPage = () => {
   const { user, login } = useAuth();
@@ -27,11 +28,6 @@ const SettingsPage = () => {
   const [success, setSuccess]   = useState('');
   const [error, setError]       = useState('');
   const [errors, setErrors]     = useState({});
-
-  const districts = [
-    'Kathmandu', 'Lalitpur', 'Bhaktapur', 'Pokhara', 'Chitwan',
-    'Butwal', 'Birgunj', 'Biratnagar', 'Dharan', 'Hetauda', 'Other',
-  ];
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -222,7 +218,7 @@ const SettingsPage = () => {
                   ${errors.shopDistrict ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500'}`}
               >
                 <option value="">Select district</option>
-                {districts.map(d => <option key={d}>{d}</option>)}
+                {NEPAL_DISTRICTS.map(d => <option key={d}>{d}</option>)}
               </select>
               {errors.shopDistrict && <p className="text-red-500 text-xs mt-1">{errors.shopDistrict}</p>}
             </div>

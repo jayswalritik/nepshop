@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
+import { NEPAL_DISTRICTS } from '../../utils/districts';
 
 const AuthPage = () => {
   const navigate = useNavigate();
@@ -587,8 +588,7 @@ const AuthPage = () => {
             ${errors.shopDistrict ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500'}`}
         >
           <option value="">Select</option>
-          {['Kathmandu','Lalitpur','Bhaktapur','Pokhara','Chitwan',
-            'Butwal','Birgunj','Biratnagar','Dharan','Hetauda','Other'].map(d => (
+          {NEPAL_DISTRICTS.map(d => (
             <option key={d}>{d}</option>
           ))}
         </select>

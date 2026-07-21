@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
-
-const districts = ['Kathmandu','Lalitpur','Bhaktapur','Pokhara','Chitwan','Butwal','Birgunj','Biratnagar','Dharan','Hetauda','Other'];
+import { NEPAL_DISTRICTS } from '../../utils/districts';
 
 const RoleUpgrade = () => {
   const { user, login } = useAuth();
@@ -210,7 +209,7 @@ const RoleUpgrade = () => {
                     <label className="block text-xs font-medium text-gray-700 mb-1">District</label>
                     <select value={sellerData.shopDistrict} onChange={(e) => setSellerData({...sellerData, shopDistrict: e.target.value})} className={inputCls + ' bg-white'}>
                       <option value="">Select</option>
-                      {districts.map(d => <option key={d}>{d}</option>)}
+                      {NEPAL_DISTRICTS.map(d => <option key={d}>{d}</option>)}
                     </select>
                   </div>
                 </div>

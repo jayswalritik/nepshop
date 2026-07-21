@@ -3,6 +3,7 @@ import { useCart } from '../../context/CartContext';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import RecommendationRow from '../../components/recommendations/RecommendationRow';
+import { NEPAL_DISTRICTS } from '../../utils/districts';
 
 // A cart item counts toward checkout only if selected AND not stale (out of
 // stock / deactivated — server auto-deselects these, this is a defensive
@@ -335,11 +336,6 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
   const selectedItems    = cart.items.filter((item) => item.product && isCheckoutEligible(item));
   const selectedSubtotal = selectedItems.reduce((s, i) => s + i.price * i.quantity, 0);
 
-  const districts = [
-    'Kathmandu', 'Lalitpur', 'Bhaktapur', 'Pokhara', 'Chitwan',
-    'Butwal', 'Birgunj', 'Biratnagar', 'Dharan', 'Hetauda', 'Other'
-  ];
-
   const handleChange = (e) => {
     setAddress({ ...address, [e.target.name]: e.target.value });
     setFieldErrors({ ...fieldErrors, [e.target.name]: '' });
@@ -540,7 +536,7 @@ const CheckoutPage = ({ cart, user, onSuccess, onBack }) => {
                     className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none bg-white transition-all
                       ${fieldErrors.district ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500'}`}>
                     <option value="">Select</option>
-                    {districts.map(d => <option key={d}>{d}</option>)}
+                    {NEPAL_DISTRICTS.map(d => <option key={d}>{d}</option>)}
                   </select>
                   {fieldErrors.district && <p className="text-red-500 text-xs mt-1">{fieldErrors.district}</p>}
                 </div>
