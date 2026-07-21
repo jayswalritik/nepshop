@@ -85,7 +85,14 @@ const styles = StyleSheet.create({
   sheetWrap: {
     maxHeight: '70%',
   },
+  // `sheetWrap` caps the sheet at 70% of the screen, but that cap only clips —
+  // it doesn't bound the FlatList's viewport, because RN children default to
+  // flexShrink: 0 (unlike web). The list therefore laid out at its full content
+  // height and got cut off with nothing to scroll. flexShrink here (and on the
+  // list below) lets both actually shrink to the cap, which is what gives the
+  // FlatList a bounded height to scroll inside.
   sheet: {
+    flexShrink: 1,
     backgroundColor: COLORS.background,
     borderTopLeftRadius: RADII.xl,
     borderTopRightRadius: RADII.xl,
@@ -108,6 +115,8 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   optionList: {
+    flexGrow: 0,
+    flexShrink: 1,
     paddingHorizontal: SPACING.lg,
   },
   option: {

@@ -22,14 +22,21 @@ import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 
 // Mirrors frontend/src/pages/customer/SearchPage.jsx's full result-handling
-// model against the SAME endpoint: GET /search?q=<query>&limit=20, response
-// { products, rescue, totalFound, understanding, intent[, interpretedAs] }.
+// model against the SAME endpoint: GET /search?q=<query>&page=<n>&limit=<n>,
+// response { products, rescue, total, page, totalPages, totalFound,
+// understanding, intent[, interpretedAs] }.
 // interpretedAs isn't in this task's stated response shape, but the web
 // code (the mandated reading) reads it too — it's genuinely part of the
 // live response (an LLM-rescue rewrite case), so it's handled here the same
 // way rather than silently dropped.
+//
+// Results are paginated + infinite-scrolled rather than fetched in one shot:
+// `limit` is the PAGE SIZE, and the backend ranks a capped pool (maxLimit 40)
+// then slices. Web reaches the full ranked set via numbered pages; here the
+// same set is reached by appending pages on scroll.
 const MIN_CHARS = 2;
 const DEBOUNCE_MS = 700;
+const PAGE_SIZE = 10;
 
 const columnsForWidth = (width) => {
   if (width >= 900) return 4;
@@ -51,6 +58,13 @@ export default function SearchScreen() {
   const [interpretedAs, setInterpretedAs] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingSlow, setLoadingSlow] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Pagination cursor for the CURRENT query. `page` is the highest page
+  // successfully loaded; `total`/`totalPages` come straight from the
+  // response and are what tells us when the ranked pool is exhausted.
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [hasSearched, setHasSearched] = useState(false);
   const [removedChips, setRemovedChips] = useState([]);
   const [addingId, setAddingId] = useState(null);
@@ -64,6 +78,11 @@ export default function SearchScreen() {
   const latestQueryRef = useRef('');
   const abortControllerRef = useRef(null);
   const debounceTimerRef = useRef(null);
+  // onEndReached fires repeatedly as the user keeps dragging near the bottom.
+  // State alone can't gate that — a second call can land before setState has
+  // committed — so the in-flight guard is a ref, and the state is only for
+  // rendering the footer spinner.
+  const loadingMoreRef = useRef(false);
 
   // Auto-focus with the keyboard open on arrival. Chosen over passing a
   // route param: nothing needs to flow INTO this screen from Home (the
@@ -95,6 +114,15 @@ export default function SearchScreen() {
     setRemovedChips([]);
     setHasSearched(true);
 
+    // A new query always restarts pagination from scratch — page 1, no
+    // carried-over results, no stale totals, and any load-more in flight is
+    // disowned (the abort above cancels it; this clears its guard).
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    setPage(1);
+    setTotalPages(1);
+    setTotal(0);
+
     // Cold-start escalation: upgrade the loading copy after 3s without
     // swapping the loading UI out from under the user.
     const slowTimer = setTimeout(() => {
@@ -102,20 +130,28 @@ export default function SearchScreen() {
     }, 3000);
 
     try {
-      const { data } = await API.get(`/search?q=${encodeURIComponent(q)}&limit=20`, {
-        signal: controller.signal,
-      });
+      const { data } = await API.get(
+        `/search?q=${encodeURIComponent(q)}&page=1&limit=${PAGE_SIZE}`,
+        { signal: controller.signal }
+      );
       if (latestQueryRef.current !== q) return; // superseded while in flight
-      setResults(data.products || []);
+      const products = data.products || [];
+      setResults(products);
       setRescue(data.rescue || []);
       setUnderstanding(data.understanding || null);
       setIntent(data.intent || null);
       setInterpretedAs(data.interpretedAs || null);
+      setPage(data.page || 1);
+      setTotalPages(data.totalPages || 1);
+      setTotal(typeof data.total === 'number' ? data.total : products.length);
     } catch (err) {
       if (err.name === 'AbortError') return; // cancelled, not a failure
       if (latestQueryRef.current !== q) return; // stale error, ignore
       setResults([]);
       setRescue([]);
+      setPage(1);
+      setTotalPages(1);
+      setTotal(0);
     } finally {
       clearTimeout(slowTimer);
       if (latestQueryRef.current === q) {
@@ -125,8 +161,66 @@ export default function SearchScreen() {
     }
   }, []);
 
+  // Is there anything left to fetch for the current query? Both halves of the
+  // stop condition are checked: page cursor vs totalPages, AND loaded count vs
+  // total. Either one alone is enough in practice; together they also cover a
+  // short/duplicate page. This is what makes a 3-result query show no footer
+  // spinner (totalPages === 1) and what makes a big query stop cleanly at the
+  // backend's ranked-pool cap (maxLimit 40) instead of spinning forever.
+  const hasMore = results.length > 0 && page < totalPages && results.length < total;
+
+  const loadMore = useCallback(async () => {
+    // onEndReached can fire several times per drag, and also fires while the
+    // initial search is still running or while showing the rescue list (which
+    // isn't paginated at all) — all of those must be no-ops.
+    if (loadingMoreRef.current || loading || !hasMore) return;
+
+    const q = latestQueryRef.current;
+    if (!q) return;
+
+    const nextPage = page + 1;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    // Registered on the shared ref so a new query (or unmount) aborts this
+    // in-flight append the same way it aborts a first-page search.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const { data } = await API.get(
+        `/search?q=${encodeURIComponent(q)}&page=${nextPage}&limit=${PAGE_SIZE}`,
+        { signal: controller.signal }
+      );
+      if (latestQueryRef.current !== q) return; // query changed mid-flight
+      const more = data.products || [];
+      // Append, never replace. Guarded against a duplicate page: the backend
+      // clamps an over-range page back to the last one, so appending blindly
+      // could repeat items and break FlatList's keys.
+      setResults((prev) => {
+        const seen = new Set(prev.map((p) => p._id));
+        return [...prev, ...more.filter((p) => !seen.has(p._id))];
+      });
+      setPage(data.page || nextPage);
+      if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
+      if (typeof data.total === 'number') setTotal(data.total);
+    } catch {
+      // A failed (or aborted) append leaves the already-loaded results and the
+      // page cursor untouched — `page` only advances on success, so scrolling
+      // again simply retries the same page.
+    } finally {
+      loadingMoreRef.current = false;
+      if (latestQueryRef.current === q) setLoadingMore(false);
+    }
+  }, [hasMore, loading, page]);
+
   const resetToIdle = () => {
     latestQueryRef.current = '';
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    setPage(1);
+    setTotalPages(1);
+    setTotal(0);
     setResults([]);
     setRescue([]);
     setUnderstanding(null);
@@ -282,6 +376,15 @@ export default function SearchScreen() {
           contentContainerStyle={styles.grid}
           columnWrapperStyle={styles.gridRow}
           keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoading}>
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              </View>
+            ) : null
+          }
           ListHeaderComponent={
             <SearchListHeader
               interpretedAs={interpretedAs}
@@ -291,6 +394,7 @@ export default function SearchScreen() {
               displayResults={displayResults}
               displayQueryLabel={displayQueryLabel}
               showRescue={showRescue}
+              total={total}
             />
           }
           ListEmptyComponent={
@@ -323,8 +427,18 @@ export default function SearchScreen() {
 //    interpreted-as framing, rescue framing ──────────────────────────────
 function SearchListHeader({
   interpretedAs, understanding, removedChips, onToggleChip,
-  displayResults, displayQueryLabel, showRescue,
+  displayResults, displayQueryLabel, showRescue, total,
 }) {
+  // With paging, displayResults.length is only what's loaded SO FAR — showing
+  // it would read "10 results" for a 23-result query until the user scrolled.
+  // The response's `total` is the honest count (and matches what web shows).
+  // Once the user removes a refine chip the list is locally filtered, so the
+  // server total no longer describes what's on screen and the loaded count is
+  // the truthful one again.
+  const resultCount = removedChips.length === 0 && total > displayResults.length
+    ? total
+    : displayResults.length;
+
   return (
     <View>
       {/* Never shown for interpretedAs results — that banner would be
@@ -357,8 +471,8 @@ function SearchListHeader({
           </View>
         ) : (
           <Text style={styles.resultCount}>
-            <Text style={styles.resultCountBold}>{displayResults.length}</Text>
-            {' '}result{displayResults.length !== 1 ? 's' : ''} for{' '}
+            <Text style={styles.resultCountBold}>{resultCount}</Text>
+            {' '}result{resultCount !== 1 ? 's' : ''} for{' '}
             <Text style={styles.resultCountQuery}>"{displayQueryLabel}"</Text>
           </Text>
         )
@@ -586,6 +700,10 @@ const styles = StyleSheet.create({
     borderRadius: RADII.sm,
     backgroundColor: COLORS.surface,
     marginTop: 4,
+  },
+  footerLoading: {
+    paddingVertical: SPACING.lg,
+    alignItems: 'center',
   },
   grid: {
     padding: SPACING.lg,

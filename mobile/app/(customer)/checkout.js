@@ -30,8 +30,12 @@ import { formatRs } from '../../src/utils/format';
 // POST /orders COD payload. Order Summary numbers come ENTIRELY from
 // GET /api/cart/summary (backend/controllers/cartController.js's
 // getCartSummary) — nothing here computes delivery, coupon, or totals.
-// Khalti/eSewa are represented with an icon + label instead of the web's
-// static logo images (no such asset exists in this project).
+// Khalti/eSewa show their own brand logos, the same images web uses
+// (frontend/public/payment-logos/*.png, copied to mobile/assets/payment-logos/
+// since a native bundle can't read the web app's public/ dir). Rendered at the
+// same 24x56 contain box as web's `h-6 w-14 object-contain`, with the same
+// logo-or-icon fallback. Cash on Delivery keeps its Ionicon — web uses an
+// emoji there and has no logo for it either.
 //
 // Both gateways are enabled, and both open through the same
 // openGatewayAndWait helper below (WebBrowser.openAuthSessionAsync, waiting
@@ -53,8 +57,8 @@ import { formatRs } from '../../src/utils/format';
 //   opens formUrl exactly like Khalti's paymentUrl.
 const PAYMENT_METHODS = [
   { value: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'cash-outline', desc: 'Pay when your order arrives', enabled: true },
-  { value: 'khalti', label: 'Khalti', icon: 'wallet-outline', desc: 'Pay with Khalti wallet', enabled: true },
-  { value: 'esewa', label: 'eSewa', icon: 'wallet-outline', desc: 'Pay with eSewa wallet', enabled: true },
+  { value: 'khalti', label: 'Khalti', icon: 'wallet-outline', logo: require('../../assets/payment-logos/khalti-logo.png'), desc: 'Pay with Khalti wallet', enabled: true },
+  { value: 'esewa', label: 'eSewa', icon: 'wallet-outline', logo: require('../../assets/payment-logos/esewa-logo.png'), desc: 'Pay with eSewa wallet', enabled: true },
 ];
 
 export default function CheckoutScreen() {
@@ -421,7 +425,11 @@ export default function CheckoutScreen() {
                 size={18}
                 color={!m.enabled ? COLORS.tabInactive : paymentMethod === m.value ? COLORS.primary : COLORS.border}
               />
-              <Ionicons name={m.icon} size={20} color={m.enabled ? COLORS.text : COLORS.tabInactive} />
+              {m.logo ? (
+                <Image source={m.logo} style={styles.paymentLogo} resizeMode="contain" />
+              ) : (
+                <Ionicons name={m.icon} size={20} color={m.enabled ? COLORS.text : COLORS.tabInactive} />
+              )}
               <View style={styles.paymentTextWrap}>
                 <Text style={[styles.paymentLabel, !m.enabled && styles.paymentLabelDisabled]}>{m.label}</Text>
                 <Text style={styles.paymentDesc}>{m.desc}</Text>
@@ -866,6 +874,13 @@ const styles = StyleSheet.create({
   },
   paymentRowDisabled: {
     opacity: 0.6,
+  },
+  // Same box as web's `h-6 w-14 object-contain` — a fixed frame so the two
+  // logos (different aspect ratios) line up and the row height doesn't shift
+  // between payment options.
+  paymentLogo: {
+    width: 56,
+    height: 24,
   },
   paymentTextWrap: {
     flex: 1,

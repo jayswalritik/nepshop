@@ -25,6 +25,11 @@ export default function RecommendationRail({
   loading,
   onProduct,
   onAddToCart,
+  // _id of the product whose add-to-cart is currently in flight, so that
+  // card's "+ Cart" dims/disables while it runs — same treatment the browse
+  // grid (app/(customer)/products.js) already gives it. Optional: callers
+  // that don't track it simply get the previous always-enabled behaviour.
+  addingId = null,
   showReason = false,
   emptyText = null,
 }) {
@@ -69,6 +74,7 @@ export default function RecommendationRail({
             <ProductCard
               product={item}
               style={{ width: cardWidth }}
+              adding={addingId === item._id}
               showReason={showReason}
               onPress={() => onProduct(item)}
               onAddToCart={() => onAddToCart(item)}

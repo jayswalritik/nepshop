@@ -37,6 +37,7 @@ export default function Home() {
   const [loading, setLoading] = useState(loadingRailState(true));
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
+  const [addingId, setAddingId] = useState(null);
 
   const fetchRail = useCallback(async (rail) => {
     setLoading((prev) => ({ ...prev, [rail.key]: true }));
@@ -78,8 +79,13 @@ export default function Home() {
     setRefreshing(false);
   }, [fetchRail]);
 
+  // Mirrors the browse grid's handler (app/(customer)/products.js) exactly:
+  // mark this product as in-flight so its card's "+ Cart" dims and disables,
+  // then clear it before the toast — cleared on failure as well as success.
   const handleAddToCart = async (product) => {
+    setAddingId(product._id);
     const result = await addToCart(product._id, 1);
+    setAddingId(null);
     setToast(
       result.success
         ? { type: 'success', message: `"${product.name}" added to cart!` }
@@ -186,6 +192,7 @@ export default function Home() {
               emptyText={rail.emptyText}
               onProduct={goToProduct}
               onAddToCart={handleAddToCart}
+              addingId={addingId}
             />
           ))}
 
