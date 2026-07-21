@@ -14,6 +14,7 @@ import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import RecommendationRow from '../../components/recommendations/RecommendationRow';
+import Pagination from '../../components/common/Pagination';
 
 const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
   const { addToCart, loading: cartLoading } = useCart();
@@ -250,37 +251,16 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
             ))}
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-2 mt-8">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-4 py-2 text-sm border border-gray-200 rounded-lg disabled:opacity-40 hover:border-gray-300 transition-all"
-              >
-                ← Prev
-              </button>
-              {[...Array(totalPages)].map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setPage(i + 1)}
-                  className={`w-9 h-9 text-sm rounded-lg transition-all
-                    ${page === i + 1
-                      ? 'bg-indigo-600 text-white'
-                      : 'border border-gray-200 text-gray-600 hover:border-gray-300'}`}
-                >
-                  {i + 1}
-                </button>
-              ))}
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-4 py-2 text-sm border border-gray-200 rounded-lg disabled:opacity-40 hover:border-gray-300 transition-all"
-              >
-                Next →
-              </button>
-            </div>
-          )}
+          {/* Pagination — shared numbered control (category/sort filters are
+              preserved automatically: fetchProducts re-reads them on page change) */}
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={(p) => {
+              setPage(p);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         </>
       )}
 

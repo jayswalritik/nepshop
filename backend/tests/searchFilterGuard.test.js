@@ -23,14 +23,26 @@
  *       prompt, survive even when the mock vetoes everything it WAS shown.
  *   (c) weak-tail item vetoed by the mocked LLM is still removed.
  *   (d) items without semantic scores remain vetoable (not auto-protected).
+ *
+ * [Task: search-tuning] Also covers the rescue-pool / rescue-term-cache
+ * guards added on top of the above:
+ *   (e) a rescue-derived tiny pool (options.isRescuePool=true) is judged by
+ *       the LLM instead of being tiny-pool-skipped.
+ *   (f) an organic tiny pool (isRescuePool false/default) still skips —
+ *       regression guard for (a).
+ *   (g) the rescue-term cache returns identical terms on a repeat call
+ *       without a second understandQuery() call.
+ *   (h) a different query still triggers its own fresh call (cache is
+ *       actually keyed, not a blanket "never call again").
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 const assert = require('assert');
 
-// Install the mock BEFORE resultFilter.js is ever required in this process —
-// its `const { generate } = require(...)` destructure happens at that
-// require, so the mutation must land first.
+// Install the mocks BEFORE resultFilter.js / nepShopSearchAdapter.js are
+// ever required in this process — both destructure their LLM dependency
+// (`const { generate } = require(...)`, `const { understandQuery } =
+// require(...)`) at their own top level, so the mutation must land first.
 const ollamaService = require('../services/chatbot/ollamaService');
 let generateCalls = 0;
 let capturedUserPrompt = null;
@@ -42,7 +54,21 @@ ollamaService.generate = async (systemPrompt, userPrompt) => {
   return JSON.stringify({ relevant: mockRelevant });
 };
 
+const queryUnderstanding = require('../services/queryUnderstanding');
+let understandQueryCalls = 0;
+let mockUnderstoodTerms = ['gizmo', 'widget'];
+queryUnderstanding.understandQuery = async (queryText) => {
+  understandQueryCalls++;
+  return { terms: mockUnderstoodTerms };
+};
+
 const { filterResults } = require('../services/resultFilter');
+// nepShopSearchAdapter.js requires ../models/Product at its own top level,
+// but merely requiring it (as opposed to calling searchProducts/
+// getAllSearchCandidates/getZeroResultRescue) never touches the DB — schema
+// registration only. understandQueryCached is the only function exercised
+// here, and it never touches Product/Mongo at all.
+const { understandQueryCached } = require('../services/nepShopSearchAdapter');
 
 let passed = 0;
 let failed = 0;
@@ -116,6 +142,59 @@ const product = (id, name, category, description, searchSemantic) => {
   await test('(d) item with no semantic score (noScore) is vetoable, not auto-protected', async () => {
     assert.ok(capturedUserPrompt.includes('Mystery Accessory'), `expected noScore to have been shown to the LLM, got: ${capturedUserPrompt}`);
     assert.ok(!guardResult.keptIds.includes('noScore'), `expected noScore dropped, got ${JSON.stringify(guardResult.keptIds)}`);
+  });
+
+  // ── (e) Rescue-derived tiny pool -> judged by the LLM, not skipped ────────
+  // r2's semantic score is deliberately far below r1's (well outside
+  // filterProtectMargin) so top-scorer protection doesn't ALSO sweep it in —
+  // this test targets the tiny-pool-skip denial specifically, isolated from
+  // the separate protection mechanism covered by tests (b)-(d).
+  mockRelevant = [1]; // keep the only judged candidate (r2)
+  generateCalls = 0;
+  const rescueTinyPool = [
+    product('r1', 'Rescue Item A', 'Electronics', 'From LLM rescue', 32),
+    product('r2', 'Rescue Item B', 'Electronics', 'From LLM rescue', 5),
+  ];
+  const rescueTinyResult = await filterResults('phone', rescueTinyPool, { isRescuePool: true });
+
+  await test('(e) rescue-derived tiny pool (isRescuePool=true) is judged by the LLM, not tiny-pool-skipped', async () => {
+    assert.strictEqual(generateCalls, 1, `expected exactly 1 generate() call for a rescue-derived tiny pool, got ${generateCalls}`);
+    assert.notStrictEqual(rescueTinyResult.skipReason, 'tinyPool', `expected NOT tinyPool-skipped, got skipReason=${rescueTinyResult.skipReason}`);
+    assert.notStrictEqual(rescueTinyResult.skipReason, 'allProtected', `expected NOT allProtected, got skipReason=${rescueTinyResult.skipReason}`);
+  });
+
+  // ── (f) Organic tiny pool -> still skips (regression guard for (a)) ──────
+  generateCalls = 0;
+  const organicTinyPool = [
+    product('o1', 'Organic Item A', 'Electronics', '', 10),
+    product('o2', 'Organic Item B', 'Electronics', '', 9),
+  ];
+  const organicTinyResult = await filterResults('phone', organicTinyPool, { isRescuePool: false });
+
+  await test('(f) organic tiny pool (isRescuePool=false) still skips the LLM', async () => {
+    assert.strictEqual(generateCalls, 0, `expected generate() never called for an organic tiny pool, got ${generateCalls}`);
+    assert.strictEqual(organicTinyResult.skipReason, 'tinyPool');
+  });
+
+  // ── (g)/(h) Rescue-term cache ──────────────────────────────────────────────
+  understandQueryCalls = 0;
+  mockUnderstoodTerms = ['alpha', 'beta'];
+  const cacheKey = 'cache test query unique 20260721a';
+  const cacheFirst  = await understandQueryCached(cacheKey);
+  const cacheSecond = await understandQueryCached(cacheKey);
+
+  await test('(g) rescue-term cache: identical repeat query returns identical terms without a second LLM call', async () => {
+    assert.strictEqual(understandQueryCalls, 1, `expected exactly 1 understandQuery() call across 2 identical requests, got ${understandQueryCalls}`);
+    assert.deepStrictEqual(cacheSecond, cacheFirst, 'expected identical cached terms on the second call');
+  });
+
+  understandQueryCalls = 0;
+  mockUnderstoodTerms = ['gamma', 'delta'];
+  await understandQueryCached('cache test query unique 20260721b');
+  await understandQueryCached('cache test query unique 20260721c');
+
+  await test('(h) rescue-term cache: a different query still triggers its own fresh LLM call', async () => {
+    assert.strictEqual(understandQueryCalls, 2, `expected 2 separate calls for 2 different queries, got ${understandQueryCalls}`);
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

@@ -171,5 +171,53 @@ test('semanticFloorDelta: semanticFloor itself is untouched in config', () => {
   assert.strictEqual(config.semanticFloor, 0.50);
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// [Task: search-tuning] semanticFloorDelta is now ANCHOR-GATED — the delta
+// only applies when the query has at least one literal (strong or weak)
+// match. The branch-vs-main comparison (docs/search-branch-comparison.md)
+// found the un-gated version above relaxing the floor for EVERY query,
+// letting near-floor noise into genuinely answerless queries ("guitar",
+// "kayak", "asdfghjkl" — nothing in the catalog matches at all).
+//
+// NOTE: the "gizmo widget" fixture above (no literal match for either
+// candidate) now EXCLUDES sibling1 under the new anchor-gated behavior —
+// this directly inverts what that pre-existing test asserts. Per this
+// project's "extend, never replace" testing rule, that assertion is left
+// untouched and is EXPECTED to fail after this change; see the task summary
+// for the full explanation. The two tests below use fresh fixtures to
+// demonstrate the new, correct behavior without touching it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// (a) Answerless: zero literal matches anywhere -> the delta must NOT apply,
+// so a 0.494 near-miss sibling (same shape as the old fixture) is EXCLUDED.
+const answerlessPool = [
+  { _id: 'ans_top',     name: 'Alpha Item', category: 'Electronics', description: '', ...SHARED },
+  { _id: 'ans_sibling', name: 'Beta Item',  category: 'Electronics', description: '', ...SHARED },
+];
+const answerlessSemScores = { ans_top: 0.56, ans_sibling: 0.494 };
+const answerlessResult = runSearch(answerlessPool, 'noise phrase xyz', config, { limit: 20, semanticScores: answerlessSemScores });
+
+test('semanticFloorDelta (anchor-gated): a 0.494 near-miss sibling is EXCLUDED when the query has zero literal matches', () => {
+  const ids = answerlessResult.results.map(p => p._id);
+  assert.ok(!ids.includes('ans_sibling'), `expected ans_sibling excluded (no anchor -> strict floor), got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('ans_top'), `expected ans_top (clears the strict floor on its own) still admitted, got ${JSON.stringify(ids)}`);
+});
+
+// (b) Anchored: a genuine weak (description-only) literal match establishes
+// an anchor -> the delta DOES apply, so a 0.494 near-miss sibling (with NO
+// literal match of its own) is still admitted, same as the original fix.
+const anchoredPool = [
+  { _id: 'anchor_weak',    name: 'Widget Pro',       category: 'Electronics', description: 'A genuine gizmo device for daily use', ...SHARED },
+  { _id: 'anchor_sibling', name: 'Gadget Companion', category: 'Electronics', description: '', ...SHARED },
+];
+const anchoredSemScores = { anchor_weak: 0.56, anchor_sibling: 0.494 };
+const anchoredResult = runSearch(anchoredPool, 'gizmo', config, { limit: 20, semanticScores: anchoredSemScores });
+
+test('semanticFloorDelta (anchor-gated): a 0.494 near-miss sibling is still ADMITTED when a weak literal anchor exists', () => {
+  const ids = anchoredResult.results.map(p => p._id);
+  assert.ok(ids.includes('anchor_weak'), `expected the weak-anchor item present, got ${JSON.stringify(ids)}`);
+  assert.ok(ids.includes('anchor_sibling'), `expected anchor_sibling admitted (anchor present -> relaxed floor), got ${JSON.stringify(ids)}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

@@ -21,6 +21,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
+import Pagination from '../../components/common/Pagination';
+
+// Results per page for the search grid — matches the Shop/browse page and the
+// backend's DEFAULT_SEARCH_PAGE_SIZE so the two surfaces page identically.
+const SEARCH_PAGE_SIZE = 12;
 
 // ── Understanding Card ────────────────────────────────────────────────────────
 const UnderstandingCard = ({ understanding, removedChips, onRemoveChip }) => {
@@ -182,6 +187,9 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
   const [loading, setLoading]           = useState(false);
   const [loadingSlow, setLoadingSlow]   = useState(false);
   const [totalFound, setTotalFound]     = useState(0);
+  const [page, setPage]                 = useState(1);
+  const [totalPages, setTotalPages]     = useState(1);
+  const [total, setTotal]               = useState(0);
   const [toast, setToast]               = useState(null);
   const [removedChips, setRemovedChips] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -206,7 +214,10 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
   // both otherwise look like an identical `initialQuery` prop change.
   const lastCommitNonceRef = useRef(searchCommitNonce);
 
-  const runSearch = useCallback(async (q) => {
+  // pageArg lets the pagination control re-fetch the SAME query at a different
+  // page. A brand-new query (from typing / commit) always calls this with
+  // page 1, so a fresh search resets to the first page automatically.
+  const runSearch = useCallback(async (q, pageArg = 1) => {
     // A new request starting always supersedes whatever was still in flight.
     if (abortControllerRef.current) abortControllerRef.current.abort();
     const controller = new AbortController();
@@ -215,7 +226,9 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
     latestQueryRef.current = q;      // this is now the query we care about
     setLoading(true);
     setLoadingSlow(false);
-    setRemovedChips([]);
+    // Only reset the relaxed-filter chips when the QUERY itself changes, not
+    // when merely paging through the same query's results.
+    if (pageArg === 1) setRemovedChips([]);
 
     // Cold-start / slow-backend escalation: upgrade the loading copy after
     // 3s without swapping the whole loading UI out from under the user.
@@ -224,14 +237,18 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
     }, 3000);
 
     try {
-      const { data } = await API.get(`/search?q=${encodeURIComponent(q)}&limit=20`, {
-        signal: controller.signal,
-      });
+      const { data } = await API.get(
+        `/search?q=${encodeURIComponent(q)}&page=${pageArg}&limit=${SEARCH_PAGE_SIZE}`,
+        { signal: controller.signal },
+      );
       // Ignore this response if a newer query has since been issued.
       if (latestQueryRef.current !== q) return;
       setResults(data.products || []);
       setRescue(data.rescue || []);
       setTotalFound(data.totalFound || 0);
+      setPage(data.page || pageArg);
+      setTotalPages(data.totalPages || 1);
+      setTotal(data.total || 0);
       setUnderstanding(data.understanding);
       setIntent(data.intent);
       setInterpretedAs(data.interpretedAs || null);
@@ -283,6 +300,9 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
       setIntent(null);
       setInterpretedAs(null);
       setTotalFound(0);
+      setPage(1);
+      setTotalPages(1);
+      setTotal(0);
       setLoading(false);
       setLoadingSlow(false);
       return;
@@ -332,6 +352,17 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
       setToast({ type: 'error', message: result.message });
     }
     setTimeout(() => setToast(null), 3000);
+  };
+
+  // Page change: re-fetch the SAME active query (latestQueryRef holds it) at
+  // the new page, and scroll back to the top so the user starts at result 1 of
+  // the new page. The query + filters are preserved because we re-issue the
+  // exact same query string — only the page number differs.
+  const handlePageChange = (nextPage) => {
+    const q = latestQueryRef.current;
+    if (!q) return;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    runSearch(q, nextPage);
   };
 
   // Toggle a chip in/out of the removed set (re-clickable).
@@ -438,7 +469,7 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
           </div>
         ) : (
           <p className="text-sm text-gray-500 mb-4">
-            <span className="font-semibold text-gray-800">{displayResults.length}</span> result{displayResults.length !== 1 ? 's' : ''} for{' '}
+            <span className="font-semibold text-gray-800">{total}</span> result{total !== 1 ? 's' : ''} for{' '}
             <span className="text-indigo-600 font-medium">"{displayQueryLabel}"</span>
           </p>
         )
@@ -446,17 +477,27 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
 
       {/* Results grid */}
       {displayResults.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {displayResults.map((product, i) => (
-            <SearchProductCard
-              key={product._id}
-              product={product}
-              rank={i + 1}
-              onAddToCart={handleAddToCart}
-              onOpenModal={setSelectedProduct}
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {displayResults.map((product, i) => (
+              <SearchProductCard
+                key={product._id}
+                product={product}
+                rank={i + 1}
+                onAddToCart={handleAddToCart}
+                onOpenModal={setSelectedProduct}
+              />
+            ))}
+          </div>
+
+          {/* Shared numbered pagination — same control as the Shop page. Ranked
+              server-side; page 2 continues in relevance order (no re-rank). */}
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            onPageChange={handlePageChange}
+          />
+        </>
       ) : !showRescue ? (
         /* Zero results, no rescue either */
         <div className="bg-white border border-gray-200 rounded-xl p-16 text-center">
