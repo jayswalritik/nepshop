@@ -33,11 +33,27 @@
  *     entirely — the LLM never sees them as an option, so it structurally
  *     cannot veto them, regardless of what it returns.
  *
+ * [Task: search-tuning] The tiny-pool skip is DENIED to rescue-derived pools
+ * (options.isRescuePool, set by the caller — nepShopSearchAdapter.js is the
+ * only place that knows a pool's origin, so this file never infers it). The
+ * branch-vs-main comparison found a real case: the LLM rescue reinterpreted
+ * "ring" as "accessory", which then weak-matched a product literally named
+ * "...with Accessories" (a doll set, not a ring) — a wrong 1-item pool that
+ * the tiny-pool skip let straight through with no sanity check. A rescue
+ * pool's relevance is inherently less trustworthy than an organic one (it's
+ * the LLM's OWN reinterpretation of the query being judged against the
+ * LLM's OWN candidate selection), so it always gets the LLM's judgment
+ * regardless of size. Organic pools keep the ≤3 skip unchanged — that's
+ * still where the real "only 2 phones in the catalog" scarcity lives.
+ * Top-scorer protection is unaffected either way: it still applies to any
+ * pool — rescue-derived or organic — that reaches the LLM.
+ *
  * EXPORTS
- *   filterResults(query, products) -> Promise<{
+ *   filterResults(query, products, options) -> Promise<{
  *     keptIds: string[], fired: boolean, droppedCount: number,
  *     failedOpen: boolean, skipReason: string|null,
  *   }>
+ *   options.isRescuePool: boolean — caller-supplied, see above.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -90,8 +106,9 @@ const failOpen = (products, skipReason) => ({
   skipReason,
 });
 
-const filterResults = async (query, products) => {
+const filterResults = async (query, products, options = {}) => {
   const pool = Array.isArray(products) ? products : [];
+  const isRescuePool = options.isRescuePool === true;
 
   // Nothing to judge — a truly empty pool, never worth an LLM call.
   if (pool.length === 0) return failOpen(pool, 'trivialPool');
@@ -103,7 +120,11 @@ const filterResults = async (query, products) => {
   // nondeterministically vetoed one of the two on different runs. This
   // supersedes the older per-item judging this filter used to do down to a
   // single item — the risk/reward no longer favors it at this scale.
-  if (pool.length <= TINY_POOL_MAX) return failOpen(pool, 'tinyPool');
+  //
+  // [Task: search-tuning] ...UNLESS this pool came from the LLM rescue path
+  // (isRescuePool) — see the file header for the "ring" case this fixes.
+  // Rescue pools always get judged, regardless of size.
+  if (pool.length <= TINY_POOL_MAX && !isRescuePool) return failOpen(pool, 'tinyPool');
 
   const q = (query || '').trim();
   if (!q) return failOpen(pool, 'emptyQuery');

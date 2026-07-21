@@ -60,6 +60,42 @@ const getAllSearchCandidates = async () => {
   return { data: [...data], cacheStatus: 'MISS' };
 };
 
+// ── Rescue-term cache (60s TTL, keyed by normalized query) ───────────────────
+// [Task: search-tuning] understandQuery() is a live Groq call whose output
+// can vary between calls for the same input — the branch-vs-main comparison
+// found "diamond ring"/"green" nondeterministic purely from THIS call (not
+// the result-filter veto, which is already guarded elsewhere). Caching the
+// rescue terms for a short window means repeated identical queries get
+// identical terms without a fresh LLM call each time. Same TTL and Map-based
+// pattern as candidateCache above and rescueCache below (both 60s) — reusing
+// the established convention rather than inventing a new one. A cache read/
+// write failure falls straight through to a live call; this never throws,
+// matching understandQuery's own never-throw contract.
+const rescueTermCache = new Map(); // normalizedQuery -> { understood, fetchedAt }
+const RESCUE_TERM_CACHE_TTL_MS = 60 * 1000;
+
+const understandQueryCached = async (queryText) => {
+  const key = (queryText || '').trim().toLowerCase();
+  try {
+    const cached = rescueTermCache.get(key);
+    if (cached && (Date.now() - cached.fetchedAt) < RESCUE_TERM_CACHE_TTL_MS) {
+      return cached.understood;
+    }
+  } catch (e) {
+    // never let a cache read failure block the live call below
+  }
+
+  const understood = await understandQuery(queryText);
+
+  try {
+    rescueTermCache.set(key, { understood, fetchedAt: Date.now() });
+  } catch (e) {
+    // never let a cache write failure invalidate an otherwise-good live result
+  }
+
+  return understood;
+};
+
 // ── LLM result filter — applied to a runSearch()-shaped result ───────────────
 // Fires ONLY when the result pool has ZERO strong (name/category) literal
 // matches — strongMatchCount is null for browse-style queries (no product
@@ -72,7 +108,16 @@ const getAllSearchCandidates = async () => {
 // rerun) — decided independently each time it's called, per this task's
 // explicit rule that a rerun's exemption depends on ITS OWN strong matches,
 // never inherited from the original query's run.
+//
+// [Task: search-tuning] `stage === 'rescueRerun'` also tells filterResults
+// this pool came from the LLM rescue path (understandQuery's own reinterpre-
+// tation, e.g. "ring" -> "accessory"), so its tiny-pool skip never applies —
+// the adapter is the one place that genuinely knows a pool's origin (it's
+// the caller of both the organic runSearch and the rescue rerun), so this
+// flag is computed HERE and passed down, never inferred inside
+// resultFilter.js itself. See resultFilter.js's isRescuePool handling.
 const applyResultFilter = async (stage, query, searchResult) => {
+  const isRescuePool = stage === 'rescueRerun';
   if (searchResult.results.length === 0) {
     console.log(`[search:filter] ${stage} skipped(emptyPool) kept=0 dropped=0`);
     return { result: searchResult, filterMs: null };
@@ -83,7 +128,7 @@ const applyResultFilter = async (stage, query, searchResult) => {
   }
 
   const tFilter0 = Date.now();
-  const filterInfo = await filterResults(query, searchResult.results);
+  const filterInfo = await filterResults(query, searchResult.results, { isRescuePool });
   const filterMs = Date.now() - tFilter0;
 
   if (!filterInfo.fired) {
@@ -224,7 +269,7 @@ const searchProducts = async (rawQuery, options = {}) => {
     console.log(`[search:rescue] fired reason=${reason} query="${rawQuery}"${embedQuery !== rawQuery ? ` expandedQuery="${embedQuery}"` : ''}`);
 
     const tLLM0 = Date.now();
-    const understood = await understandQuery(embedQuery); // CRITICAL: expanded, not raw — see Task 3
+    const understood = await understandQueryCached(embedQuery); // CRITICAL: expanded, not raw — see Task 3
     rescueLLMMs = Date.now() - tLLM0;
 
     if (understood && understood.terms.length) {
@@ -400,4 +445,5 @@ const getZeroResultRescue = async (intent) => {
 module.exports = {
   searchProducts,
   getZeroResultRescue,
+  understandQueryCached, // exported for isolated (no-DB) cache tests only
 };

@@ -969,8 +969,25 @@ const runSearch = (candidates, rawQuery, config, options = {}) => {
   // noise. Still gated by the SAME relative margin as before — this never
   // widens the window beyond topSem - semMargin, it only softens the
   // absolute floor side of the max(). See searchConfig.js for the derivation.
+  //
+  // [Task: search-tuning] ANCHOR-GATED. The branch-vs-main comparison
+  // (docs/search-branch-comparison.md) showed the un-gated version above
+  // relaxing the floor for EVERY query, not just ones with a literal anchor —
+  // letting near-floor noise into genuinely answerless queries ("guitar",
+  // "kayak", "asdfghjkl": nothing in the catalog matches at all) and
+  // attribute-only queries ("red bag": color-only matches with no product-
+  // noun anchor). The delta is now applied only when the query already has
+  // SOME literal evidence of relevance (strong or weak match) — a real
+  // anchored near-miss sibling (iPhone next to the weak-matched Galaxy A55
+  // for "phone") still gets the relaxed floor; a query with zero literal
+  // matches at all gets the strict, unrelaxed floor, same as before this
+  // feature existed. `strong`/`weak` are already computed above (step 3),
+  // so this never manufactures results out of nothing for an answerless
+  // query — it only widens the window for a query the engine already has
+  // real textual evidence about.
+  const hasLiteralAnchor = strong.length > 0 || weak.length > 0;
   const semFloorDelta = config.semanticFloorDelta != null ? config.semanticFloorDelta : 0;
-  const semCutFloor = semFloor - semFloorDelta;
+  const semCutFloor = hasLiteralAnchor ? (semFloor - semFloorDelta) : semFloor;
   const semCut = Math.max(semCutFloor, topSem - semMargin);
 
   // A weak (description-only) match is corroborated only if it ALSO clears
