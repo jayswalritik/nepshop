@@ -15,6 +15,7 @@ import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import RecommendationRow from '../../components/recommendations/RecommendationRow';
 import Pagination from '../../components/common/Pagination';
+import { PRODUCT_CATEGORIES } from '../../utils/categories';
 
 const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
   const { addToCart, loading: cartLoading } = useCart();
@@ -30,11 +31,12 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
   const [toast, setToast]         = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  const categories = [
-    'Electronics', 'Clothing', 'Food & Grocery', 'Home & Kitchen',
-    'Beauty & Health', 'Sports & Outdoors', 'Books & Stationery',
-    'Toys & Games', 'Automotive', 'Other',
-  ];
+  // Price range. The number inputs update `priceInput` on every keystroke, but
+  // the fetch only re-runs when the range is COMMITTED (Enter / blur) into
+  // `priceApplied` — so we never fire a request per digit. The backend already
+  // accepts minPrice/maxPrice on /api/products (raw price field).
+  const [priceInput, setPriceInput]     = useState({ min: '', max: '' });
+  const [priceApplied, setPriceApplied] = useState({ min: '', max: '' });
 
   // Keep category in sync if the dashboard passes a new initialCategory
   // (e.g. clicking a Home page category tile while already on Shop tab)
@@ -44,13 +46,15 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
 
   useEffect(() => {
     fetchProducts();
-  }, [page, category, sort]);
+  }, [page, category, sort, priceApplied.min, priceApplied.max]);
 
   const fetchProducts = async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page, limit: 12, sort });
       if (category) params.append('category', category);
+      if (priceApplied.min !== '') params.append('minPrice', priceApplied.min);
+      if (priceApplied.max !== '') params.append('maxPrice', priceApplied.max);
 
       const { data } = await API.get(`/products?${params}`);
       setProducts(data.products);
@@ -83,6 +87,24 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
     return product.price;
   };
 
+  // Commit the typed price range (Enter / blur) — reset to page 1, preserving
+  // the current category + sort selections. Only re-fetches if the committed
+  // range actually differs from what's already applied.
+  const applyPrice = () => {
+    if (priceInput.min === priceApplied.min && priceInput.max === priceApplied.max) return;
+    setPriceApplied({ ...priceInput });
+    setPage(1);
+  };
+
+  const clearFilters = () => {
+    setCategory('');
+    setPriceInput({ min: '', max: '' });
+    setPriceApplied({ min: '', max: '' });
+    setPage(1);
+  };
+
+  const hasActiveFilters = category || priceApplied.min !== '' || priceApplied.max !== '';
+
   return (
     <div>
       {/* Toast notification */}
@@ -110,7 +132,7 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
             className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
           >
             <option value="">All Categories</option>
-            {categories.map(c => <option key={c}>{c}</option>)}
+            {PRODUCT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
           </select>
 
           {/* Sort */}
@@ -125,13 +147,35 @@ const ProductsPage = ({ onGoToCart, initialCategory = '' }) => {
             <option value="top_rated">Top Rated</option>
           </select>
 
+          {/* Price range — commits on Enter or blur (not per keystroke) */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-500">Rs</span>
+            <input
+              type="number" min="0" inputMode="numeric" placeholder="Min"
+              value={priceInput.min}
+              onChange={(e) => setPriceInput(p => ({ ...p, min: e.target.value }))}
+              onBlur={applyPrice}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyPrice(); }}
+              className="w-20 px-2 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+            />
+            <span className="text-xs text-gray-400">–</span>
+            <input
+              type="number" min="0" inputMode="numeric" placeholder="Max"
+              value={priceInput.max}
+              onChange={(e) => setPriceInput(p => ({ ...p, max: e.target.value }))}
+              onBlur={applyPrice}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyPrice(); }}
+              className="w-20 px-2 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+            />
+          </div>
+
           {/* Clear */}
-          {category && (
+          {hasActiveFilters && (
             <button
-              onClick={() => { setCategory(''); setPage(1); }}
+              onClick={clearFilters}
               className="px-3 py-2.5 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:border-gray-300 transition-all"
             >
-              Clear filter
+              Clear filters
             </button>
           )}
         </div>

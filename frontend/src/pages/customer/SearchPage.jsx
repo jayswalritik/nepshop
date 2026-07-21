@@ -22,6 +22,7 @@ import API from '../../utils/api';
 import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import Pagination from '../../components/common/Pagination';
+import { PRODUCT_CATEGORIES } from '../../utils/categories';
 
 // Results per page for the search grid — matches the Shop/browse page and the
 // backend's DEFAULT_SEARCH_PAGE_SIZE so the two surfaces page identically.
@@ -194,6 +195,16 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
   const [removedChips, setRemovedChips] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
+  // ── Faceted filters — applied AFTER the ranker (server-side, in the search
+  // controller). UI state drives the controls; `filtersRef` mirrors it so the
+  // stable runSearch callback always reads the latest values when building the
+  // request URL without being recreated on every filter change. Category + sort
+  // commit immediately on change; the price range commits on Enter / blur.
+  const [category, setCategory]     = useState('');
+  const [priceInput, setPriceInput] = useState({ min: '', max: '' });
+  const [sortBy, setSortBy]         = useState('relevance');
+  const filtersRef = useRef({ category: '', minPrice: '', maxPrice: '', sort: 'relevance' });
+
   // Tracks the most recent query we care about. Any response whose query does
   // not match this ref is stale (a slower earlier request) and is discarded.
   // This remains the last-resort guard; AbortController (below) is the
@@ -237,10 +248,18 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
     }, 3000);
 
     try {
-      const { data } = await API.get(
-        `/search?q=${encodeURIComponent(q)}&page=${pageArg}&limit=${SEARCH_PAGE_SIZE}`,
-        { signal: controller.signal },
-      );
+      // Facet params come from filtersRef (kept in sync with the UI state) so
+      // this stable callback always sends the current filters. When they're at
+      // their defaults, no facet params are appended and the URL is identical
+      // to the pre-filter behavior.
+      const f = filtersRef.current;
+      const params = new URLSearchParams({ q, page: pageArg, limit: SEARCH_PAGE_SIZE });
+      if (f.category)        params.append('category', f.category);
+      if (f.minPrice !== '') params.append('minPrice', f.minPrice);
+      if (f.maxPrice !== '') params.append('maxPrice', f.maxPrice);
+      if (f.sort && f.sort !== 'relevance') params.append('sort', f.sort);
+
+      const { data } = await API.get(`/search?${params.toString()}`, { signal: controller.signal });
       // Ignore this response if a newer query has since been issued.
       if (latestQueryRef.current !== q) return;
       setResults(data.products || []);
@@ -303,6 +322,11 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
       setPage(1);
       setTotalPages(1);
       setTotal(0);
+      // Clearing the search also clears the faceted filters (both UI + ref).
+      setCategory('');
+      setPriceInput({ min: '', max: '' });
+      setSortBy('relevance');
+      filtersRef.current = { category: '', minPrice: '', maxPrice: '', sort: 'relevance' };
       setLoading(false);
       setLoadingSlow(false);
       return;
@@ -365,6 +389,46 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
     runSearch(q, nextPage);
   };
 
+  // Re-run the CURRENT active query at page 1 with whatever filters are now in
+  // filtersRef. Respects the same empty-query guard as typing: if there's no
+  // active query, changing a filter never fires a search.
+  const refetchWithFilters = () => {
+    const q = latestQueryRef.current;
+    if (!q || !q.trim()) return;
+    runSearch(q, 1);
+  };
+
+  // Category + sort commit immediately.
+  const handleCategoryChange = (value) => {
+    setCategory(value);
+    filtersRef.current = { ...filtersRef.current, category: value };
+    refetchWithFilters();
+  };
+  const handleSortChange = (value) => {
+    setSortBy(value);
+    filtersRef.current = { ...filtersRef.current, sort: value };
+    refetchWithFilters();
+  };
+  // Price commits on Enter / blur — only re-fetches if the committed range
+  // actually changed from what's already applied in filtersRef.
+  const commitPrice = () => {
+    const { min, max } = priceInput;
+    if (filtersRef.current.minPrice === min && filtersRef.current.maxPrice === max) return;
+    filtersRef.current = { ...filtersRef.current, minPrice: min, maxPrice: max };
+    refetchWithFilters();
+  };
+
+  const hasActiveFilters =
+    category || priceInput.min !== '' || priceInput.max !== '' || sortBy !== 'relevance';
+
+  const clearFilters = () => {
+    setCategory('');
+    setPriceInput({ min: '', max: '' });
+    setSortBy('relevance');
+    filtersRef.current = { category: '', minPrice: '', maxPrice: '', sort: 'relevance' };
+    refetchWithFilters();
+  };
+
   // Toggle a chip in/out of the removed set (re-clickable).
   const handleRemoveChip = (chip) => {
     setRemovedChips(prev => {
@@ -390,6 +454,15 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
   });
 
   const showRescue = !loading && results.length === 0 && rescue.length > 0;
+
+  // Show the filter bar whenever a search has run for a real query (intent is
+  // set) and we're not in zero-result rescue mode. This keeps the bar visible
+  // even when the current filters trimmed the results to zero, so the user can
+  // widen or clear them to recover.
+  const showFilterBar = !!intent && !showRescue;
+  // Filters trimmed a non-empty ranked set down to nothing (vs. a genuine
+  // no-match): tells the empty-state which message to show.
+  const emptyFromFilters = intent && !showRescue && displayResults.length === 0 && hasActiveFilters;
 
   // The label shown for "results/no results for X" — NEVER the internal
   // rewritten query the LLM rescue re-searched with. When interpretedAs is
@@ -434,6 +507,70 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
           <span>{toast.type === 'success' ? '✅' : '⚠️'}</span>
           {toast.message}
           <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">✕</button>
+        </div>
+      )}
+
+      {/* Faceted filters — category + price + sort, applied AFTER the ranker.
+          Default sort is "Relevance" (the ranked order); other sorts reorder
+          the filtered set. Changing any control re-fetches at page 1. */}
+      {showFilterBar && (
+        <div className="bg-white border border-gray-200 rounded-xl p-3 mb-5">
+          <div className="flex gap-2.5 flex-wrap items-center">
+            <span className="text-sm font-medium text-gray-700 mr-1">Filter:</span>
+
+            {/* Category */}
+            <select
+              value={category}
+              onChange={(e) => handleCategoryChange(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+            >
+              <option value="">All Categories</option>
+              {PRODUCT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+
+            {/* Sort — relevance (default) keeps the ranked order */}
+            <select
+              value={sortBy}
+              onChange={(e) => handleSortChange(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+            >
+              <option value="relevance">Sort: Relevance</option>
+              <option value="price_asc">Price: Low to High</option>
+              <option value="price_desc">Price: High to Low</option>
+              <option value="top_rated">Top Rated</option>
+            </select>
+
+            {/* Price range — commits on Enter / blur */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">Rs</span>
+              <input
+                type="number" min="0" inputMode="numeric" placeholder="Min"
+                value={priceInput.min}
+                onChange={(e) => setPriceInput(p => ({ ...p, min: e.target.value }))}
+                onBlur={commitPrice}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitPrice(); }}
+                className="w-20 px-2 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+              />
+              <span className="text-xs text-gray-400">–</span>
+              <input
+                type="number" min="0" inputMode="numeric" placeholder="Max"
+                value={priceInput.max}
+                onChange={(e) => setPriceInput(p => ({ ...p, max: e.target.value }))}
+                onBlur={commitPrice}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitPrice(); }}
+                className="w-20 px-2 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 bg-white"
+              />
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg hover:border-gray-300 transition-all"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -499,14 +636,26 @@ const SearchPage = ({ initialQuery = '', searchCommitNonce = 0, onGoToCart }) =>
           />
         </>
       ) : !showRescue ? (
-        /* Zero results, no rescue either */
+        /* Zero results — either the filters trimmed everything, or a genuine
+           no-match. The filter bar stays visible above so the user can recover. */
         <div className="bg-white border border-gray-200 rounded-xl p-16 text-center">
           <div className="text-5xl mb-4">🔍</div>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">No products found</h3>
-          <p className="text-gray-500 text-sm">
-            No results for <span className="font-medium">"{displayQueryLabel}"</span>
-          </p>
-          <p className="text-gray-400 text-xs mt-2">Try different keywords or clear the search to browse all products</p>
+          {emptyFromFilters ? (
+            <>
+              <p className="text-gray-500 text-sm">
+                No results for <span className="font-medium">"{displayQueryLabel}"</span> with the current filters
+              </p>
+              <p className="text-gray-400 text-xs mt-2">Try widening the price range, changing the category, or clearing the filters</p>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-500 text-sm">
+                No results for <span className="font-medium">"{displayQueryLabel}"</span>
+              </p>
+              <p className="text-gray-400 text-xs mt-2">Try different keywords or clear the search to browse all products</p>
+            </>
+          )}
         </div>
       ) : null}
 
