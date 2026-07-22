@@ -19,7 +19,7 @@ import { getCartSummary } from '../../src/utils/cart';
 import { getAvailableCoupons } from '../../src/utils/coupons';
 import { placeOrder } from '../../src/utils/orders';
 import { initiateKhalti, initiateEsewa } from '../../src/utils/payment';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
 import Dropdown from '../../src/components/Dropdown';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 import { DISTRICTS } from '../../src/constants/districts';
@@ -253,8 +253,8 @@ export default function CheckoutScreen() {
   const canPlaceOrder = !summaryLoading && packages.length > 0 && !placing && !awaitingGateway;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Checkout" onBack={() => router.back()} />
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero title="Checkout" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {/* 1. Delivery address */}
@@ -564,8 +564,8 @@ function TotalRow({ label, value, bold, highlight }) {
 function OrderSuccess({ order }) {
   const shortId = order._id.toString().slice(-8).toUpperCase();
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Order Placed" />
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero title="Order Placed" wordmarkSuffix=" · Customer" />
       <View style={styles.successContainer}>
         <Ionicons name="checkmark-circle" size={64} color={COLORS.success} />
         <Text style={styles.successTitle}>Order placed!</Text>

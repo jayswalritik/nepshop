@@ -6,7 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useWishlist } from '../../src/context/WishlistContext';
 import { addToCart } from '../../src/utils/cart';
 import API from '../../src/utils/api';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
 import ProductCard from '../../src/components/ProductCard';
 import RecommendationRail from '../../src/components/RecommendationRail';
 import Toast from '../../src/components/Toast';
@@ -91,9 +91,10 @@ export default function WishlistScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero
         title="My Wishlist"
+        wordmarkSuffix=" · Customer"
         onBack={() => router.back()}
         subtitle={wishlist.length ? `${wishlist.length} item${wishlist.length > 1 ? 's' : ''}` : undefined}
       />

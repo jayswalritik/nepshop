@@ -15,7 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import API from '../../src/utils/api';
 import { updateCartQuantity, updateCartSelection, removeCartItem, clearCart, getCartSummary, addToCart } from '../../src/utils/cart';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
+import NotificationBellIcon from '../../src/components/NotificationBellIcon';
 import Toast from '../../src/components/Toast';
 import RecommendationRail from '../../src/components/RecommendationRail';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
@@ -231,10 +232,12 @@ export default function CartScreen() {
   const selectedCount = selectedItems.reduce((s, i) => s + i.quantity, 0);
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero
         title="Cart"
         subtitle={cart ? `${cart.itemCount} item${cart.itemCount !== 1 ? 's' : ''}` : undefined}
+        wordmarkSuffix=" · Customer"
+        rightSlot={<NotificationBellIcon color={COLORS.background} onPress={() => router.push('/(customer)/notifications')} />}
       />
 
       {loading ? (

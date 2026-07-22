@@ -8,6 +8,7 @@ import { getNotifications, getUnreadCount, markAllRead, markOneRead } from '../u
 import { navigateForNotification } from '../utils/notificationRouting';
 import { timeAgo } from '../utils/format';
 import ScreenHeader from './ScreenHeader';
+import AppHero from './AppHero';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
 // Shared by both customer and delivery — reached via each role's own
@@ -92,9 +93,18 @@ export default function NotificationsScreen() {
     navigateForNotification(activeRole, notification);
   };
 
+  // Customer gets the shared indigo AppHero (bleeds behind the status bar → no
+  // 'top' inset on the SafeAreaView); delivery keeps its flat ScreenHeader and
+  // 'top' edge exactly as before.
+  const isCustomer = activeRole === 'customer';
+
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Notifications" onBack={() => router.back()} />
+    <SafeAreaView style={styles.screen} edges={isCustomer ? [] : ['top']}>
+      {isCustomer ? (
+        <AppHero title="Notifications" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
+      ) : (
+        <ScreenHeader title="Notifications" onBack={() => router.back()} />
+      )}
 
       {unreadCount > 0 && (
         <View style={styles.markAllRow}>

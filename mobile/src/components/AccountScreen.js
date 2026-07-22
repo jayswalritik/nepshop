@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { ROLE_NAV_CONFIG, homeRouteForRole, notificationsRouteForRole } from '../navigation/roleNavConfig';
 import { updateAvailability } from '../utils/delivery';
 import ScreenHeader from './ScreenHeader';
+import AppHero from './AppHero';
 import NotificationBellIcon from './NotificationBellIcon';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
@@ -76,16 +77,24 @@ export default function AccountScreen() {
     }
   };
 
+  // Customer gets the shared indigo AppHero (bleeds behind the status bar, so
+  // the SafeAreaView must not also add a 'top' inset). Delivery is left exactly
+  // as it was — flat white ScreenHeader, 'top' edge, primary-tinted bell.
+  const isCustomer = activeRole === 'customer';
+  const bell = (
+    <NotificationBellIcon
+      color={isCustomer ? COLORS.background : undefined}
+      onPress={() => router.push(notificationsRouteForRole(activeRole) || '/(customer)/notifications')}
+    />
+  );
+
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader
-        title="Account"
-        rightSlot={
-          <NotificationBellIcon
-            onPress={() => router.push(notificationsRouteForRole(activeRole) || '/(customer)/notifications')}
-          />
-        }
-      />
+    <SafeAreaView style={styles.screen} edges={isCustomer ? [] : ['top']}>
+      {isCustomer ? (
+        <AppHero title="Account" rightSlot={bell} wordmarkSuffix=" · Customer" />
+      ) : (
+        <ScreenHeader title="Account" rightSlot={bell} />
+      )}
       <View style={styles.container}>
         <View style={styles.profile}>
           <View style={styles.avatar}>

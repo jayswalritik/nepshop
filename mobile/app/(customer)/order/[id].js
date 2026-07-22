@@ -5,7 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getOrderById, getOrderSummary, cancelShipment } from '../../../src/utils/orders';
-import ScreenHeader from '../../../src/components/ScreenHeader';
+import AppHero from '../../../src/components/AppHero';
 import Toast from '../../../src/components/Toast';
 import OrderStatusStepper, { StatusBadge } from '../../../src/components/OrderStatusStepper';
 import CancelPackageModal from '../../../src/components/CancelPackageModal';
@@ -120,8 +120,8 @@ export default function OrderDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-        <ScreenHeader title="Order Details" onBack={() => router.back()} />
+      <SafeAreaView style={styles.screen} edges={['bottom']}>
+        <AppHero title="Order Details" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
         <View style={styles.centerFill}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
@@ -131,8 +131,8 @@ export default function OrderDetailScreen() {
 
   if (notFound || !order) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-        <ScreenHeader title="Order Details" onBack={() => router.back()} />
+      <SafeAreaView style={styles.screen} edges={['bottom']}>
+        <AppHero title="Order Details" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
         <View style={styles.centerFill}>
           <Ionicons name="alert-circle-outline" size={40} color={COLORS.tabInactive} />
           <Text style={styles.emptyTitle}>Order not found</Text>
@@ -148,8 +148,8 @@ export default function OrderDetailScreen() {
   const hasRemovedShipment = shipments.some(isRemoved) && shipments.some((s) => !isRemoved(s));
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <ScreenHeader title="Order Details" onBack={() => router.back()} />
+    <SafeAreaView style={styles.screen} edges={['bottom']}>
+      <AppHero title="Order Details" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
         {/* Summary */}
         <View style={styles.section}>

@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/context/AuthContext';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
 import RoleUpgrade from '../../src/components/RoleUpgrade';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 
@@ -75,8 +75,8 @@ export default function ProfileScreen() {
   const roles = (user?.roles && user.roles.length ? user.roles : [user?.role]).join(', ');
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Profile" onBack={() => router.back()} />
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero title="Profile" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
       <ScrollView contentContainerStyle={styles.content}>
         {/* Avatar card */}
         <View style={styles.card}>

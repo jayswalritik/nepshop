@@ -16,7 +16,7 @@ import API from '../../src/utils/api';
 import { addToCart } from '../../src/utils/cart';
 import { useWishlist } from '../../src/context/WishlistContext';
 import ProductCard from '../../src/components/ProductCard';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
 import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 import { CATEGORIES } from '../../src/constants/categories';
@@ -129,9 +129,10 @@ export default function ProductsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <ScreenHeader
+    <SafeAreaView style={styles.screen} edges={['bottom']}>
+      <AppHero
         title="All Products"
+        wordmarkSuffix=" · Customer"
         onBack={() => router.back()}
         subtitle={
           !loading
