@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { ROLE_NAV_CONFIG, homeRouteForRole, notificationsRouteForRole } from '../navigation/roleNavConfig';
 import { updateAvailability } from '../utils/delivery';
 import ScreenHeader from './ScreenHeader';
+import AppHero from './AppHero';
 import DeliveryHero from './DeliveryHero';
 import NotificationBellIcon from './NotificationBellIcon';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
@@ -87,18 +88,24 @@ export default function AccountScreen() {
     }
   };
 
+  const isCustomer = activeRole === 'customer';
+  // Both hero paths (customer AppHero, delivery DeliveryHero) sit on the indigo
+  // gradient, so the bell is white on both; only the flat ScreenHeader fallback
+  // keeps the default primary tint.
   const bell = (
     <NotificationBellIcon
-      color={isDelivery ? '#fff' : undefined}
+      color={isCustomer || isDelivery ? COLORS.background : undefined}
       onPress={() => router.push(notificationsRouteForRole(activeRole) || '/(customer)/notifications')}
     />
   );
 
   return (
-    // The hero supplies its own top inset, so the delivery path must not also
-    // apply the 'top' edge here or the header would be double-padded.
-    <SafeAreaView style={styles.screen} edges={isDelivery ? [] : ['top']}>
-      {isDelivery ? (
+    // Either hero supplies its own top inset, so neither hero path applies the
+    // 'top' edge here (that would double-pad); only the flat ScreenHeader does.
+    <SafeAreaView style={styles.screen} edges={isCustomer || isDelivery ? [] : ['top']}>
+      {isCustomer ? (
+        <AppHero title="Account" rightSlot={bell} wordmarkSuffix=" · Customer" />
+      ) : isDelivery ? (
         <>
           <StatusBar style="light" />
           {/* Slim wordmark bar: with no icon/title/subtitle passed, DeliveryHero

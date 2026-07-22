@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyOrders, cancelOrder, cancelShipment, getOrderSummary } from '../../src/utils/orders';
 import { getMyReturns } from '../../src/utils/returns';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
 import NotificationBellIcon from '../../src/components/NotificationBellIcon';
 import Dropdown from '../../src/components/Dropdown';
 import Toast from '../../src/components/Toast';
@@ -158,10 +158,11 @@ export default function OrdersScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero
         title="My Orders"
-        rightSlot={<NotificationBellIcon onPress={() => router.push('/(customer)/notifications')} />}
+        wordmarkSuffix=" · Customer"
+        rightSlot={<NotificationBellIcon color={COLORS.background} onPress={() => router.push('/(customer)/notifications')} />}
       />
 
       <View style={styles.filterRow}>

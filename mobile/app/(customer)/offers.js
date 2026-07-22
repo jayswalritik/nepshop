@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import API from '../../src/utils/api';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import AppHero from '../../src/components/AppHero';
 import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 import { formatRs } from '../../src/utils/format';
@@ -61,8 +61,8 @@ export default function OffersScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Offers & Coupons" onBack={() => router.back()} subtitle="Apply these codes at checkout to save" />
+    <SafeAreaView style={styles.screen} edges={[]}>
+      <AppHero title="Offers & Coupons" onBack={() => router.back()} subtitle="Apply these codes at checkout to save" wordmarkSuffix=" · Customer" />
 
       {loading ? (
         <View style={styles.centerFill}>
