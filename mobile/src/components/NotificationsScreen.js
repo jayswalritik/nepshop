@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,6 +11,7 @@ import { navigateForNotification } from '../utils/notificationRouting';
 import { timeAgo } from '../utils/format';
 import ScreenHeader from './ScreenHeader';
 import AppHero from './AppHero';
+import DeliveryHero from './DeliveryHero';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
 // Category glyph per notification type. Reuses the EXACT `type` values
@@ -128,15 +130,24 @@ export default function NotificationsScreen() {
     navigateForNotification(activeRole, notification);
   };
 
-  // Customer gets the shared indigo AppHero (bleeds behind the status bar → no
-  // 'top' inset on the SafeAreaView); delivery keeps its flat ScreenHeader and
-  // 'top' edge exactly as before.
+  // Customer gets the shared indigo AppHero; delivery now gets the matching
+  // DeliveryHero ("NepShop · Delivery") with a back arrow, in place of the flat
+  // ScreenHeader — same treatment AccountScreen's delivery path uses (StatusBar
+  // light + contentPaddingBottom SPACING.md). Both heroes bleed behind the
+  // status bar, so neither applies the 'top' edge (that would double-pad); any
+  // other role falls back to the flat ScreenHeader with the 'top' edge.
   const isCustomer = activeRole === 'customer';
+  const isDelivery = activeRole === 'delivery';
 
   return (
-    <SafeAreaView style={styles.screen} edges={isCustomer ? [] : ['top']}>
+    <SafeAreaView style={styles.screen} edges={isCustomer || isDelivery ? [] : ['top']}>
       {isCustomer ? (
         <AppHero title="Notifications" onBack={() => router.back()} wordmarkSuffix=" · Customer" />
+      ) : isDelivery ? (
+        <>
+          <StatusBar style="light" />
+          <DeliveryHero title="Notifications" onBack={() => router.back()} contentPaddingBottom={SPACING.md} />
+        </>
       ) : (
         <ScreenHeader title="Notifications" onBack={() => router.back()} />
       )}

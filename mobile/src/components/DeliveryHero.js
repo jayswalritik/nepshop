@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +25,7 @@ export default function DeliveryHero({
   icon,
   title,
   subtitle,
+  onBack,
   rightSlot,
   children,
   contentPaddingBottom = SPACING.xl,
@@ -46,6 +47,11 @@ export default function DeliveryHero({
       ) : null}
 
       <View style={styles.heroTopRow}>
+        {onBack ? (
+          <Pressable onPress={onBack} hitSlop={10} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={22} color={COLORS.background} />
+          </Pressable>
+        ) : null}
         <View style={styles.heroTitleWrap}>
           {/* Two-tone wordmark, same structure as Home's banner
               (home.js:152-154) and AuthHero: the nested span sets colour
@@ -86,6 +92,21 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
   },
   heroTitleWrap: { flex: 1 },
+  // Optional back arrow — mirrors AppHero's glyph exactly (arrow-back, size 22,
+  // white COLORS.background, 32×32 touch target, hitSlop 10). Rendered only when
+  // onBack is passed and sits at the START of the top row, opposite rightSlot,
+  // so it never collides with the bell. When absent it renders nothing, so
+  // existing callers (deliveries/earnings/returns/profile/Account) are byte-for-
+  // byte unchanged. marginRight gives the wordmark the same breathing room
+  // AppHero's brandRow gap provides.
+  backButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -SPACING.xs,
+    marginRight: SPACING.sm,
+  },
   // Wordmark line. No textTransform and no letterSpacing by design — see the
   // comment at the JSX. White base so "Nep" reads as brand, not as muted
   // eyebrow text; only "Shop" and the role suffix override colour.
