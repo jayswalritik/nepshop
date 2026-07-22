@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,6 +11,26 @@ import { timeAgo } from '../utils/format';
 import ScreenHeader from './ScreenHeader';
 import AppHero from './AppHero';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
+
+// Category glyph per notification type. Reuses the EXACT `type` values
+// navigateForNotification (mobile/src/utils/notificationRouting.js) switches
+// on — PAYOUT_PROCESSED / EARNINGS_RELEASED (delivery) and COUPON_PUBLISHED
+// (customer). Every other or absent type (order & return updates route by
+// data.* there, not by type) falls back to the neutral bell so nothing renders
+// blank. The icon COLOUR is decided at the call site from read state, not here,
+// so unread rows read as primary and read rows as muted.
+const iconForType = (type) => {
+  switch (type) {
+    case 'PAYOUT_PROCESSED':
+      return 'cash-outline';
+    case 'EARNINGS_RELEASED':
+      return 'wallet-outline';
+    case 'COUPON_PUBLISHED':
+      return 'pricetag-outline';
+    default:
+      return 'notifications-outline';
+  }
+};
 
 // Shared by both customer and delivery — reached via each role's own
 // "notifications" hidden route (mobile/src/navigation/roleNavConfig.js),
@@ -33,6 +54,12 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(false);
+
+  // Distinguishes "load failed" from "genuinely empty": the error view only
+  // takes over when nothing is on screen yet. A pull-refresh that fails on top
+  // of existing content keeps the list (quiet failure, prior behavior).
+  const hasDataRef = useRef(false);
 
   const fetchFirstPage = useCallback(async (isRefresh) => {
     if (isRefresh) setRefreshing(true);
@@ -42,6 +69,12 @@ export default function NotificationsScreen() {
       setNotifications(result.notifications);
       setPage(1);
       setHasMore(result.hasMore);
+      setError(false);
+      hasDataRef.current = result.notifications.length > 0;
+    } else if (!hasDataRef.current) {
+      // Nothing already shown → surface the error view. If we DO have content,
+      // leave the list untouched and fail quietly.
+      setError(true);
     }
     setLoading(false);
     setRefreshing(false);
@@ -78,6 +111,8 @@ export default function NotificationsScreen() {
       const now = new Date().toISOString();
       setNotifications((prev) => prev.map((n) => ({ ...n, readAt: n.readAt || now })));
       setUnreadCount(0);
+    } else {
+      Alert.alert("Couldn't mark all as read", 'Please try again.');
     }
   };
 
@@ -118,6 +153,21 @@ export default function NotificationsScreen() {
         <View style={styles.centerFill}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
+      ) : error ? (
+        <ScrollView
+          contentContainerStyle={styles.emptyContainer}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.primary} />}
+        >
+          <View style={styles.centerFill}>
+            <Ionicons name="cloud-offline-outline" size={44} color={COLORS.tabInactive} />
+            <Text style={styles.emptyTitle}>Couldn&apos;t load notifications</Text>
+            <Text style={styles.emptyBody}>Check your connection and try again.</Text>
+            <Pressable style={styles.retryButton} onPress={() => fetchFirstPage(false)}>
+              <Ionicons name="refresh" size={15} color={COLORS.background} />
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       ) : notifications.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
@@ -141,14 +191,20 @@ export default function NotificationsScreen() {
               style={[styles.row, !n.readAt && styles.rowUnread]}
               onPress={() => handlePressRow(n)}
             >
-              <View style={styles.rowTop}>
+              <View style={styles.rowIcon}>
+                <Ionicons
+                  name={iconForType(n.type)}
+                  size={20}
+                  color={!n.readAt ? COLORS.primary : COLORS.tabInactive}
+                />
+              </View>
+              <View style={styles.rowContent}>
                 <Text style={[styles.rowTitle, !n.readAt && styles.rowTitleUnread]} numberOfLines={2}>
                   {n.title}
                 </Text>
-                {!n.readAt && <View style={styles.unreadDot} />}
+                {n.body ? <Text style={styles.rowBody} numberOfLines={3}>{n.body}</Text> : null}
+                <Text style={styles.rowTime}>{timeAgo(n.createdAt)}</Text>
               </View>
-              {n.body ? <Text style={styles.rowBody} numberOfLines={3}>{n.body}</Text> : null}
-              <Text style={styles.rowTime}>{timeAgo(n.createdAt)}</Text>
             </Pressable>
           ))}
 
@@ -184,6 +240,9 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1, backgroundColor: COLORS.background },
   list: { padding: SPACING.lg, paddingBottom: 32, gap: SPACING.sm },
   row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.md,
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -192,10 +251,10 @@ const styles = StyleSheet.create({
     ...SHADOWS.card,
   },
   rowUnread: { backgroundColor: COLORS.primarySoft, borderColor: COLORS.primarySoft },
-  rowTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: SPACING.sm },
-  rowTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: COLORS.text },
+  rowIcon: { width: 24, alignItems: 'center', marginTop: 1 },
+  rowContent: { flex: 1 },
+  rowTitle: { fontSize: 14, fontWeight: '600', color: COLORS.text },
   rowTitleUnread: { color: COLORS.primary, fontWeight: '700' },
-  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.primary, marginTop: 4 },
   rowBody: { fontSize: 12.5, color: COLORS.textMuted, marginTop: 3 },
   rowTime: { fontSize: 11, color: COLORS.tabInactive, marginTop: 5 },
   loadMoreButton: {
@@ -208,4 +267,15 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   loadMoreText: { fontSize: 13, fontWeight: '600', color: COLORS.primary },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    borderRadius: RADII.sm,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.sm + 2,
+    marginTop: SPACING.md,
+  },
+  retryButtonText: { fontSize: 13, fontWeight: '700', color: COLORS.background },
 });
