@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_NAV_CONFIG, homeRouteForRole, notificationsRouteForRole } from '../navigation/roleNavConfig';
 import { updateAvailability } from '../utils/delivery';
 import ScreenHeader from './ScreenHeader';
+import DeliveryHero from './DeliveryHero';
 import NotificationBellIcon from './NotificationBellIcon';
 import { COLORS, RADII, SHADOWS, SPACING } from '../constants/colors';
 
@@ -26,6 +28,15 @@ export default function AccountScreen() {
   const roles = user?.roles && user.roles.length ? user.roles : [user?.role];
   const activeRole = user?.activeRole || user?.role;
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
+
+  // This screen is shared with the customer tab. Delivery gets a slim indigo
+  // "NepShop · Delivery" wordmark bar in place of the flat white ScreenHeader;
+  // that wordmark would be plainly wrong above a customer's account, hence the
+  // gate rather than an unconditional header swap. The centred profile block
+  // (avatar / name / email / role pill) is shared by BOTH roles below —
+  // identity is NOT folded into the delivery hero, so the name never appears
+  // twice.
+  const isDelivery = activeRole === 'delivery';
 
   // Mirrors frontend/src/components/common/RoleSwitcher.jsx exactly: hidden
   // entirely for single-role accounts or anyone holding admin (regardless
@@ -76,17 +87,34 @@ export default function AccountScreen() {
     }
   };
 
+  const bell = (
+    <NotificationBellIcon
+      color={isDelivery ? '#fff' : undefined}
+      onPress={() => router.push(notificationsRouteForRole(activeRole) || '/(customer)/notifications')}
+    />
+  );
+
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader
-        title="Account"
-        rightSlot={
-          <NotificationBellIcon
-            onPress={() => router.push(notificationsRouteForRole(activeRole) || '/(customer)/notifications')}
-          />
-        }
-      />
+    // The hero supplies its own top inset, so the delivery path must not also
+    // apply the 'top' edge here or the header would be double-padded.
+    <SafeAreaView style={styles.screen} edges={isDelivery ? [] : ['top']}>
+      {isDelivery ? (
+        <>
+          <StatusBar style="light" />
+          {/* Slim wordmark bar: with no icon/title/subtitle passed, DeliveryHero
+              degrades to just the "NepShop · Delivery" wordmark on the left and
+              the bell on the right (the person glyph and title lines are all
+              conditional in the shell). A tighter contentPaddingBottom trims the
+              default hero height. Identity now lives in the shared profile block
+              below, so the name is never duplicated. */}
+          <DeliveryHero title="Account" rightSlot={bell} contentPaddingBottom={SPACING.md} />
+        </>
+      ) : (
+        <ScreenHeader title="Account" rightSlot={bell} />
+      )}
       <View style={styles.container}>
+        {/* Shared by both roles — byte-identical markup, only the header above
+            differs. */}
         <View style={styles.profile}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{initials || '?'}</Text>
@@ -100,6 +128,9 @@ export default function AccountScreen() {
 
         {activeRole === 'delivery' && (
           <View style={styles.availabilityCard}>
+            <View style={styles.rowIconWrap}>
+              <Ionicons name="radio-outline" size={18} color={COLORS.primary} />
+            </View>
             <View style={styles.availabilityTextWrap}>
               <Text style={styles.availabilityLabel}>Availability</Text>
               <Text style={styles.availabilitySub}>
@@ -247,6 +278,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: SPACING.md,
     backgroundColor: COLORS.card,
     borderRadius: RADII.md,
     borderWidth: 1,
@@ -255,7 +287,7 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
     ...SHADOWS.card,
   },
-  availabilityTextWrap: { flex: 1, marginRight: SPACING.md },
+  availabilityTextWrap: { flex: 1 },
   availabilityLabel: { fontSize: 14, fontWeight: '700', color: COLORS.text },
   availabilitySub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   row: {

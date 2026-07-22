@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/context/AuthContext';
-import ScreenHeader from '../../src/components/ScreenHeader';
 import RoleUpgrade from '../../src/components/RoleUpgrade';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 
@@ -21,10 +23,16 @@ import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 // call web's handleSave makes — the locked name fields still ride along in
 // the payload unchanged (a no-op server-side), profile AND payout fields
 // submitted together in one request, not two.
+// Khalti/eSewa carry their real brand logos — the same PNGs the customer
+// checkout already ships (app/(customer)/checkout.js:60-61,
+// mobile/assets/payment-logos/). Bank Transfer has no brand mark, so it takes
+// a tokenized Ionicon rather than a lone emoji beside two real logos; that
+// keeps the three chips reading as one set. `key`/`label` are unchanged —
+// selection state and the PUT payload are untouched.
 const PAYOUT_METHODS = [
-  { key: 'bank', label: 'Bank Transfer', icon: '🏦' },
-  { key: 'khalti', label: 'Khalti', icon: '💜' },
-  { key: 'esewa', label: 'eSewa', icon: '💚' },
+  { key: 'bank', label: 'Bank Transfer', icon: 'business' },
+  { key: 'khalti', label: 'Khalti', logo: require('../../assets/payment-logos/khalti-logo.png') },
+  { key: 'esewa', label: 'eSewa', logo: require('../../assets/payment-logos/esewa-logo.png') },
 ];
 
 // firstName/lastName are locked (not user-editable), so they can never fail
@@ -38,6 +46,7 @@ const validate = (form) => {
 };
 
 export default function DeliveryProfileScreen() {
+  const insets = useSafeAreaInsets();
   const { user, updateProfile } = useAuth();
   const [form, setForm] = useState({
     firstName: user?.firstName || '',
@@ -97,14 +106,41 @@ export default function DeliveryProfileScreen() {
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <ScreenHeader title="Profile & Payout" onBack={() => router.back()} />
+    // Local branded header: DeliveryHero has no left slot to host a back arrow,
+    // so this bar reproduces the exact two-tone wordmark treatment ("Shop" in
+    // accentLight, no textTransform) on the same indigo gradient the other
+    // delivery screens open with, plus the back affordance the shell can't
+    // place. The gradient bleeds behind the status bar (own top inset), so the
+    // outer wrapper is a plain View, not a SafeAreaView with a 'top' edge.
+    <View style={styles.screen}>
+      <StatusBar style="light" />
+      <LinearGradient
+        colors={[COLORS.primaryDark, COLORS.primary]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.header, { paddingTop: insets.top + SPACING.md }]}
+      >
+        <Pressable onPress={() => router.back()} hitSlop={10} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
+        </Pressable>
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerBrand}>
+            Nep<Text style={{ color: COLORS.accentLight }}>Shop</Text>
+            <Text style={styles.headerBrandRole}> · Delivery</Text>
+          </Text>
+          <Text style={styles.headerTitle}>Profile &amp; Payout</Text>
+        </View>
+      </LinearGradient>
+      <SafeAreaView style={styles.flex} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
         <RoleUpgrade />
 
         {/* Personal info */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Personal Information</Text>
+          <View style={styles.cardHeader}>
+            <Ionicons name="person-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.cardTitle}>Personal Information</Text>
+          </View>
           <Text style={styles.cardSubtitle}>Update your name and contact details</Text>
 
           {success ? (
@@ -157,7 +193,10 @@ export default function DeliveryProfileScreen() {
 
         {/* Payout details */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Payout Details</Text>
+          <View style={styles.cardHeader}>
+            <Ionicons name="wallet-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.cardTitle}>Payout Details</Text>
+          </View>
           <Text style={styles.cardSubtitle}>How you want to receive your delivery earnings from NepShop</Text>
 
           <Text style={styles.label}>Preferred payout method</Text>
@@ -168,7 +207,13 @@ export default function DeliveryProfileScreen() {
                 style={[styles.methodChip, form.preferredMethod === m.key && styles.methodChipActive]}
                 onPress={() => handleChange('preferredMethod', m.key)}
               >
-                <Text style={styles.methodChipIcon}>{m.icon}</Text>
+                {m.logo ? (
+                  <Image source={m.logo} style={styles.methodChipLogo} resizeMode="contain" />
+                ) : (
+                  <View style={styles.methodChipGlyph}>
+                    <Ionicons name={m.icon} size={18} color={COLORS.primary} />
+                  </View>
+                )}
                 <Text style={[styles.methodChipText, form.preferredMethod === m.key && styles.methodChipTextActive]}>
                   {m.label}
                 </Text>
@@ -249,7 +294,10 @@ export default function DeliveryProfileScreen() {
 
         {/* Account info */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Account Information</Text>
+          <View style={styles.cardHeader}>
+            <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.cardTitle}>Account Information</Text>
+          </View>
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Vehicle Type</Text>
             <Text style={styles.detailValue}>{user?.vehicleType || 'Not set'}</Text>
@@ -279,13 +327,40 @@ export default function DeliveryProfileScreen() {
           )}
         </Pressable>
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
+  flex: { flex: 1 },
   content: { padding: SPACING.lg, paddingBottom: 32 },
+
+  // ── Branded header ────────────────────────────────────────────────────
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.md,
+    borderBottomLeftRadius: RADII.xl,
+    borderBottomRightRadius: RADII.xl,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: RADII.pill,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  headerTitleWrap: { flex: 1 },
+  // Same recipe as DeliveryHero's wordmark: white base so "Nep" reads as
+  // brand, accentLight only on "Shop", no textTransform / letterSpacing.
+  headerBrand: { fontSize: 13, fontWeight: '700', color: '#fff', marginBottom: 3 },
+  headerBrandRole: { color: COLORS.heroText, fontWeight: '600' },
+  headerTitle: { fontSize: 20, fontWeight: '700', color: COLORS.background },
   card: {
     backgroundColor: COLORS.card,
     borderWidth: 1,
@@ -295,12 +370,13 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
     ...SHADOWS.card,
   },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text, marginBottom: 2 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: 2 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: COLORS.text },
   cardSubtitle: { fontSize: 12.5, color: COLORS.textMuted, marginBottom: SPACING.lg },
   successBox: {
     backgroundColor: COLORS.successSoft,
     borderWidth: 1,
-    borderColor: '#BBF7D0',
+    borderColor: COLORS.success,
     borderRadius: RADII.sm,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm + 2,
@@ -310,7 +386,7 @@ const styles = StyleSheet.create({
   errorBox: {
     backgroundColor: COLORS.dangerSoft,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: COLORS.danger,
     borderRadius: RADII.sm,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm + 2,
@@ -353,13 +429,17 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm + 2,
   },
   methodChipActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primarySoft },
-  methodChipIcon: { fontSize: 16 },
+  // Both variants occupy the same 20px band so the three chips stay the same
+  // height. resizeMode="contain" letterboxes each logo inside the chip width,
+  // so the differing aspect ratios don't reach the chip edges.
+  methodChipLogo: { width: '100%', height: 20 },
+  methodChipGlyph: { height: 20, alignItems: 'center', justifyContent: 'center' },
   methodChipText: { fontSize: 11.5, fontWeight: '600', color: COLORS.textMuted },
   methodChipTextActive: { color: COLORS.primary },
   noticeBox: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: COLORS.infoSoft,
     borderWidth: 1,
-    borderColor: '#C7D2FE',
+    borderColor: COLORS.info,
     borderRadius: RADII.md,
     padding: SPACING.md,
     marginTop: SPACING.xs,
