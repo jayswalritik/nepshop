@@ -9,6 +9,7 @@ const {
   updateDeliveryProfile,
   forgotPassword,
   resetPassword,
+  changePassword,
   applyForRole,
   approveRoleRequest,
   rejectRoleRequest,
@@ -104,6 +105,9 @@ router.post('/forgot-password', forgotPassword);
 
 // PUT /api/auth/reset-password/:token
 router.put('/reset-password/:token', resetPassword);
+
+// PUT /api/auth/change-password  (protected — any authenticated role)
+router.put('/change-password', protect, changePassword);
 
 // Multi-role — apply for a new role (any authenticated user)
 router.post('/apply-role', protect, applyForRole);

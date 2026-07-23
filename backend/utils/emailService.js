@@ -400,6 +400,27 @@ const sendPasswordResetEmail = (user, resetUrl) => sendEmail({
   `,
 });
 
+// 2b. Password changed — security notice (no token, no reset-with-token link
+// exists to offer; this is a plain "it was changed" heads-up).
+const sendPasswordChangedEmail = (user) => sendEmail({
+  to:        user.email,
+  subject:   'Your NepShop password was changed',
+  preheader: 'Your account password was just changed. If this wasn\'t you, contact support immediately.',
+  html: `
+    ${hero('🔒', 'Password Changed', `Hi ${user.firstName}, this confirms that your NepShop account password was just changed.`, 'Security Notice', '#16a34a')}
+    ${section(`
+      ${infoBox([
+        ['Account', user.email],
+        ['Changed', formatDateTime(new Date())],
+      ])}
+      <p style="color:#374151;font-size:14px;line-height:1.7;margin:16px 0 8px;">
+        If you made this change, no further action is needed.
+      </p>
+      ${alertBox('If you did <strong>not</strong> change your password, your account may be at risk. Please reset your password immediately from the sign-in page and contact us at <a href="mailto:support@nepshop.com" style="color:#991b1b;">support@nepshop.com</a>.', 'danger')}
+    `)}
+  `,
+});
+
 // 3. Order placed confirmation
 const sendOrderPlacedEmail = (user, order) => sendEmail({
   to:        user.email,
@@ -1308,6 +1329,7 @@ module.exports = {
   sendWelcomeEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  sendPasswordChangedEmail,
   sendOrderPlacedEmail,
   sendOrderStatusEmail,
   sendPaymentSuccessEmail,

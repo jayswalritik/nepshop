@@ -508,6 +508,71 @@ const resetPassword = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────
+// @desc    Change password for the logged-in user
+// @route   PUT /api/auth/change-password
+// @access  Authenticated (any role) — acts only on the caller's own account
+// ─────────────────────────────────────────────────────────
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    res.status(400);
+    throw new Error('Current password and new password are required');
+  }
+
+  // The password field is `select: false`, so req.user and a plain findById
+  // never carry the hash — re-query with it explicitly so matchPassword works.
+  // Always the authenticated user only; no id/email/role is accepted from the
+  // body, so this can never target another account.
+  const user = await User.findById(req.user._id).select('+password');
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  // Verify the current password with the same bcrypt comparison login uses.
+  const isMatch = await user.matchPassword(currentPassword);
+  if (!isMatch) {
+    res.status(401);
+    throw new Error('Current password is incorrect');
+  }
+
+  // Enforce the same strength rules the web reset page applies (min 8 chars,
+  // at least one uppercase letter, at least one number) — server-side.
+  if (
+    newPassword.length < 8 ||
+    !/[A-Z]/.test(newPassword) ||
+    !/[0-9]/.test(newPassword)
+  ) {
+    res.status(400);
+    throw new Error('New password must be at least 8 characters and include an uppercase letter and a number');
+  }
+
+  // Reject a no-op change.
+  if (newPassword === currentPassword) {
+    res.status(400);
+    throw new Error('New password must be different from your current password');
+  }
+
+  // Assign plaintext and let the pre('save') hook hash it — never bcrypt here
+  // (mirrors resetPassword above). The session/token is intentionally left
+  // untouched: the user stays logged in.
+  user.password = newPassword;
+  await user.save();
+
+  // Security-notice email — fire-and-forget (matches how other handlers call
+  // email senders). sendEmail swallows its own failures, so a delivery
+  // problem can never fail the password change.
+  const { sendPasswordChangedEmail } = require('../utils/emailService');
+  sendPasswordChangedEmail(user);
+
+  res.status(200).json({
+    success: true,
+    message: 'Password changed successfully.',
+  });
+});
+
+// ─────────────────────────────────────────────────────────
 // @desc    Apply to add a new role (seller or delivery)
 // @route   POST /api/auth/apply-role
 // @access  Authenticated users
@@ -848,6 +913,7 @@ module.exports = {
   updateDeliveryProfile,
   forgotPassword,
   resetPassword,
+  changePassword,
   applyForRole,
   approveRoleRequest,
   rejectRoleRequest,
