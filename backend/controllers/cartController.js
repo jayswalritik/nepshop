@@ -2,7 +2,6 @@ const asyncHandler = require('express-async-handler');
 const Cart = require('../models/Cart');
 const Product = require('../models/Product');
 const { isSelected, isStale } = require('../utils/cartSelection');
-const { groupItemsBySeller, allocateCouponDiscount, round2 } = require('../utils/orderPricing');
 const { buildCartSummary } = require('../utils/cartSummary');
 
 // Nested-populates the seller's shop name too — the frontend groups the

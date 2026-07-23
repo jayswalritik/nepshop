@@ -1,23 +1,18 @@
 /**
  * Chatbot Cart Actions  (backend/services/chatbot/cartActions.js)
- * Grounding for the view-cart intent — reads the SAME Cart document the cart
- * page uses, including the price snapshots taken at add time.
+ * Grounding for the view-cart intent. Delegates ALL cart shaping + money to the
+ * shared buildCartSummary (backend/utils/cartSummary.js) — the SAME builder the
+ * /cart/summary endpoint uses — asking for the excluded groups too so the reply
+ * can show ticked / not-ticked / stale items. No money arithmetic lives here.
  */
 
-const Cart = require('../../models/Cart');
+const { buildCartSummary } = require('../../utils/cartSummary');
 
-const getCartContents = async (userId) => {
-  const cart = await Cart.findOne({ customer: userId })
-    .populate('items.product', 'name images price discount stock isActive category rating')
-    .lean();
-
-  if (!cart) return { items: [], total: 0, itemCount: 0 };
-
-  const validItems = (cart.items || []).filter((i) => i.product && i.product.isActive);
-  const total      = validItems.reduce((s, i) => s + i.price * i.quantity, 0);
-  const itemCount  = validItems.reduce((s, i) => s + i.quantity, 0);
-
-  return { items: validItems, total, itemCount };
-};
+// Returns the full cart summary INCLUDING the chatbot-only excluded groups
+// (notSelectedItems, staleItems). Every money figure comes from buildCartSummary;
+// nothing is summed or multiplied here. No coupon is previewed in a plain
+// "what's in my cart" view — coupons are applied at checkout.
+const getCartContents = (userId) =>
+  buildCartSummary({ userId, includeExcluded: true });
 
 module.exports = { getCartContents };

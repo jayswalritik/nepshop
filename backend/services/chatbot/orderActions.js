@@ -107,13 +107,19 @@ const toChatOrder = (o) => {
     agentName:   o.deliveryAgent
       ? `${o.deliveryAgent.firstName} ${o.deliveryAgent.lastName}`
       : null,
-    // TASK 3 — refund is now shipment-level. The order-level 'returned' sentence
-    // only renders for single-package orders, so read that sole shipment's
-    // cumulative refund directly (no summing). Degraded (no shipments) → the
-    // old order-level field, which stays 0 post-migration.
+    // Refund is shipment-level. Single-package → read that sole shipment's
+    // cumulative refund directly. Multi-package → the per-package figures live
+    // on packages[].refund (each sourced from its shipment); a SINGLE order-
+    // level number would require SUMMING them, which the money guard forbids —
+    // so it is `null` here (there is no correct order-level figure). Consumers
+    // guard on `refund > 0`, and `null > 0` is false, so this is display-safe;
+    // multi-package replies render per-package refunds instead. Genuine
+    // no-shipments (degraded) → the old order-level field, which stays 0.
     refund: packages.length === 1
       ? (shipments[0].settlement?.refundToCustomer || 0)
-      : (o.settlement?.refundToCustomer || 0),
+      : packages.length > 1
+        ? null
+        : (o.settlement?.refundToCustomer || 0),
     packages,
     returnDaysLeft: null, // filled by the service (TASK 4) when a package is still returnable
   };

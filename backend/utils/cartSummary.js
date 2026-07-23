@@ -38,13 +38,52 @@ const emptySummary = () => ({
   coupon: null,
 });
 
-// buildCartSummary({ userId, couponCode }) -> summary object ONLY.
+// Why an item is stale — derived from EXACTLY what cartSelection.isStale tests
+// (product inactive, or stock below the requested quantity). Inventory/text
+// only; no money.
+const staleReasonFor = (item) => {
+  const p = item.product;
+  if (!p || !p.isActive) return 'no longer available';
+  if (p.stock <= 0)      return 'out of stock';
+  return `only ${p.stock} left (you asked for ${item.quantity})`;
+};
+
+// The two excluded groups the CHATBOT shows (never the HTTP summary). Partition
+// of product-bearing items that did NOT make it into checkout:
+//   stale       — product && isStale (the reason it can't be bought)
+//   notSelected — product && !isSelected && !isStale (just not ticked)
+// Items with no product (deleted) are dropped, exactly as the summary already
+// drops them. No money — name/qty/unit-price only (+ reason for stale).
+const excludedGroups = (items) => {
+  const notSelectedItems = [];
+  const staleItems = [];
+  for (const item of items || []) {
+    if (!item.product) continue;
+    if (isStale(item)) {
+      staleItems.push({ name: item.product.name, quantity: item.quantity, price: item.price, staleReason: staleReasonFor(item) });
+    } else if (!isSelected(item)) {
+      notSelectedItems.push({ name: item.product.name, quantity: item.quantity, price: item.price });
+    }
+  }
+  return { notSelectedItems, staleItems };
+};
+
+// buildCartSummary({ userId, couponCode, includeExcluded }) -> summary object.
 // `couponCode` is the raw preview code (may be undefined) — same truthiness
 // gate the handler applied to req.query.coupon.
-const buildCartSummary = async ({ userId, couponCode }) => {
+// `includeExcluded` (default false) is CHATBOT-ONLY: when true, the returned
+// object ALSO carries `notSelectedItems` and `staleItems`. The getCartSummary
+// HTTP handler never passes it, so those keys never appear in the `summary`
+// response — existing web/mobile cart screens are byte-for-byte unaffected.
+const buildCartSummary = async ({ userId, couponCode, includeExcluded = false }) => {
   const cart = await Cart.findOne({ customer: userId }).populate(PRODUCT_POPULATE);
+
+  // Attach the excluded groups only when a caller asked for them.
+  const withExcluded = (core, items) =>
+    includeExcluded ? { ...core, ...excludedGroups(items) } : core;
+
   if (!cart || cart.items.length === 0) {
-    return emptySummary();
+    return withExcluded(emptySummary(), cart ? cart.items : []);
   }
 
   // Same eligibility as checkout itself would apply: selected AND not stale
@@ -53,7 +92,8 @@ const buildCartSummary = async ({ userId, couponCode }) => {
     (item) => item.product && isSelected(item) && !isStale(item)
   );
   if (eligibleItems.length === 0) {
-    return emptySummary();
+    // No checkout money, but the excluded groups may still hold items to show.
+    return withExcluded(emptySummary(), cart.items);
   }
 
   const orderItems = eligibleItems.map((item) => ({
@@ -117,14 +157,14 @@ const buildCartSummary = async ({ userId, couponCode }) => {
 
   const grandTotal = round2(subtotal + deliveryCharge - couponDiscount);
 
-  return {
+  return withExcluded({
     packages,
     itemsSubtotal: subtotal,
     totalDelivery: deliveryCharge,
     totalDiscount: round2(couponDiscount),
     grandTotal,
     coupon: couponResult,
-  };
+  }, cart.items);
 };
 
 module.exports = { buildCartSummary };

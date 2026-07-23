@@ -116,10 +116,16 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
       // Cards: active orders, or the latest finished one as context
       const orderCards = active.length ? active : (latestOrder ? [latestOrder] : []);
 
-      // Return-window urgency (TASK 4) — only worth a query when a shown order
-      // is multi-package (single-package replies stay byte-identical and never
-      // surface this). daysLeft is READ from returnActions, never recomputed.
-      if (orderCards.some((c) => Array.isArray(c.packages) && c.packages.length > 1)) {
+      // Return-window urgency — surfaced for ANY shown order that has a
+      // delivered package still inside its window (single- or multi-package).
+      // Only worth the query when a shown card actually has a delivered package;
+      // a still-moving single-package order can't be returnable. daysLeft is
+      // READ from returnActions, never recomputed.
+      const mightReturn = orderCards.some((c) =>
+        c.status === 'delivered' ||
+        (Array.isArray(c.packages) && c.packages.some((p) => p.status === 'delivered'))
+      );
+      if (mightReturn) {
         const returnFacts = await getReturnFacts(user._id);
         const daysLeftByOrder = {};
         for (const a of returnFacts.eligible) {
@@ -531,12 +537,18 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
       return respond(intent, `Sure — here's that list again:`, items, [], context);
     }
 
-    // ── View cart — GROUNDED in the real Cart document (same as cart page) ──
+    // ── View cart — GROUNDED in the real cart summary (same builder the cart
+    //    page uses); shows ticked / not-ticked / stale blocks. ────────────────
     case INTENTS.VIEW_CART: {
-      const { items, total, itemCount } = await getCartContents(user._id);
-      const reply = templates.cartViewReply(items, total, itemCount);
-      const suggestions = items.length ? [] : ['Show trending products'];
-      return respond(intent, reply, [], suggestions, context);
+      const summary = await getCartContents(user._id);
+      const reply   = templates.cartViewReply(summary);
+      const hasItems =
+        (summary.packages?.length || 0) +
+        (summary.notSelectedItems?.length || 0) +
+        (summary.staleItems?.length || 0) > 0;
+      const suggestions = hasItems ? [] : ['Show trending products'];
+      // Reuse the existing handoff mechanism to offer a jump to the cart page.
+      return respond(intent, reply, [], suggestions, context, { handoff: hasItems ? 'cart' : null });
     }
   }
 };

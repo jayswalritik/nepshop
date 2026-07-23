@@ -316,7 +316,10 @@ const CustomerDashboard = () => {
       </div>
 
       {/* ── Chatbot ── */}
-      <ChatWidget onGoToOrders={() => setActiveTab('orders')} />
+      <ChatWidget
+        onGoToOrders={() => setActiveTab('orders')}
+        onGoToCart={() => setActiveTab('cart')}
+      />
       
     </div>
   );

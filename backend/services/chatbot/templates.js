@@ -158,10 +158,34 @@ const orderStatusLine = (o) => {
     case 'cancelled':
       return `was cancelled`;
     case 'returned':
-      return `was returned${o.refund > 0 ? ` — your refund of ${formatRs(o.refund)} is being processed` : ''}`;
+      return returnedLine(o);
     default:
       return `has status "${o.status}"`;
   }
+};
+
+// Phrasing for a 'returned' state. Three shapes, no arithmetic anywhere:
+//   • package row (no `.packages`) → bare "was returned"; the amount lives on
+//     the card row, so multi-package prose carries no money.
+//   • multi-package ORDER → names the seller(s) whose package(s) came back
+//     (first two + "and N others" beyond that; N from array lengths, not money)
+//     and says a refund is being processed — NO figure.
+//   • single-package ORDER → UNCHANGED: keeps its sole shipment's refund amount.
+const returnedLine = (o) => {
+  if (!Array.isArray(o.packages)) return `was returned`;
+
+  if (isMultiPackage(o)) {
+    const names = o.packages.filter((p) => p.status === 'returned').map((p) => p.sellerName);
+    if (names.length === 0) return `was returned`; // defensive; a 'returned' order has ≥1 returned package
+    let who;
+    if (names.length === 1)      who = names[0];
+    else if (names.length === 2) who = `${names[0]} and ${names[1]}`;
+    else                         who = `${names[0]}, ${names[1]} and ${names.length - 2} other${names.length - 2 === 1 ? '' : 's'}`;
+    return `had the ${who} package${names.length > 1 ? 's' : ''} returned — a refund is being processed`;
+  }
+
+  // Single-package (or degraded) order — byte-identical to the original branch.
+  return `was returned${o.refund > 0 ? ` — your refund of ${formatRs(o.refund)} is being processed` : ''}`;
 };
 
 // A card is "multi-package" only when it carries more than one shipment. Single
@@ -173,15 +197,16 @@ const isMultiPackage = (o) => !!o && Array.isArray(o.packages) && o.packages.len
 // (whitespace-pre-line), same as helpReply/cartViewReply already rely on.
 const packageLine = (pkg) => `• Package ${pkg.index} (${pkg.sellerName}) ${orderStatusLine(pkg)}`;
 
-// Return-window nudge — ONLY for multi-package orders (surfacing a delivered
-// package hidden among moving ones). daysLeft is read from returnActions by the
-// service and stashed on the card as `returnDaysLeft`; never recomputed here.
-// Deliberately NOT applied to single-package orders so their sentence stays
-// byte-identical to today (see the task report's conflict note).
-const returnNote = (o) =>
-  isMultiPackage(o) && o.returnDaysLeft != null && o.returnDaysLeft > 0
-    ? `\nYou can still return a delivered package — ${o.returnDaysLeft} day${o.returnDaysLeft === 1 ? '' : 's'} left in the window.`
-    : '';
+// Return-window nudge — appended as an ADDITIONAL line for any order (single-
+// or multi-package) with a delivered package still inside its window. daysLeft
+// is read from returnActions by the service and stashed on the card as
+// `returnDaysLeft`; never recomputed here. Returns '' when there's no returnable
+// package, so a base sentence stays byte-identical when no note applies.
+const returnNote = (o) => {
+  if (!o || o.returnDaysLeft == null || o.returnDaysLeft <= 0) return '';
+  const what = isMultiPackage(o) ? 'a delivered package' : 'it';
+  return `\nYou can still return ${what} — ${o.returnDaysLeft} day${o.returnDaysLeft === 1 ? '' : 's'} left in the window.`;
+};
 
 // facts: { activeOrders, latestOrder (when none active), everOrdered }
 const trackingReply = (facts) => {
@@ -191,19 +216,22 @@ const trackingReply = (facts) => {
     return "You haven't placed any orders yet — want me to help you find something first?";
   }
   if (activeOrders.length === 0) {
-    // SINGLE-PACKAGE: byte-identical to today's sentence.
+    // SINGLE-PACKAGE: today's exact sentence, with the return-window note
+    // appended ONLY when a delivered package is still inside its window (TASK 2)
+    // — returnNote is '' otherwise, so past-window/non-delivered stays unchanged.
     if (isMultiPackage(latestOrder)) {
       return `Nothing is on the way right now. Your most recent order #${latestOrder.shortId} arrived in ${latestOrder.packages.length} packages:\n${latestOrder.packages.map(packageLine).join('\n')}${returnNote(latestOrder)}`;
     }
-    return `Nothing is on the way right now. Your most recent order (#${latestOrder.shortId} — ${latestOrder.itemSummary}) ${orderStatusLine(latestOrder)}.`;
+    return `Nothing is on the way right now. Your most recent order (#${latestOrder.shortId} — ${latestOrder.itemSummary}) ${orderStatusLine(latestOrder)}.${returnNote(latestOrder)}`;
   }
   if (activeOrders.length === 1) {
     const o = activeOrders[0];
-    // SINGLE-PACKAGE: byte-identical to today's sentence.
+    // SINGLE-PACKAGE: today's exact sentence, plus the return-window note when
+    // applicable (returnNote is '' for a still-moving single-package order).
     if (isMultiPackage(o)) {
       return `Your order #${o.shortId} (${formatRs(o.total)}) is arriving in ${o.packages.length} packages:\n${o.packages.map(packageLine).join('\n')}${returnNote(o)}`;
     }
-    return `Your order #${o.shortId} (${o.itemSummary}, ${formatRs(o.total)}) ${orderStatusLine(o)}.`;
+    return `Your order #${o.shortId} (${o.itemSummary}, ${formatRs(o.total)}) ${orderStatusLine(o)}.${returnNote(o)}`;
   }
   return `You have ${activeOrders.length} orders on the way right now:`;
 };
@@ -347,14 +375,54 @@ const cartSearchFirstReply = () =>
   `Here's what I found — tell me which one to add, or tap "+ Add" on a card:`;
 
 // ── Cart view ─────────────────────────────────────────────────────────────────
-const cartViewReply = (items, total, itemCount) => {
-  if (!items.length) {
+// Three labelled blocks, every money figure taken straight from buildCartSummary
+// (no arithmetic here). Empty blocks are omitted. `•` + `\n` render in the widget
+// (whitespace-pre-line), same as helpReply already relies on.
+//   summary: { packages, totalDiscount, grandTotal, notSelectedItems, staleItems, ... }
+const cartViewReply = (summary) => {
+  const packages    = summary.packages || [];
+  const notSelected = summary.notSelectedItems || [];
+  const stale       = summary.staleItems || [];
+
+  if (!packages.length && !notSelected.length && !stale.length) {
     return `Your cart is empty right now — want me to help you find something?`;
   }
-  const lines = items.map((i) =>
-    `• ${i.product.name} × ${i.quantity} — ${formatRs(i.price * i.quantity)}`
-  );
-  return `You have ${itemCount} item${itemCount === 1 ? '' : 's'} in your cart:\n${lines.join('\n')}\n\nTotal: ${formatRs(total)}`;
+
+  const blocks = [];
+
+  // 1. TICKED — the only block with money. Per-package delivery (FREE when the
+  //    charge field is 0, mirroring the cart/orders pages), coupon, grand total.
+  if (packages.length) {
+    const pkgText = packages.map((p) => {
+      const itemLines = p.items.map((i) => `  • ${i.name} × ${i.quantity}`).join('\n');
+      const delivery = p.deliveryCharge === 0 ? 'delivery FREE' : `delivery ${formatRs(p.deliveryCharge)}`;
+      return `${p.sellerName} (${delivery}):\n${itemLines}`;
+    }).join('\n');
+
+    let money = '';
+    if (summary.totalDiscount > 0) money += `\nCoupon: −${formatRs(summary.totalDiscount)}`;
+    money += `\nTotal to pay: ${formatRs(summary.grandTotal)}`;
+
+    blocks.push(`✅ Ready to check out:\n${pkgText}${money}`);
+  }
+
+  // 2. NOT-TICKED — name / qty / unit price only. No total.
+  if (notSelected.length) {
+    const lines = notSelected.map((i) => `  • ${i.name} × ${i.quantity} (${formatRs(i.price)} each)`).join('\n');
+    blocks.push(`🕗 Not ticked yet — these won't be bought until you select them:\n${lines}`);
+  }
+
+  // 3. STALE — name / qty / plain-language reason. No total.
+  if (stale.length) {
+    const lines = stale.map((i) => `  • ${i.name} × ${i.quantity} — ${i.staleReason}`).join('\n');
+    blocks.push(`⚠️ Needs a look — can't be checked out as-is:\n${lines}`);
+  }
+
+  const lead = packages.length
+    ? `Here's your cart 🛒`
+    : `Nothing's ticked for checkout yet, but here's what's in your cart 🛒`;
+
+  return `${lead}\n\n${blocks.join('\n\n')}`;
 };
 
 module.exports = {

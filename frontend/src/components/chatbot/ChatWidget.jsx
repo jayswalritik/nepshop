@@ -101,15 +101,18 @@ const statusBadge = {
   returned:           { label: 'Returned',       cls: 'bg-gray-200 text-gray-600' },
 };
 
-// Matches OrdersPage.jsx's formatStatusLabel — used ONLY for the new per-package
-// rows so their wording agrees with the web Orders page. The order-level
-// `statusBadge` map above is left untouched so single-package cards render
-// byte-identically to today (see the task report's label-disagreement note).
-const formatStatusLabel = (status) =>
-  status.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+// Readable text for a status with no statusBadge entry (e.g. return_assigned):
+// underscores → spaces, first letter capitalised. Known statuses always hit the
+// map above — this only guards the unmapped ones so a badge never renders blank.
+const humanizeStatus = (status) => {
+  const t = String(status || '').replace(/_/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+const badgeFor = (status) =>
+  statusBadge[status] || { label: humanizeStatus(status), cls: 'bg-gray-100 text-gray-600' };
 
 const ChatOrderCard = ({ order }) => {
-  const badge = statusBadge[order.status] || { label: order.status, cls: 'bg-gray-100 text-gray-600' };
+  const badge = badgeFor(order.status);
   const packages = Array.isArray(order.packages) ? order.packages : [];
   const isMulti = packages.length > 1;
 
@@ -167,13 +170,18 @@ const ChatOrderCard = ({ order }) => {
           Arrives in {packages.length} packages
         </p>
         {packages.map((p) => {
-          const pkgBadge = statusBadge[p.status] || { cls: 'bg-gray-100 text-gray-600' };
+          // Same statusBadge map the single-package card uses (with the shared
+          // readable fallback), so every label inside the widget reads identically.
+          const pkgBadge = badgeFor(p.status);
           return (
             <div key={p.index} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-xs font-medium text-gray-700 truncate">
                   Package {p.index} <span className="font-normal text-gray-400">— {p.sellerName}</span>
                 </p>
+                {/* Package money — sellerSubtotal / deliveryCharge / couponAllocation
+                    shown as SEPARATE labelled values (no per-package payable field
+                    exists on the package object, so no total is computed). */}
                 <p className="text-[11px] text-gray-500">
                   Items Rs {Number(p.sellerSubtotal).toLocaleString('en-IN')}
                   {' · '}Delivery {p.deliveryCharge === 0
@@ -183,9 +191,15 @@ const ChatOrderCard = ({ order }) => {
                     <span className="text-green-600"> · voucher −Rs {Number(p.couponAllocation).toLocaleString('en-IN')}</span>
                   )}
                 </p>
+                {/* Refund for THIS package — only when positive; never "Rs 0". */}
+                {p.refund > 0 && (
+                  <p className="text-[11px] text-green-600">
+                    Refund Rs {Number(p.refund).toLocaleString('en-IN')} being processed
+                  </p>
+                )}
               </div>
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${pkgBadge.cls}`}>
-                {formatStatusLabel(p.status)}
+                {pkgBadge.label}
               </span>
             </div>
           );
@@ -196,7 +210,7 @@ const ChatOrderCard = ({ order }) => {
 };
 
 // ── The widget ────────────────────────────────────────────────────────────────
-const ChatWidget = ({ onGoToOrders }) => {
+const ChatWidget = ({ onGoToOrders, onGoToCart }) => {
   const { user } = useAuth();
   const { addToCart } = useCart();
   const [open, setOpen]         = useState(false);
@@ -348,6 +362,16 @@ const ChatWidget = ({ onGoToOrders }) => {
                     className="mt-2 text-xs font-medium text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded-lg transition-all"
                   >
                     Open My Orders →
+                  </button>
+                )}
+
+                {/* Handoff button → Cart (same mechanism as orders) */}
+                {m.from === 'bot' && m.handoff === 'cart' && (
+                  <button
+                    onClick={() => { onGoToCart?.(); setOpen(false); }}
+                    className="mt-2 text-xs font-medium text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded-lg transition-all"
+                  >
+                    Go to cart →
                   </button>
                 )}
 

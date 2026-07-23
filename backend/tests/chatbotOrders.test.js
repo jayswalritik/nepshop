@@ -174,5 +174,80 @@ test('order with no shipments degrades gracefully (empty packages, 0 refund, sti
   );
 });
 
+// ─────────────────────────────────────────────────────────
+// 6 — multi-package top-level refund is null (not 0)
+// ─────────────────────────────────────────────────────────
+test('multi-package order: top-level refund is null, not 0', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+    ],
+  });
+  const card = toChatOrder(o);
+  assert.strictEqual(card.refund, null);
+  // Per-package refunds are still their own real values.
+  assert.strictEqual(card.packages.length, 2);
+});
+
+// ─────────────────────────────────────────────────────────
+// 7 — multi-package returned line names sellers, no currency
+// ─────────────────────────────────────────────────────────
+test('multi-package returned line names sellers and contains no currency figure', () => {
+  const o = order({
+    status: 'returned',
+    total: 3000,
+    shipments: [
+      ship({ status: 'returned', seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 500 } }),
+      ship({ status: 'returned', seller: { shopName: 'Shop B' }, settlement: { refundToCustomer: 700 } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o));
+  assert.ok(line.includes('Shop A'), 'names the first seller');
+  assert.ok(line.includes('Shop B'), 'names the second seller');
+  assert.ok(line.includes('refund is being processed'), 'states a refund is being processed');
+  assert.ok(!line.includes('Rs'), 'no currency figure in multi-package returned prose');
+});
+
+// ─────────────────────────────────────────────────────────
+// 8 — two-seller cap then "and N others" (4 packages, 3 returned)
+// ─────────────────────────────────────────────────────────
+test('multi-package returned line caps at two sellers then "and N others"', () => {
+  const o = order({
+    status: 'returned',
+    shipments: [
+      ship({ status: 'returned',  seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'returned',  seller: { shopName: 'Shop B' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'returned',  seller: { shopName: 'Shop C' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'cancelled', seller: { shopName: 'Shop D' } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o));
+  assert.ok(line.includes('Shop A') && line.includes('Shop B'), 'names the first two sellers');
+  assert.ok(line.includes('and 1 other'), 'folds the rest into "and N others"');
+  assert.ok(!line.includes('Shop C'), 'third returned seller is not named');
+  assert.ok(!line.includes('Rs'), 'no currency figure');
+});
+
+// ─────────────────────────────────────────────────────────
+// 9 — single-package returned line stays byte-identical (keeps its amount)
+// ─────────────────────────────────────────────────────────
+test('single-package returned line is byte-identical (keeps its refund amount)', () => {
+  const o = order({
+    status: 'returned',
+    total: 1000,
+    items: [{ name: 'Cable' }],
+    settlement: { refundToCustomer: 0 },
+    shipments: [
+      ship({ status: 'returned', seller: { shopName: 'Cables Inc' }, settlement: { refundToCustomer: 139.47 } }),
+    ],
+  });
+  assert.strictEqual(
+    templates.orderStatusLine(toChatOrder(o)),
+    `was returned — your refund of ${templates.formatRs(139.47)} is being processed`
+  );
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
