@@ -13,6 +13,11 @@ const Order = require('../../models/Order');
 // SAME one getMyOrders/getOrderById use — so the chatbot reads shipments
 // through one implementation, never its own Shipment.find/populate.
 const { attachShipments } = require('../../utils/orderFetch');
+// Return-window TIME helpers (shared, round-DOWN) + the window length. The
+// per-package "Returnable — N min left" label is built HERE on the backend so
+// the widget never formats or computes time.
+const { computeWindow, formatRemaining } = require('../../utils/returnWindow');
+const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
 
 // Statuses that mean "this order is still in motion". Item-level returns
 // never write 'return_assigned'/'return_in_transit' at the order level
@@ -58,6 +63,12 @@ const toChatPackage = (s, i) => {
   const firstItem = s.items?.[0];
   const extra     = (s.items?.length || 0) - 1;
 
+  // Returnability tag — only a DELIVERED package with a real deliveredAt whose
+  // window hasn't closed is returnable. Time is computed + formatted here (never
+  // in the widget); returnWindowLabel is null whenever the tag shouldn't show.
+  const { expired, minutesLeft } = computeWindow(s.deliveredAt, RETURN_WINDOW_MINUTES);
+  const returnable = s.status === 'delivered' && !!s.deliveredAt && !expired;
+
   return {
     index:       i + 1,
     sellerName:  s.seller?.shopName
@@ -79,13 +90,16 @@ const toChatPackage = (s, i) => {
     // Refund — cumulative per-shipment figure written by BOTH cancel
     // (shipmentCancellation.js) and return (returnController.js) flows.
     refund:      s.settlement?.refundToCustomer || 0,
+    // Ready-to-print returnability tag (backend-built, no widget-side time math).
+    returnMinutesLeft: returnable ? minutesLeft : 0,
+    returnWindowLabel: returnable ? `Returnable — ${formatRemaining(minutesLeft)} left` : null,
   };
 };
 
 // ── Lean order card for the chat UI + conversation memory ────────────────────
 // Keeps every top-level field it always had (nothing reading them breaks) and
 // ADDS per-package truth: `packages` (one entry per shipment) and a
-// `returnDaysLeft` slot the service fills from returnActions (never here).
+// `returnMinutesLeft` slot the service fills from returnActions (never here).
 const toChatOrder = (o) => {
   const firstItem = o.items?.[0];
   const extra     = (o.items?.length || 0) - 1;
@@ -121,7 +135,7 @@ const toChatOrder = (o) => {
         ? null
         : (o.settlement?.refundToCustomer || 0),
     packages,
-    returnDaysLeft: null, // filled by the service (TASK 4) when a package is still returnable
+    returnMinutesLeft: null, // filled by the service (min across packages) when one is still returnable
   };
 };
 

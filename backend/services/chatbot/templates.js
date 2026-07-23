@@ -16,6 +16,10 @@
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
+// Shared TIME phrasing — remaining-window ("22 min") and window-length ("5
+// minutes") copy, rounded DOWN. Never re-implement duration formatting here.
+const { formatRemaining, formatLength } = require('../../utils/returnWindow');
+
 const formatRs = (n) => `Rs ${Number(n).toLocaleString('en-IN')}`;
 
 // Effective price shown in chat = discounted price when a discount exists
@@ -168,8 +172,8 @@ const orderStatusLine = (o) => {
 //   • package row (no `.packages`) → bare "was returned"; the amount lives on
 //     the card row, so multi-package prose carries no money.
 //   • multi-package ORDER → names the seller(s) whose package(s) came back
-//     (first two + "and N others" beyond that; N from array lengths, not money)
-//     and says a refund is being processed — NO figure.
+//     (first two + "and N other package(s)" beyond that; N from array lengths,
+//     not money) and says a refund is being processed — NO figure.
 //   • single-package ORDER → UNCHANGED: keeps its sole shipment's refund amount.
 const returnedLine = (o) => {
   if (!Array.isArray(o.packages)) return `was returned`;
@@ -177,11 +181,17 @@ const returnedLine = (o) => {
   if (isMultiPackage(o)) {
     const names = o.packages.filter((p) => p.status === 'returned').map((p) => p.sellerName);
     if (names.length === 0) return `was returned`; // defensive; a 'returned' order has ≥1 returned package
+    // Each branch builds a COMPLETE noun-phrase (article + names + "package(s)"),
+    // so the count that pluralises "other" and the count that pluralises the noun
+    // are the same number — no separate trailing suffix that can disagree.
     let who;
-    if (names.length === 1)      who = names[0];
-    else if (names.length === 2) who = `${names[0]} and ${names[1]}`;
-    else                         who = `${names[0]}, ${names[1]} and ${names.length - 2} other${names.length - 2 === 1 ? '' : 's'}`;
-    return `had the ${who} package${names.length > 1 ? 's' : ''} returned — a refund is being processed`;
+    if (names.length === 1)      who = `the ${names[0]} package`;
+    else if (names.length === 2) who = `the ${names[0]} and ${names[1]} packages`;
+    else {
+      const n = names.length - 2;
+      who = `the ${names[0]}, ${names[1]} and ${n} other package${n === 1 ? '' : 's'}`;
+    }
+    return `had ${who} returned — a refund is being processed`;
   }
 
   // Single-package (or degraded) order — byte-identical to the original branch.
@@ -198,14 +208,15 @@ const isMultiPackage = (o) => !!o && Array.isArray(o.packages) && o.packages.len
 const packageLine = (pkg) => `• Package ${pkg.index} (${pkg.sellerName}) ${orderStatusLine(pkg)}`;
 
 // Return-window nudge — appended as an ADDITIONAL line for any order (single-
-// or multi-package) with a delivered package still inside its window. daysLeft
-// is read from returnActions by the service and stashed on the card as
-// `returnDaysLeft`; never recomputed here. Returns '' when there's no returnable
-// package, so a base sentence stays byte-identical when no note applies.
+// or multi-package) with a delivered package still inside its window. The
+// minutes-remaining value is read from returnActions by the service and stashed
+// on the card as `returnMinutesLeft`; never recomputed here. formatRemaining
+// phrases it (rounded DOWN — "22 min", "6 days"). Returns '' when there's no
+// returnable package, so a base sentence stays byte-identical when no note applies.
 const returnNote = (o) => {
-  if (!o || o.returnDaysLeft == null || o.returnDaysLeft <= 0) return '';
+  if (!o || o.returnMinutesLeft == null || o.returnMinutesLeft <= 0) return '';
   const what = isMultiPackage(o) ? 'a delivered package' : 'it';
-  return `\nYou can still return ${what} — ${o.returnDaysLeft} day${o.returnDaysLeft === 1 ? '' : 's'} left in the window.`;
+  return `\nYou can still return ${what} — ${formatRemaining(o.returnMinutesLeft)} left in the window.`;
 };
 
 // facts: { activeOrders, latestOrder (when none active), everOrdered }
@@ -302,7 +313,7 @@ const returnReply = (facts, orderCards) => {
     if (a.expired) {
       return `I'm sorry — the return window for the ${name} closed on ${shortDate(a.expiredOn)}, so it can't be returned anymore.`;
     }
-    return `Good news — the ${name} is still returnable (${a.daysLeft} day${a.daysLeft === 1 ? '' : 's'} left in the window). ${refundMathBit(a)} Tap below to submit the request from your orders page:`;
+    return `Good news — the ${name} is still returnable (${formatRemaining(a.minutesLeft)} left in the window). ${refundMathBit(a)} Tap below to submit the request from your orders page:`;
   }
 
   // 2. A return is already moving through the pipeline
@@ -320,17 +331,12 @@ const returnReply = (facts, orderCards) => {
   // 4. Delivered orders exist but every window has closed
   if (everDelivered) {
     const latest = annotated[0];
-    return `None of your delivered orders can be returned anymore — the most recent window closed on ${shortDate(latest.expiredOn)}. Returns are only possible within ${Math.round(latestWindowDays())} days of delivery.`;
+    const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
+    return `None of your delivered orders can be returned anymore — the most recent window closed on ${shortDate(latest.expiredOn)}. Returns are only possible within ${formatLength(RETURN_WINDOW_MINUTES)} of delivery.`;
   }
 
   // 5. Nothing delivered yet
   return `Returns are only possible for delivered orders, and you don't have any delivered orders yet. Once something arrives, you'll have a return window from the delivery date.`;
-};
-
-// Window length in days, derived from the same constant returnController uses
-const latestWindowDays = () => {
-  const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
-  return RETURN_WINDOW_MINUTES / (24 * 60);
 };
 
 // ── Product Q&A ───────────────────────────────────────────────────────────────

@@ -38,6 +38,9 @@ const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
 // file's own header comment); returnMath.js is the actual single source of
 // truth for the fee amount.
 const { computeReturnReversal, isShipmentFullyReturned, RETURN_PICKUP_FEE } = require('../../utils/returnMath');
+// Shared TIME helper — one implementation of window expiry / minutes-left, so
+// remaining time rounds DOWN consistently (never the old Math.ceil day math).
+const { computeWindow } = require('../../utils/returnWindow');
 
 // Words in a return message that are never product keywords
 const RETURN_STOPWORDS = new Set([
@@ -98,8 +101,7 @@ const getReturnFacts = async (userId, query = '') => {
       .filter((it) => it.quantity > 0);
     const anyReturnable = remainingItems.length > 0;
 
-    const expiry   = s.deliveredAt ? new Date(s.deliveredAt).getTime() + RETURN_WINDOW_MINUTES * 60 * 1000 : 0;
-    const expired  = !s.deliveredAt || now > expiry;
+    const { expiry, expired, minutesLeft } = computeWindow(s.deliveredAt, RETURN_WINDOW_MINUTES, now);
     const eligible = s.status === 'delivered' && anyReturnable && !expired && !hasReturn;
 
     const total = round2(s.sellerSubtotal + s.deliveryCharge);
@@ -153,7 +155,7 @@ const getReturnFacts = async (userId, query = '') => {
       hasReturn,
       expired,
       eligible,
-      daysLeft:   Math.max(0, Math.ceil((expiry - now) / (24 * 60 * 60 * 1000))),
+      minutesLeft, // whole minutes remaining, rounded DOWN (see returnWindow.js)
       expiredOn:  new Date(expiry),
       sellerFaultRefund:   sellerFault.refundToCustomer,
       customerFaultRefund: customerFault.refundToCustomer,

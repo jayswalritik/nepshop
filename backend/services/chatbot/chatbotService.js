@@ -119,7 +119,7 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
       // Return-window urgency — surfaced for ANY shown order that has a
       // delivered package still inside its window (single- or multi-package).
       // Only worth the query when a shown card actually has a delivered package;
-      // a still-moving single-package order can't be returnable. daysLeft is
+      // a still-moving single-package order can't be returnable. minutesLeft is
       // READ from returnActions, never recomputed.
       const mightReturn = orderCards.some((c) =>
         c.status === 'delivered' ||
@@ -127,15 +127,15 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
       );
       if (mightReturn) {
         const returnFacts = await getReturnFacts(user._id);
-        const daysLeftByOrder = {};
+        const minutesLeftByOrder = {};
         for (const a of returnFacts.eligible) {
           const oid = a.order._id.toString();
-          if (!(oid in daysLeftByOrder) || a.daysLeft < daysLeftByOrder[oid]) {
-            daysLeftByOrder[oid] = a.daysLeft;
+          if (!(oid in minutesLeftByOrder) || a.minutesLeft < minutesLeftByOrder[oid]) {
+            minutesLeftByOrder[oid] = a.minutesLeft;
           }
         }
         for (const c of orderCards) {
-          c.returnDaysLeft = daysLeftByOrder[c._id.toString()] ?? null;
+          c.returnMinutesLeft = minutesLeftByOrder[c._id.toString()] ?? null;
         }
       }
 

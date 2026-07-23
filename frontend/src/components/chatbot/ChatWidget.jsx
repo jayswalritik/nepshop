@@ -136,6 +136,11 @@ const ChatOrderCard = ({ order }) => {
           <p className="text-xs font-bold text-indigo-600">
             Rs {Number(order.total).toLocaleString('en-IN')}
           </p>
+          {/* Returnable tag — backend-built label (no time math here);
+              shown only when the window is still open. */}
+          {packages[0]?.returnWindowLabel && (
+            <p className="text-[11px] text-indigo-600 font-medium">{packages[0].returnWindowLabel}</p>
+          )}
         </div>
       </div>
     );
@@ -167,7 +172,7 @@ const ChatOrderCard = ({ order }) => {
 
       <div className="border-t border-gray-100 pt-2 space-y-1.5">
         <p className="text-[10px] font-semibold text-gray-400 uppercase">
-          Arrives in {packages.length} packages
+          {['delivered', 'cancelled', 'returned'].includes(order.status) ? '' : 'Arrives in '}{packages.length} packages
         </p>
         {packages.map((p) => {
           // Same statusBadge map the single-package card uses (with the shared
@@ -196,6 +201,11 @@ const ChatOrderCard = ({ order }) => {
                   <p className="text-[11px] text-green-600">
                     Refund Rs {Number(p.refund).toLocaleString('en-IN')} being processed
                   </p>
+                )}
+                {/* Returnable tag — backend-built label (no time math here);
+                    shown only when the window is still open. */}
+                {p.returnWindowLabel && (
+                  <p className="text-[11px] text-indigo-600 font-medium">{p.returnWindowLabel}</p>
                 )}
               </div>
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${pkgBadge.cls}`}>

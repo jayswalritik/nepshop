@@ -249,5 +249,102 @@ test('single-package returned line is byte-identical (keeps its refund amount)',
   );
 });
 
+// ─────────────────────────────────────────────────────────
+// 10 — a delivered package inside its window gets a returnWindowLabel
+// ─────────────────────────────────────────────────────────
+test('delivered package inside the window gets a backend-built returnWindowLabel', () => {
+  const o = order({
+    status: 'delivered',
+    deliveredAt: new Date(),
+    shipments: [ship({ status: 'delivered', seller: { shopName: 'Shop A' }, deliveredAt: new Date() })],
+  });
+  const p = toChatOrder(o).packages[0];
+  assert.ok(typeof p.returnWindowLabel === 'string', 'label is a string');
+  assert.ok(p.returnWindowLabel.startsWith('Returnable —'), 'label is ready-to-print');
+  assert.ok(p.returnWindowLabel.endsWith('left'), 'label ends with "left"');
+  assert.ok(p.returnMinutesLeft >= 0, 'minutes-left is a non-negative number');
+});
+
+// ─────────────────────────────────────────────────────────
+// 11 — a delivered package PAST its window → null label
+// ─────────────────────────────────────────────────────────
+test('a delivered package past its return window has a null returnWindowLabel', () => {
+  const o = order({
+    status: 'delivered',
+    deliveredAt: new Date('2020-01-01'),
+    shipments: [ship({ status: 'delivered', seller: { shopName: 'Shop A' }, deliveredAt: new Date('2020-01-01') })],
+  });
+  const p = toChatOrder(o).packages[0];
+  assert.strictEqual(p.returnWindowLabel, null);
+  assert.strictEqual(p.returnMinutesLeft, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// 12 — a non-delivered package → null label
+// ─────────────────────────────────────────────────────────
+test('a non-delivered package has a null returnWindowLabel', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [ship({ status: 'dispatched', seller: { shopName: 'Shop A' }, deliveredAt: null })],
+  });
+  const p = toChatOrder(o).packages[0];
+  assert.strictEqual(p.returnWindowLabel, null);
+  assert.strictEqual(p.returnMinutesLeft, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// 13 — plural fix: three returned names read "1 other package" (singular)
+// ─────────────────────────────────────────────────────────
+test('multi-package returned line reads "1 other package" (singular noun) at three names', () => {
+  const o = order({
+    status: 'returned',
+    shipments: [
+      ship({ status: 'returned', seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'returned', seller: { shopName: 'Shop B' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'returned', seller: { shopName: 'Shop C' }, settlement: { refundToCustomer: 100 } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o));
+  assert.ok(line.includes('and 1 other package returned'), 'noun agrees with "1 other" (singular)');
+  assert.ok(!line.includes('1 other packages'), 'no longer the mismatched "1 other packages"');
+});
+
+// ─────────────────────────────────────────────────────────
+// 14 — plural noun-phrase: exact output at one / two / three / four shops
+// ─────────────────────────────────────────────────────────
+test('returned noun-phrase reads correctly at 1/2/3/4 returned shops', () => {
+  const returnedOrder = (shops) => order({
+    status: 'returned',
+    shipments: shops.map((name) =>
+      ship({ status: 'returned', seller: { shopName: name }, settlement: { refundToCustomer: 100 } })),
+  });
+  const line = (shops) => templates.orderStatusLine(toChatOrder(returnedOrder(shops)));
+
+  // 1 & 2 shops need ≥2 packages to be MULTI; pad with a cancelled package so
+  // the order is multi-package but only the named shops are 'returned'.
+  const multi1 = order({
+    status: 'returned',
+    shipments: [
+      ship({ status: 'returned',  seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'cancelled', seller: { shopName: 'Shop Z' } }),
+    ],
+  });
+  assert.strictEqual(
+    templates.orderStatusLine(toChatOrder(multi1)),
+    'had the Shop A package returned — a refund is being processed');
+
+  assert.strictEqual(
+    line(['Shop A', 'Shop B']),
+    'had the Shop A and Shop B packages returned — a refund is being processed');
+
+  assert.strictEqual(
+    line(['Shop A', 'Shop B', 'Shop C']),
+    'had the Shop A, Shop B and 1 other package returned — a refund is being processed');
+
+  assert.strictEqual(
+    line(['Shop A', 'Shop B', 'Shop C', 'Shop D']),
+    'had the Shop A, Shop B and 2 other packages returned — a refund is being processed');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
