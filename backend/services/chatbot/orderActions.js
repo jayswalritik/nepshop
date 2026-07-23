@@ -9,6 +9,10 @@
  */
 
 const Order = require('../../models/Order');
+// Per-package (Shipment) data is attached via the shared fetch helper — the
+// SAME one getMyOrders/getOrderById use — so the chatbot reads shipments
+// through one implementation, never its own Shipment.find/populate.
+const { attachShipments } = require('../../utils/orderFetch');
 
 // Statuses that mean "this order is still in motion". Item-level returns
 // never write 'return_assigned'/'return_in_transit' at the order level
@@ -20,25 +24,73 @@ const ORDER_SELECT =
   'items status total subtotal paymentMethod deliveryAgent settlement ' +
   'createdAt confirmedAt packedAt dispatchedAt deliveredAt cancelledAt';
 
-const getActiveOrders = (userId) =>
-  Order.find({ customer: userId, status: { $in: ACTIVE_STATUSES } })
+// ACTIVE_STATUSES is still correct after the shipment migration: order.status
+// is DERIVED by orderAggregate.deriveOrderStatus as the LEAST-ADVANCED active
+// package, and it only lands on 'delivered'/'cancelled'/'returned' when NO
+// package is still moving (every package delivered / all terminal). So an order
+// with any moving package keeps a status in this set — see the analysis in the
+// task report. Each order gains its shipments via attachShipments so toChatOrder
+// can expose per-package truth.
+const getActiveOrders = async (userId) => {
+  const orders = await Order.find({ customer: userId, status: { $in: ACTIVE_STATUSES } })
     .select(ORDER_SELECT)
     .sort({ createdAt: -1 })
     .populate('deliveryAgent', 'firstName lastName phone')
     .lean();
+  return attachShipments(orders);
+};
 
-const getRecentOrders = (userId, limit = 5) =>
-  Order.find({ customer: userId })
+const getRecentOrders = async (userId, limit = 5) => {
+  const orders = await Order.find({ customer: userId })
     .select(ORDER_SELECT)
     .sort({ createdAt: -1 })
     .limit(limit)
     .populate('deliveryAgent', 'firstName lastName phone')
     .lean();
+  return attachShipments(orders);
+};
+
+// ── Lean PACKAGE (shipment) card — one per seller-package ─────────────────────
+// Every field is read STRAIGHT off the shipment document — no money arithmetic.
+// sellerName fallback mirrors OrdersPage.jsx (shopName -> "first last"), with a
+// final 'Seller' guard so a nameless seller never renders blank.
+const toChatPackage = (s, i) => {
+  const firstItem = s.items?.[0];
+  const extra     = (s.items?.length || 0) - 1;
+
+  return {
+    index:       i + 1,
+    sellerName:  s.seller?.shopName
+      || `${s.seller?.firstName || ''} ${s.seller?.lastName || ''}`.trim()
+      || 'Seller',
+    status:      s.status,
+    itemCount:   s.items?.length || 0,
+    itemSummary: firstItem
+      ? `${firstItem.name}${extra > 0 ? ` + ${extra} more` : ''}`
+      : 'Package',
+    deliveredAt: s.deliveredAt,
+    agentName:   s.deliveryAgent
+      ? `${s.deliveryAgent.firstName} ${s.deliveryAgent.lastName}`
+      : null,
+    // Money — read directly off the shipment, never computed here.
+    sellerSubtotal:   s.sellerSubtotal,
+    deliveryCharge:   s.deliveryCharge,
+    couponAllocation: s.couponAllocation || 0,
+    // Refund — cumulative per-shipment figure written by BOTH cancel
+    // (shipmentCancellation.js) and return (returnController.js) flows.
+    refund:      s.settlement?.refundToCustomer || 0,
+  };
+};
 
 // ── Lean order card for the chat UI + conversation memory ────────────────────
+// Keeps every top-level field it always had (nothing reading them breaks) and
+// ADDS per-package truth: `packages` (one entry per shipment) and a
+// `returnDaysLeft` slot the service fills from returnActions (never here).
 const toChatOrder = (o) => {
   const firstItem = o.items?.[0];
   const extra     = (o.items?.length || 0) - 1;
+  const shipments = Array.isArray(o.shipments) ? o.shipments : [];
+  const packages  = shipments.map(toChatPackage);
 
   return {
     _id:         o._id,
@@ -55,7 +107,15 @@ const toChatOrder = (o) => {
     agentName:   o.deliveryAgent
       ? `${o.deliveryAgent.firstName} ${o.deliveryAgent.lastName}`
       : null,
-    refund:      o.settlement?.refundToCustomer || 0,
+    // TASK 3 — refund is now shipment-level. The order-level 'returned' sentence
+    // only renders for single-package orders, so read that sole shipment's
+    // cumulative refund directly (no summing). Degraded (no shipments) → the
+    // old order-level field, which stays 0 post-migration.
+    refund: packages.length === 1
+      ? (shipments[0].settlement?.refundToCustomer || 0)
+      : (o.settlement?.refundToCustomer || 0),
+    packages,
+    returnDaysLeft: null, // filled by the service (TASK 4) when a package is still returnable
   };
 };
 

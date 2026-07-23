@@ -113,11 +113,28 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         latestOrder  = recent.length ? toChatOrder(recent[0]) : null;
       }
 
-      const facts = { activeOrders: active, latestOrder, everOrdered };
-      const reply = templates.trackingReply(facts);
-
       // Cards: active orders, or the latest finished one as context
       const orderCards = active.length ? active : (latestOrder ? [latestOrder] : []);
+
+      // Return-window urgency (TASK 4) — only worth a query when a shown order
+      // is multi-package (single-package replies stay byte-identical and never
+      // surface this). daysLeft is READ from returnActions, never recomputed.
+      if (orderCards.some((c) => Array.isArray(c.packages) && c.packages.length > 1)) {
+        const returnFacts = await getReturnFacts(user._id);
+        const daysLeftByOrder = {};
+        for (const a of returnFacts.eligible) {
+          const oid = a.order._id.toString();
+          if (!(oid in daysLeftByOrder) || a.daysLeft < daysLeftByOrder[oid]) {
+            daysLeftByOrder[oid] = a.daysLeft;
+          }
+        }
+        for (const c of orderCards) {
+          c.returnDaysLeft = daysLeftByOrder[c._id.toString()] ?? null;
+        }
+      }
+
+      const facts = { activeOrders: active, latestOrder, everOrdered };
+      const reply = templates.trackingReply(facts);
 
       const newContext = {
         ...context,
@@ -134,8 +151,13 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
 
     // ── Order history — GROUNDED in real Order documents ────────────────────
     case INTENTS.ORDER_HISTORY: {
-      const orders = (await getRecentOrders(user._id, 5)).map(toChatOrder);
-      const reply  = templates.historyReply(orders);
+      // Fetch one extra to detect truncation (TASK 6) without a count query —
+      // show 5, offer the full Orders page via the existing handoff when more
+      // exist.
+      const fetched   = await getRecentOrders(user._id, 6);
+      const truncated = fetched.length > 5;
+      const orders    = fetched.slice(0, 5).map(toChatOrder);
+      const reply     = templates.historyReply(orders);
 
       const newContext = {
         ...context,
@@ -147,7 +169,10 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         ? ['Where is my order?']
         : ['Show trending products'];
 
-      return respond(intent, reply, [], suggestions, newContext, { orders });
+      return respond(intent, reply, [], suggestions, newContext, {
+        orders,
+        handoff: truncated ? 'orders' : null,
+      });
     }
 
     // ── Return/refund — GROUNDED in real orders + the REAL return rules ─────
@@ -203,21 +228,28 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
     //    arrive?" (feature 4's example). Answers from conversation memory. ────
     case INTENTS.ORDER_FOLLOW_UP: {
       const orders = context.lastOrders || [];
-      // Status question: filter the shown orders by real status
+      // Status question: filter the shown orders by real PACKAGE status, so a
+      // delivered package inside a still-moving order is found (TASK 5). Spelling
+      // normalisation unchanged.
       if (statusFilter) {
         const norm   = statusFilter.replace(/\s+/g, ' ');
         const wanted = (norm === 'out for delivery' || norm === 'on the way') ? 'dispatched'
                      : norm === 'canceled' ? 'cancelled'
                      : norm;
         const label   = wanted === 'dispatched' ? 'out for delivery' : wanted;
-        const matches = orders.filter((o) => o.status === wanted);
+
+        // An order matches if ANY of its packages is in `wanted` (falling back
+        // to the order's own status for orders with no shipments attached).
+        const orderHasStatus = (o) =>
+          Array.isArray(o.packages) && o.packages.length
+            ? o.packages.some((p) => p.status === wanted)
+            : o.status === wanted;
+        const matches = orders.filter(orderHasStatus);
 
         if (!matches.length) {
-          return respond(intent, `None of the orders I showed you are ${label} right now.`, [], ['Show my recent orders'], context, { orders: [] });
+          return respond(intent, `None of the packages in the orders I showed you are ${label} right now.`, [], ['Show my recent orders'], context, { orders: [] });
         }
-        const reply = matches.length === 1
-          ? `Order #${matches[0].shortId} (${matches[0].itemSummary}) ${templates.orderStatusLine(matches[0])}.`
-          : `These ${matches.length} orders are ${label}:`;
+        const reply = templates.statusFilterReply(matches, wanted, label);
         return respond(intent, reply, [], ['Show my recent orders'], context, { orders: matches });
       }
       const target = resolveOrderTarget(query, orders);

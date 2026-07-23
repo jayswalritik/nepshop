@@ -101,26 +101,95 @@ const statusBadge = {
   returned:           { label: 'Returned',       cls: 'bg-gray-200 text-gray-600' },
 };
 
+// Matches OrdersPage.jsx's formatStatusLabel — used ONLY for the new per-package
+// rows so their wording agrees with the web Orders page. The order-level
+// `statusBadge` map above is left untouched so single-package cards render
+// byte-identically to today (see the task report's label-disagreement note).
+const formatStatusLabel = (status) =>
+  status.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
 const ChatOrderCard = ({ order }) => {
   const badge = statusBadge[order.status] || { label: order.status, cls: 'bg-gray-100 text-gray-600' };
-  return (
-    <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-2.5">
-      <div className="w-12 h-12 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
-        {order.image
-          ? <img src={order.image} alt="" className="w-full h-full object-cover" />
-          : <span className="text-lg">📦</span>}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          <p className="text-xs font-semibold text-gray-900">#{order.shortId}</p>
-          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${badge.cls}`}>
-            {badge.label}
-          </span>
+  const packages = Array.isArray(order.packages) ? order.packages : [];
+  const isMulti = packages.length > 1;
+
+  // Single-package (or legacy) orders render EXACTLY as before — no change.
+  if (!isMulti) {
+    return (
+      <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-2.5">
+        <div className="w-12 h-12 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
+          {order.image
+            ? <img src={order.image} alt="" className="w-full h-full object-cover" />
+            : <span className="text-lg">📦</span>}
         </div>
-        <p className="text-xs text-gray-600 truncate">{order.itemSummary}</p>
-        <p className="text-xs font-bold text-indigo-600">
-          Rs {Number(order.total).toLocaleString('en-IN')}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold text-gray-900">#{order.shortId}</p>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${badge.cls}`}>
+              {badge.label}
+            </span>
+          </div>
+          <p className="text-xs text-gray-600 truncate">{order.itemSummary}</p>
+          <p className="text-xs font-bold text-indigo-600">
+            Rs {Number(order.total).toLocaleString('en-IN')}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Multi-package: the same header row, plus a per-package breakdown that
+  // mirrors OrdersPage.jsx (package number, seller, status, money line).
+  return (
+    <div className="flex flex-col gap-2 bg-white border border-gray-200 rounded-xl p-2.5">
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-lg bg-gray-100 flex-shrink-0 overflow-hidden flex items-center justify-center">
+          {order.image
+            ? <img src={order.image} alt="" className="w-full h-full object-cover" />
+            : <span className="text-lg">📦</span>}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold text-gray-900">#{order.shortId}</p>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${badge.cls}`}>
+              {badge.label}
+            </span>
+          </div>
+          <p className="text-xs text-gray-600 truncate">{order.itemSummary}</p>
+          <p className="text-xs font-bold text-indigo-600">
+            Rs {Number(order.total).toLocaleString('en-IN')}
+          </p>
+        </div>
+      </div>
+
+      <div className="border-t border-gray-100 pt-2 space-y-1.5">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase">
+          Arrives in {packages.length} packages
         </p>
+        {packages.map((p) => {
+          const pkgBadge = statusBadge[p.status] || { cls: 'bg-gray-100 text-gray-600' };
+          return (
+            <div key={p.index} className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-700 truncate">
+                  Package {p.index} <span className="font-normal text-gray-400">— {p.sellerName}</span>
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Items Rs {Number(p.sellerSubtotal).toLocaleString('en-IN')}
+                  {' · '}Delivery {p.deliveryCharge === 0
+                    ? <span className="text-green-600 font-medium">FREE</span>
+                    : `Rs ${Number(p.deliveryCharge).toLocaleString('en-IN')}`}
+                  {p.couponAllocation > 0 && (
+                    <span className="text-green-600"> · voucher −Rs {Number(p.couponAllocation).toLocaleString('en-IN')}</span>
+                  )}
+                </p>
+              </div>
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${pkgBadge.cls}`}>
+                {formatStatusLabel(p.status)}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

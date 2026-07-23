@@ -164,6 +164,25 @@ const orderStatusLine = (o) => {
   }
 };
 
+// A card is "multi-package" only when it carries more than one shipment. Single
+// (or zero) package orders take the ORIGINAL, unchanged phrasing everywhere.
+const isMultiPackage = (o) => !!o && Array.isArray(o.packages) && o.packages.length > 1;
+
+// One line per package — reuses orderStatusLine so a package's sentence reads
+// exactly like the single-order sentence. `•` + `\n` render fine in the widget
+// (whitespace-pre-line), same as helpReply/cartViewReply already rely on.
+const packageLine = (pkg) => `• Package ${pkg.index} (${pkg.sellerName}) ${orderStatusLine(pkg)}`;
+
+// Return-window nudge — ONLY for multi-package orders (surfacing a delivered
+// package hidden among moving ones). daysLeft is read from returnActions by the
+// service and stashed on the card as `returnDaysLeft`; never recomputed here.
+// Deliberately NOT applied to single-package orders so their sentence stays
+// byte-identical to today (see the task report's conflict note).
+const returnNote = (o) =>
+  isMultiPackage(o) && o.returnDaysLeft != null && o.returnDaysLeft > 0
+    ? `\nYou can still return a delivered package — ${o.returnDaysLeft} day${o.returnDaysLeft === 1 ? '' : 's'} left in the window.`
+    : '';
+
 // facts: { activeOrders, latestOrder (when none active), everOrdered }
 const trackingReply = (facts) => {
   const { activeOrders, latestOrder, everOrdered } = facts;
@@ -172,13 +191,55 @@ const trackingReply = (facts) => {
     return "You haven't placed any orders yet — want me to help you find something first?";
   }
   if (activeOrders.length === 0) {
+    // SINGLE-PACKAGE: byte-identical to today's sentence.
+    if (isMultiPackage(latestOrder)) {
+      return `Nothing is on the way right now. Your most recent order #${latestOrder.shortId} arrived in ${latestOrder.packages.length} packages:\n${latestOrder.packages.map(packageLine).join('\n')}${returnNote(latestOrder)}`;
+    }
     return `Nothing is on the way right now. Your most recent order (#${latestOrder.shortId} — ${latestOrder.itemSummary}) ${orderStatusLine(latestOrder)}.`;
   }
   if (activeOrders.length === 1) {
     const o = activeOrders[0];
+    // SINGLE-PACKAGE: byte-identical to today's sentence.
+    if (isMultiPackage(o)) {
+      return `Your order #${o.shortId} (${formatRs(o.total)}) is arriving in ${o.packages.length} packages:\n${o.packages.map(packageLine).join('\n')}${returnNote(o)}`;
+    }
     return `Your order #${o.shortId} (${o.itemSummary}, ${formatRs(o.total)}) ${orderStatusLine(o)}.`;
   }
   return `You have ${activeOrders.length} orders on the way right now:`;
+};
+
+// ── Package-aware status filter ("which is delivered?") ───────────────────────
+// Collects the specific packages matching `wanted` across the shown orders, so
+// a delivered package inside a still-moving order surfaces. Single-package (or
+// degraded) matches reproduce today's order-level sentence exactly.
+const statusFilterReply = (matches, wanted, label) => {
+  const hits = [];
+  for (const o of matches) {
+    const pkgs = Array.isArray(o.packages) ? o.packages : [];
+    if (pkgs.length) {
+      for (const p of pkgs) if (p.status === wanted) hits.push({ o, p });
+    } else if (o.status === wanted) {
+      hits.push({ o, p: null });
+    }
+  }
+
+  const asOrderSentence = (o) =>
+    `Order #${o.shortId} (${o.itemSummary}) ${orderStatusLine(o)}.`;
+  const asPackageSentence = (o, p) =>
+    `Package ${p.index} (${p.sellerName}) of order #${o.shortId} ${orderStatusLine(p)}.`;
+  const isSinglePkg = (o) => !(Array.isArray(o.packages) && o.packages.length > 1);
+
+  if (hits.length === 1) {
+    const { o, p } = hits[0];
+    return (!p || isSinglePkg(o)) ? asOrderSentence(o) : asPackageSentence(o, p);
+  }
+
+  const lines = hits.map(({ o, p }) =>
+    (!p || isSinglePkg(o))
+      ? `• Order #${o.shortId} (${o.itemSummary}) ${orderStatusLine(o)}`
+      : `• Order #${o.shortId}, Package ${p.index} (${p.sellerName}) ${orderStatusLine(p)}`
+  );
+  return `These ${hits.length} are ${label}:\n${lines.join('\n')}`;
 };
 
 const historyReply = (orders) => {
@@ -310,6 +371,7 @@ module.exports = {
   followUpReply,
   orderStatusLine,
   trackingReply,
+  statusFilterReply,
   historyReply,
   returnReply,
   qaReply,
