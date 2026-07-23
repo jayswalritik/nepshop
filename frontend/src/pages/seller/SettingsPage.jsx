@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import BecomeCustomer from '../../components/common/BecomeCustomer';
+import ChangePasswordForm from '../../components/common/ChangePasswordForm';
 import { NEPAL_DISTRICTS } from '../../utils/districts';
 
 const SettingsPage = () => {
@@ -398,6 +399,11 @@ const SettingsPage = () => {
           </>
         ) : '💾 Save Settings'}
       </button>
+
+      {/* Change password */}
+      <div className="mt-5">
+        <ChangePasswordForm />
+      </div>
     </div>
   );
 };

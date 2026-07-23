@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import RoleUpgrade from '../../components/customer/RoleUpgrade';
+import ChangePasswordForm from '../../components/common/ChangePasswordForm';
 
 const ProfilePage = () => {
   const { user, login } = useAuth();
@@ -155,6 +156,9 @@ const ProfilePage = () => {
           ) : '💾 Save Profile'}
         </button>
       </div>
+
+      {/* Change password */}
+      <ChangePasswordForm />
 
       {/* Grow with NepShop — role upgrade */}
       <RoleUpgrade />

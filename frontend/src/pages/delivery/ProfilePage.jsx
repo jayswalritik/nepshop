@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import API from '../../utils/api';
 import BecomeCustomer from '../../components/common/BecomeCustomer';
+import ChangePasswordForm from '../../components/common/ChangePasswordForm';
 
 const DeliveryProfilePage = () => {
   const { user, login } = useAuth();
@@ -274,6 +275,11 @@ const DeliveryProfilePage = () => {
           </>
         ) : '💾 Save Profile'}
       </button>
+
+      {/* Change password */}
+      <div className="mt-5">
+        <ChangePasswordForm />
+      </div>
     </div>
   );
 };
