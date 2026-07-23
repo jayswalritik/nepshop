@@ -7,6 +7,7 @@ const User     = require('../models/User');
 
 const { groupItemsBySeller, allocateCouponDiscount, round2 } = require('../utils/orderPricing');
 const { recomputeOrder, buildShipmentEmailView } = require('../utils/orderAggregate');
+const { attachShipments, fetchShipmentsForOrder } = require('../utils/orderFetch');
 const { isSelected } = require('../utils/cartSelection');
 const { cancelShipment, finalizeOrderCancellation } = require('../utils/shipmentCancellation');
 const { computeOrderBuckets, computeShipmentSummaries } = require('../utils/orderSummary');
@@ -212,23 +213,9 @@ const getMyOrders = asyncHandler(async (req, res) => {
     .limit(Number(limit))
     .populate('deliveryAgent', 'firstName lastName phone');
 
-  // Attach each order's shipments (per-package status/tracking)
-  const orderIds = orders.map(o => o._id);
-  const shipments = await Shipment.find({ order: { $in: orderIds } })
-    .populate('seller', 'firstName lastName shopName')
-    .populate('deliveryAgent', 'firstName lastName phone');
-
-  const byOrder = {};
-  for (const s of shipments) {
-    const key = s.order.toString();
-    if (!byOrder[key]) byOrder[key] = [];
-    byOrder[key].push(s);
-  }
-
-  const ordersWithShipments = orders.map(o => ({
-    ...o.toObject(),
-    shipments: byOrder[o._id.toString()] || [],
-  }));
+  // Attach each order's shipments (per-package status/tracking) — extracted to
+  // utils/orderFetch.js; same populate selects, same output shape.
+  const ordersWithShipments = await attachShipments(orders);
 
   res.status(200).json({
     success: true,
@@ -254,9 +241,8 @@ const getOrderById = asyncHandler(async (req, res) => {
     throw new Error('Order not found');
   }
 
-  const shipments = await Shipment.find({ order: order._id })
-    .populate('seller',        'firstName lastName shopName')
-    .populate('deliveryAgent', 'firstName lastName phone');
+  // Same populate selects as before — extracted to utils/orderFetch.js.
+  const shipments = await fetchShipmentsForOrder(order._id);
 
   const userId = req.user._id.toString();
   const isCustomer = order.customer._id.toString() === userId;
