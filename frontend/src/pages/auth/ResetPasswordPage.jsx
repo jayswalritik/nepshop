@@ -11,6 +11,9 @@ const ResetPasswordPage = () => {
   const forgotPath = searchParams.get('client') === 'app'
     ? '/forgot-password?client=app'
     : '/forgot-password';
+  // App-originated resets get an "open the app" CTA on success (with a web
+  // fallback beneath). Web-originated resets are left exactly as before.
+  const isApp = searchParams.get('client') === 'app';
   const [formData, setFormData]   = useState({ password: '', confirmPassword: '' });
   const [showPw, setShowPw]       = useState(false);
   const [loading, setLoading]     = useState(false);
@@ -71,12 +74,33 @@ const ResetPasswordPage = () => {
               <p className="text-gray-500 text-sm mb-6">
                 Your password has been reset successfully. You can now sign in with your new password.
               </p>
-              <button
-                onClick={() => navigate('/login')}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-all text-sm"
-              >
-                Go to Sign in →
-              </button>
+              {isApp ? (
+                <>
+                  {/* Non-http scheme → must be a plain anchor; a React Router
+                      Link would try to route it in-app. Matches the app's
+                      deep-link precedent (nepshop://payment/... in
+                      MobileReturn.jsx / app.json scheme "nepshop"). */}
+                  <a
+                    href="nepshop://login"
+                    className="block w-full text-center bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-all text-sm"
+                  >
+                    Open the NepShop app →
+                  </a>
+                  <button
+                    onClick={() => navigate('/login')}
+                    className="mt-4 text-indigo-600 font-medium hover:underline text-xs"
+                  >
+                    Or continue signing in on the web
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => navigate('/login')}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl transition-all text-sm"
+                >
+                  Go to Sign in →
+                </button>
+              )}
             </div>
           ) : (
             <>
