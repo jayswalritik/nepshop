@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import API from '../utils/api';
 import { COLORS, RADII, SPACING } from '../constants/colors';
 
@@ -25,6 +26,11 @@ export default function ChangePasswordForm() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  // Independent per-field visibility — revealing one field never reveals
+  // the others. Matches the eye/eye-off toggle used on login.js / signup.js.
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -96,46 +102,61 @@ export default function ChangePasswordForm() {
 
       <View style={styles.fieldWrap}>
         <Text style={styles.label}>Current password</Text>
-        <TextInput
-          style={[styles.input, errors.currentPassword && styles.inputError]}
-          value={form.currentPassword}
-          onChangeText={(v) => handleChange('currentPassword', v)}
-          placeholder="Enter your current password"
-          placeholderTextColor={COLORS.tabInactive}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        <View style={styles.passwordWrapper}>
+          <TextInput
+            style={[styles.input, styles.passwordInput, errors.currentPassword && styles.inputError]}
+            value={form.currentPassword}
+            onChangeText={(v) => handleChange('currentPassword', v)}
+            placeholder="Enter your current password"
+            placeholderTextColor={COLORS.tabInactive}
+            secureTextEntry={!showCurrent}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Pressable style={styles.eyeButton} hitSlop={10} onPress={() => setShowCurrent((v) => !v)}>
+            <Ionicons name={showCurrent ? 'eye-off' : 'eye'} size={20} color={COLORS.textMuted} />
+          </Pressable>
+        </View>
         {errors.currentPassword ? <Text style={styles.fieldError}>{errors.currentPassword}</Text> : null}
       </View>
 
       <View style={styles.fieldWrap}>
         <Text style={styles.label}>New password</Text>
-        <TextInput
-          style={[styles.input, errors.newPassword && styles.inputError]}
-          value={form.newPassword}
-          onChangeText={(v) => handleChange('newPassword', v)}
-          placeholder="Min. 8 chars, 1 uppercase, 1 number"
-          placeholderTextColor={COLORS.tabInactive}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        <View style={styles.passwordWrapper}>
+          <TextInput
+            style={[styles.input, styles.passwordInput, errors.newPassword && styles.inputError]}
+            value={form.newPassword}
+            onChangeText={(v) => handleChange('newPassword', v)}
+            placeholder="Min. 8 chars, 1 uppercase, 1 number"
+            placeholderTextColor={COLORS.tabInactive}
+            secureTextEntry={!showNew}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Pressable style={styles.eyeButton} hitSlop={10} onPress={() => setShowNew((v) => !v)}>
+            <Ionicons name={showNew ? 'eye-off' : 'eye'} size={20} color={COLORS.textMuted} />
+          </Pressable>
+        </View>
         {errors.newPassword ? <Text style={styles.fieldError}>{errors.newPassword}</Text> : null}
       </View>
 
       <View style={styles.fieldWrap}>
         <Text style={styles.label}>Confirm new password</Text>
-        <TextInput
-          style={[styles.input, errors.confirmPassword && styles.inputError]}
-          value={form.confirmPassword}
-          onChangeText={(v) => handleChange('confirmPassword', v)}
-          placeholder="Repeat your new password"
-          placeholderTextColor={COLORS.tabInactive}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+        <View style={styles.passwordWrapper}>
+          <TextInput
+            style={[styles.input, styles.passwordInput, errors.confirmPassword && styles.inputError]}
+            value={form.confirmPassword}
+            onChangeText={(v) => handleChange('confirmPassword', v)}
+            placeholder="Repeat your new password"
+            placeholderTextColor={COLORS.tabInactive}
+            secureTextEntry={!showConfirm}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <Pressable style={styles.eyeButton} hitSlop={10} onPress={() => setShowConfirm((v) => !v)}>
+            <Ionicons name={showConfirm ? 'eye-off' : 'eye'} size={20} color={COLORS.textMuted} />
+          </Pressable>
+        </View>
         {errors.confirmPassword ? <Text style={styles.fieldError}>{errors.confirmPassword}</Text> : null}
       </View>
 
@@ -203,6 +224,13 @@ const styles = StyleSheet.create({
   },
   inputError: { borderColor: COLORS.danger },
   fieldError: { color: COLORS.danger, fontSize: 11.5, marginTop: 3 },
+  // Eye toggle layout — matches login.js / signup.js. Their input carries a
+  // bottom margin so their eyeButton uses bottom:16 to center; this form's
+  // input has no bottom margin (spacing lives on fieldWrap), so bottom:0
+  // centers the icon over the full input height.
+  passwordWrapper: { position: 'relative', justifyContent: 'center' },
+  passwordInput: { paddingRight: 46 },
+  eyeButton: { position: 'absolute', right: 12, top: 0, bottom: 0, justifyContent: 'center' },
   saveButton: {
     marginTop: SPACING.sm,
     backgroundColor: COLORS.primary,

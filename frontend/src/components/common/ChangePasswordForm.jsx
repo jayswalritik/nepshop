@@ -1,6 +1,23 @@
 import { useState } from 'react';
 import API from '../../utils/api';
 
+// Inline eye / eye-off toggle icon — frontend has no icon library, so this
+// reuses AdminLoginPage.jsx's SVG (matching mobile login.js's Ionicons look)
+// rather than adding a dependency. `off` = password currently visible.
+const EyeIcon = ({ off }) => (
+  off ? (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
+    </svg>
+  ) : (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  )
+);
+
 // Self-contained "Change Password" card, mounted on the customer profile,
 // seller settings, and delivery profile pages. Takes no per-role props — it
 // acts on the logged-in user via the role-agnostic, protected endpoint
@@ -16,7 +33,9 @@ const ChangePasswordForm = () => {
     newPassword:     '',
     confirmPassword: '',
   });
-  const [showNew, setShowNew] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew]         = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError]     = useState('');
@@ -99,14 +118,24 @@ const ChangePasswordForm = () => {
         {/* Current password */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Current password</label>
-          <input
-            type="password"
-            name="currentPassword"
-            value={formData.currentPassword}
-            onChange={handleChange}
-            placeholder="Enter your current password"
-            className={inputClass(errors.currentPassword)}
-          />
+          <div className="relative">
+            <input
+              type={showCurrent ? 'text' : 'password'}
+              name="currentPassword"
+              value={formData.currentPassword}
+              onChange={handleChange}
+              placeholder="Enter your current password"
+              className={`${inputClass(errors.currentPassword)} pr-10`}
+            />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowCurrent(!showCurrent)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <EyeIcon off={showCurrent} />
+            </button>
+          </div>
           {errors.currentPassword && <p className="text-red-500 text-xs mt-1">{errors.currentPassword}</p>}
         </div>
 
@@ -128,7 +157,7 @@ const ChangePasswordForm = () => {
               onClick={() => setShowNew(!showNew)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
             >
-              {showNew ? '🙈' : '👁️'}
+              <EyeIcon off={showNew} />
             </button>
           </div>
           {errors.newPassword && <p className="text-red-500 text-xs mt-1">{errors.newPassword}</p>}
@@ -137,14 +166,24 @@ const ChangePasswordForm = () => {
         {/* Confirm new password */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Confirm new password</label>
-          <input
-            type="password"
-            name="confirmPassword"
-            value={formData.confirmPassword}
-            onChange={handleChange}
-            placeholder="Repeat your new password"
-            className={inputClass(errors.confirmPassword)}
-          />
+          <div className="relative">
+            <input
+              type={showConfirm ? 'text' : 'password'}
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              placeholder="Repeat your new password"
+              className={`${inputClass(errors.confirmPassword)} pr-10`}
+            />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setShowConfirm(!showConfirm)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <EyeIcon off={showConfirm} />
+            </button>
+          </div>
           {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
         </div>
       </div>

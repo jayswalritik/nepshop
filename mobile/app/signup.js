@@ -64,6 +64,7 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Seller-only fields
   const [shopName, setShopName] = useState('');
@@ -401,15 +402,20 @@ export default function SignupScreen() {
             {errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
 
             <Text style={styles.label}>Confirm password</Text>
-            <TextInput
-              style={[styles.input, errors.confirmPassword && styles.inputError]}
-              placeholder="Re-enter your password"
-              placeholderTextColor={COLORS.tabInactive}
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-            />
+            <View style={styles.passwordWrapper}>
+              <TextInput
+                style={[styles.input, styles.passwordInput, errors.confirmPassword && styles.inputError]}
+                placeholder="Re-enter your password"
+                placeholderTextColor={COLORS.tabInactive}
+                secureTextEntry={!showConfirmPassword}
+                autoCapitalize="none"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+              />
+              <Pressable style={styles.eyeButton} hitSlop={10} onPress={() => setShowConfirmPassword((v) => !v)}>
+                <Ionicons name={showConfirmPassword ? 'eye-off' : 'eye'} size={20} color={COLORS.textMuted} />
+              </Pressable>
+            </View>
             {errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
 
             {apiError ? <Text style={styles.error}>{apiError}</Text> : null}

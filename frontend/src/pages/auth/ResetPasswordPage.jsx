@@ -2,6 +2,23 @@ import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import API from '../../utils/api';
 
+// Inline eye / eye-off toggle icon — frontend has no icon library, so this
+// reuses AdminLoginPage.jsx's SVG (matching mobile login.js's Ionicons look)
+// rather than adding a dependency. `off` = password currently visible.
+const EyeIcon = ({ off }) => (
+  off ? (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18" />
+    </svg>
+  ) : (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+    </svg>
+  )
+);
+
 const ResetPasswordPage = () => {
   const { token }   = useParams();
   const navigate    = useNavigate();
@@ -16,6 +33,7 @@ const ResetPasswordPage = () => {
   const isApp = searchParams.get('client') === 'app';
   const [formData, setFormData]   = useState({ password: '', confirmPassword: '' });
   const [showPw, setShowPw]       = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading]     = useState(false);
   const [success, setSuccess]     = useState(false);
   const [error, setError]         = useState('');
@@ -151,7 +169,7 @@ const ResetPasswordPage = () => {
                     onClick={() => setShowPw(!showPw)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    {showPw ? '🙈' : '👁️'}
+                    <EyeIcon off={showPw} />
                   </button>
                 </div>
                 {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
@@ -160,17 +178,27 @@ const ResetPasswordPage = () => {
               {/* Confirm password */}
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Confirm password</label>
-                <input
-                  type="password"
-                  value={formData.confirmPassword}
-                  onChange={(e) => {
-                    setFormData({ ...formData, confirmPassword: e.target.value });
-                    setErrors({ ...errors, confirmPassword: '' });
-                  }}
-                  placeholder="Repeat your new password"
-                  className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
-                    ${errors.confirmPassword ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirm ? 'text' : 'password'}
+                    value={formData.confirmPassword}
+                    onChange={(e) => {
+                      setFormData({ ...formData, confirmPassword: e.target.value });
+                      setErrors({ ...errors, confirmPassword: '' });
+                    }}
+                    placeholder="Repeat your new password"
+                    className={`w-full px-3 py-2.5 pr-10 border rounded-lg text-sm outline-none transition-all
+                      ${errors.confirmPassword ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
+                  />
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <EyeIcon off={showConfirm} />
+                  </button>
+                </div>
                 {errors.confirmPassword && <p className="text-red-500 text-xs mt-1">{errors.confirmPassword}</p>}
               </div>
 
