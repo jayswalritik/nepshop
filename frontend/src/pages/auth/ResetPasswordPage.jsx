@@ -1,10 +1,16 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import API from '../../utils/api';
 
 const ResetPasswordPage = () => {
   const { token }   = useParams();
   const navigate    = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Preserve the app-origin marker so "request a new one" lands on a
+  // forgot-password page that filters roles to the app's supported set.
+  const forgotPath = searchParams.get('client') === 'app'
+    ? '/forgot-password?client=app'
+    : '/forgot-password';
   const [formData, setFormData]   = useState({ password: '', confirmPassword: '' });
   const [showPw, setShowPw]       = useState(false);
   const [loading, setLoading]     = useState(false);
@@ -89,7 +95,7 @@ const ResetPasswordPage = () => {
                     {error.includes('expired') && (
                       <div className="mt-2">
                         <button
-                          onClick={() => navigate('/forgot-password')}
+                          onClick={() => navigate(forgotPath)}
                           className="text-indigo-600 font-medium hover:underline text-xs"
                         >
                           Request a new reset link →

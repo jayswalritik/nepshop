@@ -424,7 +424,7 @@ const updateDeliveryProfile = asyncHandler(async (req, res) => {
 // @access  Public
 // ─────────────────────────────────────────────────────────
 const forgotPassword = asyncHandler(async (req, res) => {
-  const { email, role } = req.body;
+  const { email, role, client } = req.body;
 
   if (!email) {
     res.status(400);
@@ -447,8 +447,14 @@ const forgotPassword = asyncHandler(async (req, res) => {
   const resetToken = user.generateResetToken();
   await user.save({ validateBeforeSave: false });
 
-  // Build reset URL
-  const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
+  // Build reset URL — environment-aware (matches FRONTEND_URL convention used
+  // across the backend, e.g. the verify-email flow above); falls back to the
+  // Vite dev origin for local development.
+  // Carry an app-origin marker through the link so the web forgot-password
+  // page can narrow role options for app-originated users if they need a new
+  // link. Only the exact value 'app' is honored; anything else is ignored.
+  const clientSuffix = client === 'app' ? '?client=app' : '';
+  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password/${resetToken}${clientSuffix}`;
 
   // Send email
   const { sendPasswordResetEmail } = require('../utils/emailService');

@@ -1,21 +1,38 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import API from '../../utils/api';
 
 const ForgotPasswordPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail]     = useState('');
   const [role, setRole]       = useState('customer');
   const [loading, setLoading] = useState(false);
   const [sent, setSent]       = useState(false);
   const [error, setError]     = useState('');
 
-  const roles = [
+  const allRoles = [
     { key: 'customer', label: 'Customer',       icon: '🛍️' },
     { key: 'seller',   label: 'Seller',          icon: '🏪' },
     { key: 'delivery', label: 'Delivery Agent',  icon: '🚚' },
     { key: 'admin',    label: 'Admin',            icon: '🛡️' },
   ];
+
+  // App-originated resets (?client=app) only support customer & delivery on
+  // mobile, so hide seller/admin for them. Absent or any other value keeps the
+  // full role set unchanged.
+  const isApp = searchParams.get('client') === 'app';
+  const roles = useMemo(
+    () => (isApp ? allRoles.filter((r) => r.key === 'customer' || r.key === 'delivery') : allRoles),
+    [isApp]
+  );
+
+  // Never leave a hidden role selected — if the current selection isn't in the
+  // visible set (e.g. it was defaulted/selected before filtering), fall back to
+  // the first visible option so the form can't submit a hidden role.
+  useEffect(() => {
+    if (!roles.some((r) => r.key === role)) setRole(roles[0].key);
+  }, [roles, role]);
 
   const handleSubmit = async () => {
     if (!email || !/\S+@\S+\.\S+/.test(email)) {

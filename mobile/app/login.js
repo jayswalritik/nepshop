@@ -169,6 +169,14 @@ export default function LoginScreen() {
               </Pressable>
             </View>
 
+            <Pressable
+              style={styles.forgotRow}
+              onPress={() => router.push('/forgot-password')}
+              hitSlop={6}
+            >
+              <Text style={styles.forgotLink}>Forgot password?</Text>
+            </Pressable>
+
             {role === 'seller' && (
               <View style={styles.noticeBox}>
                 <Ionicons name="information-circle-outline" size={16} color={COLORS.primary} style={styles.noticeIcon} />
@@ -340,6 +348,16 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 16,
     justifyContent: 'center',
+  },
+  forgotRow: {
+    alignSelf: 'flex-end',
+    marginTop: -4,
+    marginBottom: 14,
+  },
+  forgotLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   error: {
     color: COLORS.danger,
