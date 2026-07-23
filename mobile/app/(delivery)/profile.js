@@ -7,6 +7,7 @@ import { router } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/context/AuthContext';
 import RoleUpgrade from '../../src/components/RoleUpgrade';
+import ChangePasswordForm from '../../src/components/ChangePasswordForm';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 
 // Pushed hidden route (mobile/src/navigation/roleNavConfig.js's delivery
@@ -326,6 +327,9 @@ export default function DeliveryProfileScreen() {
             <Text style={styles.saveButtonText}>💾 Save Profile</Text>
           )}
         </Pressable>
+
+        {/* Change password */}
+        <ChangePasswordForm />
       </ScrollView>
       </SafeAreaView>
     </View>

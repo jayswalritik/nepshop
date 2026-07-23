@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/context/AuthContext';
 import AppHero from '../../src/components/AppHero';
 import RoleUpgrade from '../../src/components/RoleUpgrade';
+import ChangePasswordForm from '../../src/components/ChangePasswordForm';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 
 // Pushed hidden route (mobile/src/navigation/roleNavConfig.js's
@@ -189,6 +190,9 @@ export default function ProfileScreen() {
             </Text>
           </View>
         </View>
+
+        {/* Change password */}
+        <ChangePasswordForm />
       </ScrollView>
     </SafeAreaView>
   );
