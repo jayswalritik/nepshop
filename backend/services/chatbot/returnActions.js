@@ -14,16 +14,13 @@
  *     never a single promised number
  *
  * Each `annotated` entry exposes `.order` as a shipment-scoped "chat order"
- * view — `_id` is the REAL (customer-recognizable) order id, everything else
+ * view — `_id` is the REAL (customer-recognizable) order id (so shortId reads
+ * correctly), `shipmentId` is THIS package's id, and everything else
  * (items/status/total/deliveredAt) is this ONE package's data — so it's
  * consumable by orderActions.toChatOrder / templates.js exactly like the
- * whole-order views used elsewhere in the chatbot.
- *
- * Known simplification: if an order has multiple packages, `matched.find()`
- * (ordinal/keyword resolution in chatbotService.js) only ever resolves to the
- * FIRST matching package for that order id — there's no "which package do you
- * mean" disambiguation in chat. Fine for the common single-package order;
- * multi-package precision is left to the OrdersPage UI.
+ * whole-order views used elsewhere in the chatbot. Chat resolves a specific
+ * package by matching `shipmentId`, so a multi-package order can now be
+ * addressed per package ("the second package").
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -106,7 +103,8 @@ const getReturnFacts = async (userId, query = '') => {
 
     const total = round2(s.sellerSubtotal + s.deliveryCharge);
     const chatView = {
-      _id:            order._id, // real, customer-recognizable order id
+      _id:            order._id, // real, customer-recognizable order id (drives shortId)
+      shipmentId:     s._id,     // THIS package's id — how chat resolves to the right package
       items:          s.items,
       status:         s.status,
       total,

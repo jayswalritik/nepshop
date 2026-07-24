@@ -172,6 +172,28 @@ const ChatOrderCard = ({ order }) => {
             </span>
           </div>
           <p className="text-xs text-gray-600 truncate">{order.itemSummary}</p>
+          {/* Money as three READ lines — subtotal and delivery reuse the
+              multi-package row's exact labels/formatting; total is order.total
+              (already the package payable via packageAsCard). No arithmetic. */}
+          {packages[0] && (
+            <>
+              <p className="text-[11px] text-gray-500">
+                Items Rs {Number(packages[0].sellerSubtotal).toLocaleString('en-IN')}
+              </p>
+              <p className="text-[11px] text-gray-500">
+                Delivery {packages[0].deliveryCharge === 0
+                  ? <span className="text-green-600 font-medium">FREE</span>
+                  : `Rs ${Number(packages[0].deliveryCharge).toLocaleString('en-IN')}`}
+              </p>
+              {/* Voucher — own stacked line, only when positive; reuses the
+                  multi-package row's colour, minus sign and formatting. */}
+              {packages[0].couponAllocation > 0 && (
+                <p className="text-[11px] text-green-600">
+                  voucher −Rs {Number(packages[0].couponAllocation).toLocaleString('en-IN')}
+                </p>
+              )}
+            </>
+          )}
           <p className="text-xs font-bold text-indigo-600">
             Rs {Number(order.total).toLocaleString('en-IN')}
           </p>

@@ -30,7 +30,7 @@ const { INTENTS, detectIntent } = require('./intentRouter');
 const templates                 = require('./templates');
 const { searchProducts }        = require('../nepShopSearchAdapter');
 const { getTrending }           = require('../nepShopAdapter');
-const { getActiveOrders, getRecentOrders, toChatOrder, resolveOrderTarget } = require('./orderActions');
+const { getActiveOrders, getRecentOrders, toChatOrder, resolveOrderTarget, resolveListTarget, packageAsCard } = require('./orderActions');
 const { getReturnFacts } = require('./returnActions');
 const { resolveTarget, extractTopicKeywords, answerFromDescription, fetchProductForQA, fetchProductsForQA, resolveCartTarget } = require('./productQA');
 const { answerProductQuestion, answerMultiProductQuestion } = require('./ollamaService');
@@ -146,6 +146,7 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         ...context,
         lastIntent: INTENTS.ORDER_TRACKING,
         lastOrders: orderCards,
+        ...listFields(orderCards),
       };
 
       const suggestions = everOrdered
@@ -169,6 +170,7 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         ...context,
         lastIntent: INTENTS.ORDER_HISTORY,
         lastOrders: orders,
+        ...listFields(orders),
       };
 
       const suggestions = orders.length
@@ -185,19 +187,28 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
     case INTENTS.RETURN_REFUND: {
       const facts = await getReturnFacts(user._id, query);
 
-      // Ordinal reference to the shown ORDER list: "return the first one"
+      // Ordinal/package/shortId reference to what was last shown: "return the
+      // first one", "return the second package". A resolved package matches its
+      // shipment directly; a single-package order matches its sole shipment.
       if (Array.isArray(context.lastOrders) && context.lastOrders.length > 0) {
-        const ordTarget = resolveOrderTarget(query, context.lastOrders);
-        if (ordTarget) {
-          if (ordTarget.status !== 'delivered') {
+        const res = resolveListTarget(query, context);
+        const t   = res && res.target;
+        if (t) {
+          if (res.kind === 'order' && t.status !== 'delivered') {
             return respond(
               intent,
-              `Order #${ordTarget.shortId} (${ordTarget.itemSummary}) ${templates.orderStatusLine(ordTarget)} — only delivered orders can be returned.`,
-              [], ['Show my recent orders'], context, { orders: [ordTarget] }
+              `Order #${t.shortId} (${t.itemSummary}) ${templates.orderStatusLine(t)} — only delivered orders can be returned.`,
+              [], ['Show my recent orders'], context, { orders: [t] }
             );
           }
-          const a = facts.annotated.find((x) => x.order._id.toString() === ordTarget._id.toString());
-          if (a) facts.matched = [a]; // route into the specific-order reply path
+          // Match the annotated return-fact entry by SHIPMENT id (chatView.shipmentId).
+          const shipmentId = res.kind === 'package'
+            ? t._id
+            : (Array.isArray(t.packages) && t.packages.length === 1 ? t.packages[0]._id : null);
+          if (shipmentId) {
+            const a = facts.annotated.find((x) => String(x.order.shipmentId) === String(shipmentId));
+            if (a) facts.matched = [a]; // route into the specific-package reply path
+          }
         }
       }
 
@@ -221,6 +232,7 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         ...context,
         lastIntent: INTENTS.RETURN_REFUND,
         lastOrders: orderCards,
+        ...listFields(orderCards),
       };
 
       return respond(intent, reply, [], ['Where is my order?'], newContext, {
@@ -258,9 +270,11 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         const reply = templates.statusFilterReply(matches, wanted, label);
         return respond(intent, reply, [], ['Show my recent orders'], context, { orders: matches });
       }
-      const target = resolveOrderTarget(query, orders);
+      // Ordinal resolves against the LAST list shown — a multi-package card's
+      // packages, else the order list (single-package card degrades to orders).
+      const res = resolveListTarget(query, context);
 
-      if (!target) {
+      if (!res) {
         // If the message carried a short-id token (6 hex, optional '#') that
         // resolved to nothing — unknown OR ambiguous — echo it and point at the
         // list-first flow. With NO id token, the original reply fires unchanged.
@@ -272,14 +286,37 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
         return respond(intent, `Which order do you mean? Say "the first one" or "the second one".`, [], [], context, { orders });
       }
 
-      // ORDER_FOLLOW_UP opts INTO grouped clauses so a mixed-status order can't
-      // hide a returned package behind one derived status. Grouped predicates
-      // carry internal periods and never end with one; append the closing period
-      // only when the predicate doesn't already end with it, so we never get "..".
+      if (res.outOfRange != null) {
+        const msg = res.kind === 'package'
+          ? `That order has ${res.outOfRange} packages.`
+          : `You have only ${res.outOfRange} recent orders.`;
+        return respond(intent, msg, [], ['Show my recent orders'], context, { orders: [] });
+      }
+
+      // A resolved PACKAGE renders on the EXISTING single-package card. The user
+      // has DRILLED INTO a multi-package order, so bare ordinals keep counting
+      // THAT ORDER'S packages (lastList stays 'packages') until they leave it —
+      // "the first order" is the escape hatch back to the order list. A genuine
+      // one-package order never reaches here (it has no package list to drill).
+      if (res.kind === 'package') {
+        const parent    = context.lastPackageOrder || {};
+        const pkg       = res.target;
+        const predicate = templates.orderStatusLine(pkg, true);
+        const reply = `Package ${pkg.index} (${pkg.sellerName}) of order #${parent.shortId} ${predicate}${predicate.endsWith('.') ? '' : '.'}`;
+        const newContext = { ...context, lastIntent: INTENTS.ORDER_FOLLOW_UP, lastList: 'packages' };
+        return respond(intent, reply, [], ['Show my recent orders'], newContext, { orders: [packageAsCard(parent, pkg)] });
+      }
+
+      // A resolved ORDER — ORDER_FOLLOW_UP opts INTO grouped clauses so a mixed-
+      // status order can't hide a returned package behind one derived status.
+      // Grouped predicates carry internal periods and never end with one; append
+      // the closing period only when the predicate doesn't already, avoiding "..".
+      const target = res.target;
       const predicate = templates.orderStatusLine(target, true);
       const reply = `Your order #${target.shortId} (${target.itemSummary}, ${templates.formatRs(target.total)}) ${predicate}${predicate.endsWith('.') ? '' : '.'}`;
 
-      return respond(intent, reply, [], ['Show my recent orders'], context, { orders: [target] });
+      const newContext = { ...context, lastIntent: INTENTS.ORDER_FOLLOW_UP, ...listFields([target]) };
+      return respond(intent, reply, [], ['Show my recent orders'], newContext, { orders: [target] });
     }
 
     // ── Trending — GROUNDED in the real recommendation engine ───────────────
@@ -567,6 +604,17 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
 };
 
 // Uniform response shape (extra carries intent-specific payloads like orders)
+// What ordinals should address AFTER this reply renders `rendered` (order cards).
+// A lone MULTI-package card makes its packages the addressable list; a real list
+// OR a single-package card makes orders the list (and clears any package list).
+const listFields = (rendered) => {
+  const only = rendered.length === 1 ? rendered[0] : null;
+  if (only && Array.isArray(only.packages) && only.packages.length > 1) {
+    return { lastList: 'packages', lastPackages: only.packages, lastPackageOrder: only };
+  }
+  return { lastList: 'orders', lastPackages: [], lastPackageOrder: null };
+};
+
 const respond = (intent, reply, products, suggestions, context, extra = {}) => ({
   intent,
   reply,

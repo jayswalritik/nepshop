@@ -19,6 +19,10 @@ const { attachShipments } = require('../../utils/orderFetch');
 // the widget never formats or computes time.
 const { computeWindow, formatRemaining } = require('../../utils/returnWindow');
 const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
+// Voucher-aware per-package payable — the SINGLE source of truth for this
+// formula (sellerSubtotal + deliveryCharge − couponAllocation), reused rather
+// than re-implemented. All the arithmetic stays inside this backend util.
+const { computeCustomerPayable } = require('../../utils/orderAggregate');
 
 // Statuses that mean "this order is still in motion". Item-level returns
 // never write 'return_assigned'/'return_in_transit' at the order level
@@ -112,6 +116,7 @@ const toChatPackage = (s, i) => {
   const returnable = s.status === 'delivered' && !!s.deliveredAt && !expired;
 
   return {
+    _id:         s._id, // shipment id — lets context address a specific package
     index:       i + 1,
     sellerName:  s.seller?.shopName
       || `${s.seller?.firstName || ''} ${s.seller?.lastName || ''}`.trim()
@@ -129,6 +134,10 @@ const toChatPackage = (s, i) => {
     sellerSubtotal:   s.sellerSubtotal,
     deliveryCharge:   s.deliveryCharge,
     couponAllocation: s.couponAllocation || 0,
+    // Voucher-aware amount owed for THIS package — computed by the shared
+    // backend util (never re-summed here or in the client). Shown as the total
+    // when a single package is rendered on its own card.
+    payable:          computeCustomerPayable(s),
     // Refund — cumulative per-shipment figure written by BOTH cancel
     // (shipmentCancellation.js) and return (returnController.js) flows.
     refund:      s.settlement?.refundToCustomer || 0,
@@ -228,10 +237,81 @@ const resolveOrderTarget = (msg, lastOrders) => {
   return null;
 };
 
-module.exports = { 
-  getActiveOrders, 
-  getRecentOrders, 
-  toChatOrder, 
-  ACTIVE_STATUSES, 
-  resolveOrderTarget 
+// Index an ordinal word ("second", "last", "3rd") against a list of length len.
+//   { idx }        → in-range hit
+//   { outOfRange }  → an ordinal that names a slot past a NON-EMPTY list
+//   null           → no ordinal word, or nothing to index (empty list)
+const ordinalIndex = (query, len) => {
+  const lower = (query || '').toLowerCase();
+  let idx = null;
+  for (const [word, i] of Object.entries(ORDER_ORDINALS)) {
+    if (new RegExp(`\\b${word}\\b`).test(lower)) { idx = i; break; }
+  }
+  if (idx == null && /\blast\b/.test(lower)) idx = len - 1;
+  if (idx == null) return null;         // no ordinal at all
+  if (len === 0)   return null;         // nothing to index
+  return (idx < 0 || idx >= len) ? { outOfRange: len } : { idx };
+};
+
+// Resolve an ordinal / shortId against the LAST LIST THE BOT SHOWED.
+//   - explicit "order(s)"  → always the order list
+//   - explicit "package(s)" → always the package list (never an order)
+//   - no noun → the last-rendered list (context.lastList); a single-package card
+//     is not a list, so it degrades to the order list.
+// Ordinal outranks shortId (unchanged). Tolerates the OLD context shape
+// (no lastPackages/lastList) → order-only behaviour, never throws.
+// Returns { kind:'order'|'package', target } | { kind, outOfRange:N } | null.
+const resolveListTarget = (query, context = {}) => {
+  const lastOrders   = Array.isArray(context.lastOrders)   ? context.lastOrders   : [];
+  const lastPackages = Array.isArray(context.lastPackages) ? context.lastPackages : [];
+  const lower = (query || '').toLowerCase();
+  const saysPackage = /\bpackages?\b/.test(lower);
+  const saysOrder   = /\borders?\b/.test(lower);
+  const wantPackages = saysPackage || (!saysOrder && context.lastList === 'packages');
+
+  if (wantPackages && lastPackages.length) {
+    const r = ordinalIndex(query, lastPackages.length);
+    if (r && r.idx != null)        return { kind: 'package', target: lastPackages[r.idx] };
+    if (r && r.outOfRange != null) return { kind: 'package', outOfRange: r.outOfRange };
+    if (saysPackage)               return null; // explicit "package", no ordinal → not-found
+    // implicit package context with no ordinal → fall through (e.g. a shortId)
+  } else if (saysPackage) {
+    return null; // explicitly asked for a package but none were shown
+  }
+
+  const r = ordinalIndex(query, lastOrders.length);
+  if (r && r.idx != null)        return { kind: 'order', target: lastOrders[r.idx] };
+  if (r && r.outOfRange != null) return { kind: 'order', outOfRange: r.outOfRange };
+
+  const idMatch = lower.match(/#?\b([0-9a-f]{6})\b/i);
+  if (idMatch) {
+    const id   = idMatch[1].toUpperCase();
+    const hits = lastOrders.filter((o) => (o.shortId || '').toUpperCase() === id);
+    if (hits.length === 1) return { kind: 'order', target: hits[0] };
+  }
+  return null;
+};
+
+// Wrap one resolved package as an ORDER-shaped card so the EXISTING single-
+// package card renders it. `total` is the package's own payable (already
+// computed by the backend util in toChatPackage) — never re-summed here.
+const packageAsCard = (order, pkg) => ({
+  _id:         pkg._id || `${order._id || 'order'}-${pkg.index}`,
+  shortId:     order.shortId,
+  status:      pkg.status,
+  total:       pkg.payable,
+  itemSummary: pkg.itemSummary,
+  image:       order.image || null,
+  deliveredAt: pkg.deliveredAt,
+  packages:    [pkg],
+});
+
+module.exports = {
+  getActiveOrders,
+  getRecentOrders,
+  toChatOrder,
+  ACTIVE_STATUSES,
+  resolveOrderTarget,
+  resolveListTarget,
+  packageAsCard,
 };

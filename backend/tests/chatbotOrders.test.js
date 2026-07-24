@@ -21,7 +21,7 @@
  */
 
 const assert = require('assert');
-const { toChatOrder, resolveOrderTarget } = require('../services/chatbot/orderActions');
+const { toChatOrder, resolveOrderTarget, resolveListTarget, packageAsCard } = require('../services/chatbot/orderActions');
 const { detectIntent, INTENTS } = require('../services/chatbot/intentRouter');
 const templates = require('../services/chatbot/templates');
 
@@ -812,7 +812,7 @@ test('return counts: no returns and no items array → both 0, no throw', () => 
 // ─────────────────────────────────────────────────────────
 // 43 — packages[] keeps every prior field/value, adding only itemsReturned
 // ─────────────────────────────────────────────────────────
-test('packages[] keeps every prior field/value and adds only itemsReturned', () => {
+test('packages[] keeps every prior field/value and adds _id, payable and itemsReturned', () => {
   const o = order({
     status: 'delivered',
     shipments: [ship({
@@ -824,13 +824,15 @@ test('packages[] keeps every prior field/value and adds only itemsReturned', () 
   });
   const p = toChatOrder(o).packages[0];
 
-  // The 13 original keys + itemsInReturn (step 2) + itemsReturned (this step).
+  // Prior keys + itemsInReturn + itemsReturned + _id (shipment id) + payable.
   const expectedKeys = [
-    'index', 'sellerName', 'status', 'itemCount', 'itemSummary', 'deliveredAt',
+    '_id', 'index', 'sellerName', 'status', 'itemCount', 'itemSummary', 'deliveredAt',
     'agentName', 'sellerSubtotal', 'deliveryCharge', 'couponAllocation', 'refund',
-    'returnMinutesLeft', 'returnWindowLabel', 'itemsInReturn', 'itemsReturned',
+    'returnMinutesLeft', 'returnWindowLabel', 'itemsInReturn', 'itemsReturned', 'payable',
   ].sort();
   assert.deepStrictEqual(Object.keys(p).sort(), expectedKeys);
+  // payable = sellerSubtotal + deliveryCharge − couponAllocation (backend util).
+  assert.strictEqual(p.payable, 1100);
 
   // Prior fields keep their exact values (unchanged by the additions).
   assert.strictEqual(p.index, 1);
@@ -1127,6 +1129,179 @@ test('single-package and package-arg output are unaffected by partial-return cou
   const pkg = { status: 'delivered', deliveredAt: new Date('2026-07-05'), itemsInReturn: 3, sellerName: 'Shop A', index: 1 };
   assert.strictEqual(templates.orderStatusLine(pkg), 'was delivered on 5 Jul ✅');
   assert.strictEqual(templates.orderStatusLine(pkg, true), 'was delivered on 5 Jul ✅');
+});
+
+// ─────────────────────────────────────────────────────────
+// Ordinal resolution against the LAST list shown (orders vs packages)
+// ─────────────────────────────────────────────────────────
+// Out-of-range copy, reproduced from chatbotService.js ORDER_FOLLOW_UP (that
+// module warms Ollama on import, so we mirror the 2-line mapping).
+const outOfRangeMsg = (res) => res.kind === 'package'
+  ? `That order has ${res.outOfRange} packages.`
+  : `You have only ${res.outOfRange} recent orders.`;
+
+const multiCard = toChatOrder(order({
+  status: 'dispatched',
+  shipments: [
+    ship({ status: 'dispatched', seller: { shopName: 'Shop A' } }),
+    ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+  ],
+}));
+const o1 = toChatOrder(order({ _id: '0000000000000000001c5159' })); // shortId 1C5159, single-package
+const o2 = toChatOrder(order({ _id: '0000000000000000009ab123' })); // shortId 9AB123, single-package
+const pkgCtx  = { lastList: 'packages', lastPackages: multiCard.packages, lastPackageOrder: multiCard, lastOrders: [multiCard] };
+const listCtx = { lastList: 'orders',   lastPackages: [], lastPackageOrder: null, lastOrders: [o1, o2] };
+
+test('ordinal inside a multi-package card selects a PACKAGE', () => {
+  const r = resolveListTarget('the second one', pkgCtx);
+  assert.strictEqual(r.kind, 'package');
+  assert.strictEqual(r.target, multiCard.packages[1]);
+});
+
+test('ordinal after an order list selects an ORDER', () => {
+  const r = resolveListTarget('the second one', listCtx);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o2);
+});
+
+test('explicit "the second order" always means the order list', () => {
+  const r = resolveListTarget('the second order', { ...pkgCtx, lastOrders: [o1, o2] });
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o2);
+});
+
+test('explicit "the second package" always means a package', () => {
+  const ctx = { lastList: 'orders', lastOrders: [o1, o2], lastPackages: multiCard.packages, lastPackageOrder: multiCard };
+  const r = resolveListTarget('the second package', ctx);
+  assert.strictEqual(r.kind, 'package');
+  assert.strictEqual(r.target, multiCard.packages[1]);
+});
+
+test('explicit "package" with no package list resolves to nothing (never an order)', () => {
+  assert.strictEqual(resolveListTarget('the second package', listCtx), null);
+});
+
+test('out-of-range in package context → "That order has N packages."', () => {
+  const r = resolveListTarget('the fifth one', pkgCtx);
+  assert.strictEqual(r.kind, 'package');
+  assert.strictEqual(r.outOfRange, 2);
+  assert.strictEqual(outOfRangeMsg(r), 'That order has 2 packages.');
+});
+
+test('out-of-range in order context → "You have only N recent orders."', () => {
+  const r = resolveListTarget('the fifth one', listCtx);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.outOfRange, 2);
+  assert.strictEqual(outOfRangeMsg(r), 'You have only 2 recent orders.');
+});
+
+test('a single-package card is not a list: a bare ordinal falls back to the order list', () => {
+  // lastList 'orders' (what listFields sets after a single-package card), with a
+  // lingering package list from earlier — a bare ordinal still picks an ORDER.
+  const ctx = { lastList: 'orders', lastOrders: [o1, o2], lastPackages: multiCard.packages, lastPackageOrder: multiCard };
+  const r = resolveListTarget('the first one', ctx);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o1);
+});
+
+test('shortId still resolves against the order list', () => {
+  const r = resolveListTarget('#1c5159', listCtx);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o1);
+});
+
+test('an ordinal still outranks a shortId', () => {
+  const r = resolveListTarget('the second one #1c5159', listCtx); // "second" → o2, not #1C5159 (o1)
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o2);
+});
+
+test('OLD-shape context (no lastList/lastPackages) degrades to order-only, never throws', () => {
+  const old = { lastOrders: [o1, o2] };
+  const r = resolveListTarget('the second one', old);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o2);
+  assert.strictEqual(resolveListTarget('the second one', {}), null);
+  assert.doesNotThrow(() => resolveListTarget('hello there', undefined));
+});
+
+test('packageAsCard wraps a package as a single-package card with total = payable', () => {
+  const pkg  = multiCard.packages[1];
+  const card = packageAsCard(multiCard, pkg);
+  assert.strictEqual(card.total, pkg.payable, 'total is the package payable, not re-summed');
+  assert.strictEqual(card.packages.length, 1, 'renders the single-package card');
+  assert.strictEqual(card.packages[0], pkg);
+  assert.strictEqual(card.shortId, multiCard.shortId, 'keeps the parent order shortId');
+  assert.strictEqual(card.status, pkg.status);
+});
+
+// ─────────────────────────────────────────────────────────
+// Drilling into a package keeps bare ordinals on that order's packages
+// ─────────────────────────────────────────────────────────
+// Reproductions of chatbotService.js (Ollama-coupled on import):
+//   listFieldsRepro    → what listFields sets when rendering order card(s)
+//   afterPackageRender → the newContext the ORDER_FOLLOW_UP package branch sets
+const listFieldsRepro = (rendered) => {
+  const only = rendered.length === 1 ? rendered[0] : null;
+  return (only && Array.isArray(only.packages) && only.packages.length > 1)
+    ? { lastList: 'packages', lastPackages: only.packages, lastPackageOrder: only }
+    : { lastList: 'orders', lastPackages: [], lastPackageOrder: null };
+};
+const afterPackageRender = (context) => ({ ...context, lastIntent: 'order_follow_up', lastList: 'packages' });
+
+// State after drilling into a package of the 2-package multiCard.
+const drilled = afterPackageRender(pkgCtx);
+
+test('drill-in keeps lastList=packages so bare ordinals stay on the packages', () => {
+  assert.strictEqual(drilled.lastList, 'packages');
+  assert.strictEqual(drilled.lastPackages, multiCard.packages); // package list preserved
+});
+
+test('A: inside a package, "the first one" → package 1', () => {
+  const r = resolveListTarget('the first one', drilled);
+  assert.strictEqual(r.kind, 'package');
+  assert.strictEqual(r.target, multiCard.packages[0]);
+});
+
+test('A: inside a package, "the third one" → "That order has 2 packages."', () => {
+  const r = resolveListTarget('the third one', drilled);
+  assert.strictEqual(r.kind, 'package');
+  assert.strictEqual(outOfRangeMsg(r), 'That order has 2 packages.');
+});
+
+test('A: "the first order" escapes back to the order list even while drilled in', () => {
+  const r = resolveListTarget('the first order', drilled);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, multiCard); // drilled.lastOrders === [multiCard]
+});
+
+test('A: "the third package" still gives the package out-of-range copy', () => {
+  const r = resolveListTarget('the third package', drilled);
+  assert.strictEqual(r.kind, 'package');
+  assert.strictEqual(outOfRangeMsg(r), 'That order has 2 packages.');
+});
+
+test('B: a GENUINE single-package order → bare ordinal falls back to the order list', () => {
+  // listFields for a lone single-package card clears the package list.
+  const ctx = { lastOrders: [o1, o2], ...listFieldsRepro([o1]) };
+  assert.strictEqual(ctx.lastList, 'orders');
+  assert.deepStrictEqual(ctx.lastPackages, []);
+  const r = resolveListTarget('the third one', ctx);
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(outOfRangeMsg(r), 'You have only 2 recent orders.');
+});
+
+test('B: listFields distinguishes a genuine single-package card from a multi-package one', () => {
+  assert.strictEqual(listFieldsRepro([o1]).lastList, 'orders');       // one package → order list
+  assert.strictEqual(listFieldsRepro([multiCard]).lastList, 'packages'); // >1 package → package list
+});
+
+test('C: drilled context with an OLD-shape client (no lastPackages) degrades to orders, no throw', () => {
+  const oldDrilled = { lastList: 'packages', lastOrders: [o1, o2] }; // lastPackages dropped by old client
+  let r;
+  assert.doesNotThrow(() => { r = resolveListTarget('the first one', oldDrilled); });
+  assert.strictEqual(r.kind, 'order');
+  assert.strictEqual(r.target, o1);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
