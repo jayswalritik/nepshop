@@ -4,6 +4,12 @@ import API from '../../utils/api';
 import RoleUpgrade from '../../components/customer/RoleUpgrade';
 import ChangePasswordForm from '../../components/common/ChangePasswordForm';
 
+// Phone rule — identical to the backend (backend/utils/contactValidation.js):
+// exactly 10 digits starting 98/97. Only enforced when the phone is actually
+// changed, so accounts holding a legacy number can still save name edits.
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+
 const ProfilePage = () => {
   const { user, login } = useAuth();
 
@@ -30,6 +36,8 @@ const ProfilePage = () => {
     if (!formData.firstName.trim()) errs.firstName = 'First name is required';
     if (!formData.lastName.trim())  errs.lastName  = 'Last name is required';
     if (!formData.phone.trim())     errs.phone     = 'Phone is required';
+    else if (formData.phone.trim() !== (user?.phone || '').trim() && !PHONE_RE.test(formData.phone.trim()))
+      errs.phone = PHONE_MSG;
     return errs;
   };
 

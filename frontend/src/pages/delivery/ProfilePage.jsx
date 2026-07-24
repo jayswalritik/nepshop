@@ -4,6 +4,15 @@ import API from '../../utils/api';
 import BecomeCustomer from '../../components/common/BecomeCustomer';
 import ChangePasswordForm from '../../components/common/ChangePasswordForm';
 
+// Phone rule — identical to the backend (backend/utils/contactValidation.js):
+// exactly 10 digits starting 98/97. Enforced only when the phone is actually
+// changed, so a legacy number still saves untouched.
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+// Khalti/eSewa payout numbers — optional, but must be valid when non-empty.
+const KHALTI_MSG = 'Khalti number must be exactly 10 digits and start with 98 or 97.';
+const ESEWA_MSG  = 'eSewa number must be exactly 10 digits and start with 98 or 97.';
+
 const DeliveryProfilePage = () => {
   const { user, login } = useAuth();
 
@@ -22,14 +31,31 @@ const DeliveryProfilePage = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError]     = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [khaltiError, setKhaltiError] = useState('');
+  const [esewaError, setEsewaError]   = useState('');
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (e.target.name === 'phone')        setPhoneError('');
+    if (e.target.name === 'khaltiNumber') setKhaltiError('');
+    if (e.target.name === 'esewaNumber')  setEsewaError('');
     setError('');
     setSuccess('');
   };
 
   const handleSave = async () => {
+    // Inline, per-field phone check — format enforced only on an actual change.
+    const p = formData.phone.trim();
+    if (!p) { setPhoneError('Phone is required'); return; }
+    if (p !== (user?.phone || '').trim() && !PHONE_RE.test(p)) { setPhoneError(PHONE_MSG); return; }
+
+    // Payout numbers are optional — validate only when non-empty.
+    const kh = formData.khaltiNumber.trim();
+    const es = formData.esewaNumber.trim();
+    if (kh && !PHONE_RE.test(kh)) { setKhaltiError(KHALTI_MSG); return; }
+    if (es && !PHONE_RE.test(es)) { setEsewaError(ESEWA_MSG); return; }
+
     setLoading(true);
     setError('');
     setSuccess('');
@@ -109,8 +135,10 @@ const DeliveryProfilePage = () => {
               name="phone"
               value={formData.phone}
               onChange={handleChange}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+              className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+                ${phoneError ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
             />
+            {phoneError && <p className="text-red-500 text-xs mt-1">{phoneError}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
@@ -207,8 +235,10 @@ const DeliveryProfilePage = () => {
                 value={formData.khaltiNumber}
                 onChange={handleChange}
                 placeholder="Khalti registered phone number"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+                  ${khaltiError ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
               />
+              {khaltiError && <p className="text-red-500 text-xs mt-1">{khaltiError}</p>}
             </div>
           )}
 
@@ -221,8 +251,10 @@ const DeliveryProfilePage = () => {
                 value={formData.esewaNumber}
                 onChange={handleChange}
                 placeholder="eSewa registered phone number"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+                  ${esewaError ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
               />
+              {esewaError && <p className="text-red-500 text-xs mt-1">{esewaError}</p>}
             </div>
           )}
 

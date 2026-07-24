@@ -5,6 +5,16 @@ import BecomeCustomer from '../../components/common/BecomeCustomer';
 import ChangePasswordForm from '../../components/common/ChangePasswordForm';
 import { NEPAL_DISTRICTS } from '../../utils/districts';
 
+// Phone rules — identical to the backend (backend/utils/contactValidation.js):
+// exactly 10 digits starting 98/97. Personal phone is enforced only when it
+// actually changes; the shop contact is required + validated; Khalti/eSewa
+// payout numbers are optional but must be valid when non-empty.
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+const SHOP_PHONE_MSG = 'Shop contact number must be exactly 10 digits and start with 98 or 97.';
+const KHALTI_MSG = 'Khalti number must be exactly 10 digits and start with 98 or 97.';
+const ESEWA_MSG  = 'eSewa number must be exactly 10 digits and start with 98 or 97.';
+
 const SettingsPage = () => {
   const { user, login } = useAuth();
 
@@ -42,11 +52,17 @@ const SettingsPage = () => {
     if (!formData.firstName.trim())    errs.firstName    = 'First name is required';
     if (!formData.lastName.trim())     errs.lastName     = 'Last name is required';
     if (!formData.phone.trim())        errs.phone        = 'Phone is required';
+    else if (formData.phone.trim() !== (user?.phone || '').trim() && !PHONE_RE.test(formData.phone.trim()))
+      errs.phone = PHONE_MSG;
     if (!formData.shopName.trim())     errs.shopName     = 'Shop name is required';
     if (!formData.shopStreet.trim())   errs.shopStreet   = 'Street address is required';
     if (!formData.shopCity.trim())     errs.shopCity     = 'City is required';
     if (!formData.shopDistrict)        errs.shopDistrict = 'District is required';
     if (!formData.shopPhone.trim())    errs.shopPhone    = 'Shop contact is required';
+    else if (!PHONE_RE.test(formData.shopPhone.trim())) errs.shopPhone = SHOP_PHONE_MSG;
+    // Payout numbers are optional — validate only when non-empty.
+    if (formData.khaltiNumber.trim() && !PHONE_RE.test(formData.khaltiNumber.trim())) errs.khaltiNumber = KHALTI_MSG;
+    if (formData.esewaNumber.trim()  && !PHONE_RE.test(formData.esewaNumber.trim()))  errs.esewaNumber  = ESEWA_MSG;
     return errs;
   };
 
@@ -328,8 +344,10 @@ const SettingsPage = () => {
                 value={formData.khaltiNumber}
                 onChange={handleChange}
                 placeholder="Khalti registered phone number"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+                  ${errors.khaltiNumber ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
               />
+              {errors.khaltiNumber && <p className="text-red-500 text-xs mt-1">{errors.khaltiNumber}</p>}
             </div>
           )}
 
@@ -342,8 +360,10 @@ const SettingsPage = () => {
                 value={formData.esewaNumber}
                 onChange={handleChange}
                 placeholder="eSewa registered phone number"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-all
+                  ${errors.esewaNumber ? 'border-red-400' : 'border-gray-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100'}`}
               />
+              {errors.esewaNumber && <p className="text-red-500 text-xs mt-1">{errors.esewaNumber}</p>}
             </div>
           )}
 

@@ -21,6 +21,15 @@ const EyeIcon = ({ off }) => (
   )
 );
 
+// Contact rules — identical to the backend (backend/utils/contactValidation.js):
+// phone is exactly 10 digits starting 98/97; email is a standard-format check.
+// (The web has no shared client util file writable here, so the rule is inlined
+// per form; kept byte-identical to the backend helper's regexes.)
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+const SHOP_PHONE_MSG = 'Shop contact number must be exactly 10 digits and start with 98 or 97.';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const AuthPage = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -76,6 +85,7 @@ const AuthPage = () => {
       if (!formData.firstName.trim()) newErrors.firstName = 'First name is required';
       if (!formData.lastName.trim())  newErrors.lastName  = 'Last name is required';
       if (!formData.phone.trim())     newErrors.phone     = 'Phone number is required';
+      else if (!PHONE_RE.test(formData.phone.trim())) newErrors.phone = PHONE_MSG;
       if (currentRole === 'seller') {
         if (!formData.shopName.trim())    newErrors.shopName    = 'Shop name is required';
         if (!formData.panNumber.trim())   newErrors.panNumber   = 'PAN number is required';
@@ -83,6 +93,7 @@ const AuthPage = () => {
         if (!formData.shopCity.trim())    newErrors.shopCity    = 'City is required';
         if (!formData.shopDistrict)       newErrors.shopDistrict = 'District is required';
         if (!formData.shopPhone.trim())   newErrors.shopPhone   = 'Shop contact number is required';
+        else if (!PHONE_RE.test(formData.shopPhone.trim())) newErrors.shopPhone = SHOP_PHONE_MSG;
       }
       if (currentRole === 'delivery') {
         if (!formData.vehicleType)           newErrors.vehicleType        = 'Vehicle type is required';
@@ -97,8 +108,8 @@ const AuthPage = () => {
       if (formData.password !== formData.confirmPassword)
         newErrors.confirmPassword = 'Passwords do not match';
     }
-    if (!formData.email || !/\S+@\S+\.\S+/.test(formData.email))
-      newErrors.email = 'Valid email is required';
+    if (!formData.email || !EMAIL_RE.test(formData.email.trim()))
+      newErrors.email = 'Please enter a valid email address';
     if (!formData.password)
       newErrors.password = 'Password is required';
     return newErrors;

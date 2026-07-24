@@ -28,11 +28,19 @@ import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 // header immediately without needing a focus-refetch (this screen doesn't
 // display server state that could go stale from elsewhere — it edits the
 // same in-memory `user` the whole app already keeps live).
-const validate = (form) => {
+// Phone rule — identical to the backend (backend/utils/contactValidation.js):
+// exactly 10 digits starting 98/97. Enforced only when the phone actually
+// changes, so a legacy number still saves untouched.
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+
+const validate = (form, originalPhone = '') => {
   const errs = {};
   if (!form.firstName.trim()) errs.firstName = 'First name is required';
   if (!form.lastName.trim()) errs.lastName = 'Last name is required';
   if (!form.phone.trim()) errs.phone = 'Phone is required';
+  else if (form.phone.trim() !== (originalPhone || '').trim() && !PHONE_RE.test(form.phone.trim()))
+    errs.phone = PHONE_MSG;
   return errs;
 };
 
@@ -56,7 +64,7 @@ export default function ProfileScreen() {
   };
 
   const handleSave = async () => {
-    const errs = validate(form);
+    const errs = validate(form, user?.phone);
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
     setLoading(true);

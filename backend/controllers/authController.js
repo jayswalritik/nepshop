@@ -3,6 +3,25 @@ const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const { generateToken } = require('../utils/generateToken');
 const { SUSPENDED_MESSAGE } = require('../middleware/authMiddleware');
+// Single source of truth for the phone rule — the SAME helper the register
+// route uses (backend/utils/contactValidation.js). Profile updates validate the
+// phone ONLY when it's actually changing, so existing accounts holding legacy
+// numbers can still save other edits untouched.
+const {
+  isValidNepaliPhone,
+  isBlankOrValidNepaliPhone,
+  PHONE_ERROR_MESSAGE,
+  SHOP_PHONE_ERROR_MESSAGE,
+  KHALTI_ERROR_MESSAGE,
+  ESEWA_ERROR_MESSAGE,
+} = require('../utils/contactValidation');
+
+// True only when `incoming` is a real change to the stored `current` phone
+// (whitespace-insensitive). undefined/null/unchanged → not a change → skip
+// validation entirely (deliberate: seeded numbers that predate the rule stay
+// valid for save until the user actually edits them).
+const phoneIsChanging = (incoming, current) =>
+  incoming != null && String(incoming).trim() !== String(current ?? '').trim();
 
 // ─────────────────────────────────────────────────────────
 // @desc    Register a new user (customer / seller / delivery)
@@ -52,6 +71,12 @@ const registerUser = asyncHandler(async (req, res) => {
       res.status(400);
       throw new Error('Shop name and PAN number are required for seller registration');
     }
+    // Shop contact phone is required for a seller and must be a valid Nepali
+    // mobile (rejects empty/absent too, since isValidNepaliPhone is false for those).
+    if (!isValidNepaliPhone(shopAddress?.phone)) {
+      res.status(400);
+      throw new Error(SHOP_PHONE_ERROR_MESSAGE);
+    }
   }
 
   if (role === 'delivery') {
@@ -93,18 +118,16 @@ const registerUser = asyncHandler(async (req, res) => {
 
   // 7. Build response
   const {
-    sendWelcomeEmail,
     sendSellerApplicationEmail,
     sendDeliveryApplicationEmail,
     sendNewApplicationToAdmin,
   } = require('../utils/emailService');
 
-  
-  if (role === 'customer') {
-    // Send welcome email
-    sendWelcomeEmail(user);
 
-    // NOTE: no token issued — user must verify email before logging in
+  if (role === 'customer') {
+    // NOTE: no token issued — user must verify email before logging in. The
+    // customer WELCOME email is intentionally NOT sent here; it fires once the
+    // customer actually verifies their email (see verifyEmail below).
     return res.status(201).json({
       success: true,
       message: 'Account created! Please check your email to verify your account before signing in.',
@@ -171,10 +194,10 @@ const loginUser = asyncHandler(async (req, res) => {
   if (role && !userRoles.includes(role)) {
     res.status(403);
     const roleLabels = { customer: 'customer', seller: 'seller', delivery: 'delivery agent' };
-    throw new Error(
-      `This email is not registered as a ${roleLabels[role] || role}. ` +
-      `You have access to: ${userRoles.join(', ')}.`
-    );
+    // Do NOT enumerate the account's other roles — that discloses which roles
+    // the account holds to whoever is signing in. State only that this email
+    // isn't registered for the role they chose.
+    throw new Error(`This email is not registered as a ${roleLabels[role] || role}.`);
   }
 
   // 4. Check account status
@@ -279,6 +302,31 @@ const updateSellerSettings = asyncHandler(async (req, res) => {
     throw new Error('Your name is verified and locked. Contact support to change verified identity details.');
   }
 
+  // Validate the phone ONLY when it's actually being changed (see helper).
+  if (phoneIsChanging(phone, user.phone) && !isValidNepaliPhone(String(phone).trim())) {
+    res.status(400);
+    throw new Error(PHONE_ERROR_MESSAGE);
+  }
+
+  // A submitted shop address must carry a valid Nepali-mobile shop contact —
+  // the shop phone is required wherever the shop is created/edited.
+  if (shopAddress && !isValidNepaliPhone(shopAddress.phone)) {
+    res.status(400);
+    throw new Error(SHOP_PHONE_ERROR_MESSAGE);
+  }
+
+  // Payout numbers are OPTIONAL: blank stays acceptable; a provided value must be valid.
+  if (req.body.payoutDetails) {
+    if (!isBlankOrValidNepaliPhone(req.body.payoutDetails.khaltiNumber)) {
+      res.status(400);
+      throw new Error(KHALTI_ERROR_MESSAGE);
+    }
+    if (!isBlankOrValidNepaliPhone(req.body.payoutDetails.esewaNumber)) {
+      res.status(400);
+      throw new Error(ESEWA_ERROR_MESSAGE);
+    }
+  }
+
   // Update fields if provided
   if (phone)       user.phone     = phone;
   if (shopName)    user.shopName  = shopName;
@@ -340,6 +388,12 @@ const updateCustomerProfile = asyncHandler(async (req, res) => {
     throw new Error("Verified seller/delivery accounts can't edit profile details from the customer profile.");
   }
 
+  // Validate the phone ONLY when it's actually being changed (see helper).
+  if (phoneIsChanging(phone, user.phone) && !isValidNepaliPhone(String(phone).trim())) {
+    res.status(400);
+    throw new Error(PHONE_ERROR_MESSAGE);
+  }
+
   if (firstName) user.firstName = firstName;
   if (lastName)  user.lastName  = lastName;
   if (phone)     user.phone     = phone;
@@ -397,6 +451,24 @@ const updateDeliveryProfile = asyncHandler(async (req, res) => {
     throw new Error('Your name is verified and locked. Contact support to change verified identity details.');
   }
 
+  // Validate the phone ONLY when it's actually being changed (see helper).
+  if (phoneIsChanging(phone, user.phone) && !isValidNepaliPhone(String(phone).trim())) {
+    res.status(400);
+    throw new Error(PHONE_ERROR_MESSAGE);
+  }
+
+  // Payout numbers are OPTIONAL: blank stays acceptable; a provided value must be valid.
+  if (payoutDetails) {
+    if (!isBlankOrValidNepaliPhone(payoutDetails.khaltiNumber)) {
+      res.status(400);
+      throw new Error(KHALTI_ERROR_MESSAGE);
+    }
+    if (!isBlankOrValidNepaliPhone(payoutDetails.esewaNumber)) {
+      res.status(400);
+      throw new Error(ESEWA_ERROR_MESSAGE);
+    }
+  }
+
   if (phone)         user.phone     = phone;
   if (payoutDetails) {
     user.payoutDetails = {
@@ -416,7 +488,7 @@ const updateDeliveryProfile = asyncHandler(async (req, res) => {
     message: 'Profile updated successfully',
     user: updated.toPublicJSON(),
   });
-}); 
+});
 
 // ─────────────────────────────────────────────────────────
 // @desc    Forgot password — send reset email
@@ -632,6 +704,11 @@ const applyForRole = asyncHandler(async (req, res) => {
     user.shopName    = shopName;
     user.panNumber   = panNumber;
     if (shopAddress) {
+      // A submitted shop address must carry a valid Nepali-mobile shop contact.
+      if (!isValidNepaliPhone(shopAddress.phone)) {
+        res.status(400);
+        throw new Error(SHOP_PHONE_ERROR_MESSAGE);
+      }
       user.shopAddress = {
         street:   shopAddress.street   || null,
         city:     shopAddress.city     || null,
@@ -651,6 +728,15 @@ const applyForRole = asyncHandler(async (req, res) => {
   }
 
   if (payoutDetails) {
+    // Payout numbers are OPTIONAL: blank stays acceptable; a provided value must be valid.
+    if (!isBlankOrValidNepaliPhone(payoutDetails.khaltiNumber)) {
+      res.status(400);
+      throw new Error(KHALTI_ERROR_MESSAGE);
+    }
+    if (!isBlankOrValidNepaliPhone(payoutDetails.esewaNumber)) {
+      res.status(400);
+      throw new Error(ESEWA_ERROR_MESSAGE);
+    }
     user.payoutDetails = {
       preferredMethod:   payoutDetails.preferredMethod   || user.payoutDetails?.preferredMethod,
       bankName:          payoutDetails.bankName          || user.payoutDetails?.bankName,
@@ -862,6 +948,15 @@ const verifyEmail = asyncHandler(async (req, res) => {
   user.emailVerifyToken = null;
   user.emailVerifyExpire = null;
   await user.save();
+
+  // Customer WELCOME email — sent ONCE, here, only after successful email
+  // verification (moved out of registration). Customers only; sellers/delivery
+  // have their own application/approval emails. Fire-and-forget (not awaited),
+  // matching every other email call — a delivery problem never fails the flow.
+  if (user.role === 'customer') {
+    const { sendWelcomeEmail } = require('../utils/emailService');
+    sendWelcomeEmail(user);
+  }
 
   res.status(200).json({
     success: true,

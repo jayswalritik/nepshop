@@ -40,9 +40,23 @@ const PAYOUT_METHODS = [
 // validation here — checking them would risk silently blocking a legitimate
 // phone/payout-only save with no visible error, since neither field renders
 // an error message anymore.
-const validate = (form) => {
+// Phone rule — identical to the backend (backend/utils/contactValidation.js):
+// exactly 10 digits starting 98/97. Enforced only when the phone actually
+// changes, so a legacy number still saves untouched.
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+// Khalti/eSewa payout numbers — optional, but must be valid when non-empty.
+const KHALTI_MSG = 'Khalti number must be exactly 10 digits and start with 98 or 97.';
+const ESEWA_MSG  = 'eSewa number must be exactly 10 digits and start with 98 or 97.';
+
+const validate = (form, originalPhone = '') => {
   const errs = {};
   if (!form.phone.trim()) errs.phone = 'Phone is required';
+  else if (form.phone.trim() !== (originalPhone || '').trim() && !PHONE_RE.test(form.phone.trim()))
+    errs.phone = PHONE_MSG;
+  // Payout numbers are optional — validate only when non-empty.
+  if (form.khaltiNumber.trim() && !PHONE_RE.test(form.khaltiNumber.trim())) errs.khaltiNumber = KHALTI_MSG;
+  if (form.esewaNumber.trim()  && !PHONE_RE.test(form.esewaNumber.trim()))  errs.esewaNumber  = ESEWA_MSG;
   return errs;
 };
 
@@ -73,7 +87,7 @@ export default function DeliveryProfileScreen() {
   };
 
   const handleSave = async () => {
-    const errs = validate(form);
+    const errs = validate(form, user?.phone);
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
 
     setLoading(true);
@@ -261,13 +275,14 @@ export default function DeliveryProfileScreen() {
             <View style={styles.fieldWrap}>
               <Text style={styles.label}>Khalti number</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.khaltiNumber && styles.inputError]}
                 value={form.khaltiNumber}
                 onChangeText={(v) => handleChange('khaltiNumber', v)}
                 placeholder="Khalti registered phone number"
                 placeholderTextColor={COLORS.tabInactive}
                 keyboardType="phone-pad"
               />
+              {errors.khaltiNumber ? <Text style={styles.fieldError}>{errors.khaltiNumber}</Text> : null}
             </View>
           )}
 
@@ -275,13 +290,14 @@ export default function DeliveryProfileScreen() {
             <View style={styles.fieldWrap}>
               <Text style={styles.label}>eSewa number</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.esewaNumber && styles.inputError]}
                 value={form.esewaNumber}
                 onChangeText={(v) => handleChange('esewaNumber', v)}
                 placeholder="eSewa registered phone number"
                 placeholderTextColor={COLORS.tabInactive}
                 keyboardType="phone-pad"
               />
+              {errors.esewaNumber ? <Text style={styles.fieldError}>{errors.esewaNumber}</Text> : null}
             </View>
           )}
 

@@ -24,8 +24,12 @@ import { DISTRICTS } from '../src/constants/districts';
 // conditional spread in handleSignup, mirroring AuthPage.jsx's handleSignup
 // payload construction), same POST /auth/register endpoint, same
 // role-specific success states.
-const EMAIL_RE = /\S+@\S+\.\S+/;
-const PHONE_RE = /^[0-9+\- ]{7,15}$/;
+// Contact rules — identical to the backend (backend/utils/contactValidation.js):
+// phone is exactly 10 digits starting 98/97; email is a standard-format check.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^(98|97)\d{8}$/;
+const PHONE_MSG = 'Phone number must be exactly 10 digits and start with 98 or 97.';
+const SHOP_PHONE_MSG = 'Shop contact number must be exactly 10 digits and start with 98 or 97.';
 
 // AuthPage.jsx's `roles` array (role tabs on the auth screen).
 const ROLES = [
@@ -98,7 +102,7 @@ export default function SignupScreen() {
     if (!firstName.trim()) e.firstName = 'First name is required';
     if (!lastName.trim()) e.lastName = 'Last name is required';
     if (!phone.trim()) e.phone = 'Phone number is required';
-    else if (!PHONE_RE.test(phone.trim())) e.phone = 'Enter a valid phone number';
+    else if (!PHONE_RE.test(phone.trim())) e.phone = PHONE_MSG;
 
     if (role === 'seller') {
       if (!shopName.trim()) e.shopName = 'Shop name is required';
@@ -107,13 +111,14 @@ export default function SignupScreen() {
       if (!shopCity.trim()) e.shopCity = 'City is required';
       if (!shopDistrict) e.shopDistrict = 'District is required';
       if (!shopPhone.trim()) e.shopPhone = 'Shop contact number is required';
+      else if (!PHONE_RE.test(shopPhone.trim())) e.shopPhone = SHOP_PHONE_MSG;
     }
     if (role === 'delivery') {
       if (!vehicleType) e.vehicleType = 'Vehicle type is required';
       if (!citizenshipNumber.trim()) e.citizenshipNumber = 'Citizenship number is required';
     }
 
-    if (!email || !EMAIL_RE.test(email)) e.email = 'Valid email is required';
+    if (!email || !EMAIL_RE.test(email.trim())) e.email = 'Please enter a valid email address';
     if (!password || password.length < 8) e.password = 'Password must be at least 8 characters';
     else if (!/[A-Z]/.test(password)) e.password = 'Password must contain at least one uppercase letter';
     else if (!/[0-9]/.test(password)) e.password = 'Password must contain at least one number';

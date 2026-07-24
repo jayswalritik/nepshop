@@ -20,6 +20,13 @@ const {
 } = require('../controllers/authController');
 const { reapplyUser } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
+// Single source of truth for email + phone rules (backend/utils/contactValidation.js).
+const {
+  isValidEmail,
+  isValidNepaliPhone,
+  EMAIL_ERROR_MESSAGE,
+  PHONE_ERROR_MESSAGE,
+} = require('../utils/contactValidation');
 
 
 const router = express.Router();
@@ -41,12 +48,14 @@ const registerValidation = [
     .trim()
     .toLowerCase()
     .notEmpty().withMessage('Email is required')
-    .isEmail().withMessage('Please enter a valid email address'),
+    .bail()
+    .custom((value) => isValidEmail(value)).withMessage(EMAIL_ERROR_MESSAGE),
 
   body('phone')
     .trim()
     .notEmpty().withMessage('Phone number is required')
-    .matches(/^[0-9+\- ]{7,15}$/).withMessage('Please enter a valid phone number'),
+    .bail()
+    .custom((value) => isValidNepaliPhone(value)).withMessage(PHONE_ERROR_MESSAGE),
 
   body('password')
     .notEmpty().withMessage('Password is required')
