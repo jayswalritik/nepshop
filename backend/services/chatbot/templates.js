@@ -18,7 +18,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Shared TIME phrasing — remaining-window ("22 min") and window-length ("5
 // minutes") copy, rounded DOWN. Never re-implement duration formatting here.
-const { formatRemaining, formatLength } = require('../../utils/returnWindow');
+const { computeWindow, formatRemaining, formatLength } = require('../../utils/returnWindow');
 
 const formatRs = (n) => `Rs ${Number(n).toLocaleString('en-IN')}`;
 
@@ -439,6 +439,63 @@ const historyReply = (orders) => {
 const orderNotFound = (id) =>
   `I don't see order #${id} in the orders I just showed you. Try "show my recent orders" first.`;
 
+// ── Cancel ──────────────────────────────────────────────────────────────────
+// Every money figure comes straight off a packages[] field (payable) — the bot
+// never does cancellation arithmetic. The actual cancel is performed only by the
+// existing PUT endpoint via the client action; these are phrasing only.
+const cancelWhichOrderReply = () =>
+  `Which order would you like to cancel? Here are your recent orders — tell me which one (e.g. "cancel the first one").`;
+
+const cancelNoOrdersReply = () =>
+  `You don't have any orders to cancel yet.`;
+
+// Single cancellable package → straight to confirm, naming shop + amount owed.
+const cancelConfirmReply = (shopName, payable) =>
+  `Just to confirm — cancel your ${shopName} package (${formatRs(payable)})? This can't be undone. Reply "yes" to go ahead, or "no" to keep it.`;
+
+// 2+ cancellable packages on one order → picker, never a guess. Each line is
+// addressed by its own package index, so "cancel the second package" lines up.
+const cancelPickerReply = (order, cancellablePackages) =>
+  `Order #${order.shortId} has ${cancellablePackages.length} packages that can still be cancelled:\n` +
+  cancellablePackages.map((p) => `• Package ${p.index} — ${p.sellerName} (${formatRs(p.payable)})`).join('\n') +
+  `\nWhich one? e.g. "cancel the second package".`;
+
+// Re-ask when a pick was ambiguous (two packages share a shop name) or matched
+// none — never guess. Names each package by its own index + shop + amount.
+const cancelRepickReply = (order, cancellablePackages) =>
+  `I couldn't tell which package you meant. Order #${order.shortId} still has these you can cancel:\n` +
+  cancellablePackages.map((p) => `• Package ${p.index} — ${p.sellerName} (${formatRs(p.payable)})`).join('\n') +
+  `\nWhich one? e.g. "cancel the second package".`;
+
+const cancelInProgressReply = () =>
+  `Okay — cancelling that package now…`;
+
+const cancelAbortedReply = () =>
+  `No problem — I've left that order exactly as it is.`;
+
+// One honest sentence for a package that can't be cancelled, chosen by state.
+// Window state is read from the shared returnWindow helper — no date math here.
+const cancelBlockedSentence = (p) => {
+  const shop = p.sellerName;
+  if (p.status === 'delivered') {
+    const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
+    const { expired, minutesLeft } = computeWindow(p.deliveredAt, RETURN_WINDOW_MINUTES);
+    return expired
+      ? `Your ${shop} package has been delivered and its return window has closed, so it can't be cancelled or returned.`
+      : `Your ${shop} package has already been delivered, so it can't be cancelled — but you can still return it (${formatRemaining(minutesLeft)} left in the return window).`;
+  }
+  if (p.status === 'returned')  return `Your ${shop} package has already been returned, so there's nothing to cancel.`;
+  if (p.status === 'cancelled') return `Your ${shop} package is already cancelled.`;
+  // packed / dispatched / out for delivery — in motion, can't be stopped now.
+  return `Your ${shop} package is already on its way, so it can't be cancelled now — a return window will open once it's delivered.`;
+};
+
+const cancelBlockedReply = (order, packages) => {
+  const lines = (packages || []).map(cancelBlockedSentence);
+  if (lines.length <= 1) return lines[0] || `There's nothing to cancel on order #${order.shortId}.`;
+  return `None of the packages on order #${order.shortId} can be cancelled:\n` + lines.map((l) => `• ${l}`).join('\n');
+};
+
 // ── Returns ───────────────────────────────────────────────────────────────────
 // Honest by construction: eligibility comes from real orders + the real window,
 // and BOTH refund outcomes are stated because the ADMIN decides fault — the bot
@@ -596,6 +653,14 @@ module.exports = {
   statusFilterReply,
   historyReply,
   orderNotFound,
+  cancelWhichOrderReply,
+  cancelNoOrdersReply,
+  cancelConfirmReply,
+  cancelPickerReply,
+  cancelRepickReply,
+  cancelInProgressReply,
+  cancelAbortedReply,
+  cancelBlockedReply,
   returnReply,
   qaReply,
   qaMissReply,

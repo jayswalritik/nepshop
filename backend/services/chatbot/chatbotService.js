@@ -319,6 +319,153 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
       return respond(intent, reply, [], ['Show my recent orders'], newContext, { orders: [target] });
     }
 
+    // ── Cancel an order/package — with a MANDATORY confirm step. The cancel
+    //    itself happens ONLY through the existing PUT endpoint (client action);
+    //    this layer never calls cancelShipment or touches documents. ──────────
+    case INTENTS.CANCEL_ORDER: {
+      const CANCELLABLE = ['pending', 'confirmed'];
+
+      // ── Confirm turn: a pendingCancel staged last turn awaits a yes/no.
+      // pendingCancel is stripped at the respond() chokepoint, so whatever we
+      // return here it never survives past this single turn (no leak).
+      if (context.pendingCancel) {
+        const said = (message || '').trim();
+        const YES  = /^(yes|yeah|yep|yup|confirm|do it|go ahead|sure|please do)\b[\s!.]*$/i;
+        if (YES.test(said)) {
+          return respond(
+            intent, templates.cancelInProgressReply(), [], [], context,
+            { action: { type: 'cancel_order', shipmentId: context.pendingCancel.shipmentId } }
+          );
+        }
+        const NO = /^(no|nope|nah|don'?t|do not|stop|leave it|keep it|never\s?mind)\b[\s!.]*$/i;
+        if (NO.test(said)) {
+          return respond(intent, templates.cancelAbortedReply(), [], ['Show my recent orders'], context);
+        }
+        // Neither yes nor no → abandon the pending cancel silently and handle
+        // the message as a brand-new turn. pendingCancel is already gone via the
+        // chokepoint, and detection re-runs without it (rule 0 won't re-fire).
+        const fresh = { ...context };
+        delete fresh.pendingCancel;
+        return handleMessage(user, message, fresh, mode);
+      }
+
+      // ── A pick answering a cancel ask-step (which-order list / package
+      //    picker). pendingCancelPick lives ONE turn (respond() chokepoint); the
+      //    router only routes here when the message is a genuine pick. ─────────
+      let res;
+      if (context.pendingCancelPick) {
+        const pick = context.pendingCancelPick;
+
+        if (pick.kind === 'package') {
+          // The packages actually offered, in the order shown (by shipmentIds).
+          const offered = (pick.shipmentIds || [])
+            .map((id) => (context.lastPackages || []).find((p) => String(p._id) === String(id)))
+            .filter(Boolean);
+          const parent = context.lastPackageOrder || {};
+
+          // Ordinal by position among the offered packages (reuse resolveListTarget's
+          // package path). Out of range → the existing copy, verbatim.
+          const r = resolveListTarget(query, { lastList: 'packages', lastPackages: offered, lastPackageOrder: parent, lastOrders: context.lastOrders });
+          if (r && r.outOfRange != null) {
+            // N counts only the CANCELLABLE packages (the list the pick indexes
+            // into), so say so — the customer may see more packages than N.
+            return respond(intent, `That order has ${r.outOfRange} package${r.outOfRange === 1 ? '' : 's'} that can still be cancelled.`, [], ['Show my recent orders'], context, { orders: [] });
+          }
+          let pkg = r && r.kind === 'package' ? r.target : null;
+          // No ordinal → shop-name match among the offered packages.
+          if (!pkg) {
+            const hits = offered.filter((p) => shopMatches(query, p.sellerName));
+            if (hits.length === 1) pkg = hits[0]; // exactly one → resolve; else ambiguous
+          }
+          if (pkg) {
+            // Resolved → straight to the CONFIRM step (mandatory), same staging
+            // as the existing single-cancellable path.
+            return respond(
+              intent, templates.cancelConfirmReply(pkg.sellerName, pkg.payable), [], ['Show my recent orders'], context,
+              { orders: [packageAsCard(parent, pkg)], pendingCancel: { shipmentId: pkg._id, orderId: parent._id } }
+            );
+          }
+          // Ambiguous (shared shop name) or no match → re-ask, never guess, and
+          // re-stage the pick for one more turn.
+          return respond(intent, templates.cancelRepickReply(parent, offered), [], ['Show my recent orders'], context, { orders: [parent], pendingCancelPick: pick });
+        }
+
+        // kind 'order' → resolve the ordinal against the listed orders, then fall
+        // THROUGH to the existing order-resolved logic below (no duplication).
+        const r = resolveListTarget(query, { lastList: 'orders', lastOrders: context.lastOrders || [], lastPackages: [], lastPackageOrder: null });
+        if (r && r.outOfRange != null) {
+          return respond(intent, `You have only ${r.outOfRange} recent orders.`, [], ['Show my recent orders'], context, { orders: [] });
+        }
+        if (!r || r.kind !== 'order') {
+          return respond(intent, templates.cancelWhichOrderReply(), [], ['Show my recent orders'], context, { orders: context.lastOrders || [], pendingCancelPick: pick });
+        }
+        res = r;
+      } else {
+        // ── Fresh cancel request: which order/package do they mean? ──────────
+        res = resolveListTarget(query, context);
+      }
+
+      // No order identified (or an out-of-range ordinal) → show the recent-orders
+      // list and ask which, the same path ORDER_HISTORY uses. Stage the pick so
+      // the user's next reply routes back into cancel (one turn only).
+      if (!res || res.outOfRange != null) {
+        const fetched    = await getRecentOrders(user._id, 6);
+        const orders     = fetched.slice(0, 5).map(toChatOrder);
+        const newContext = { ...context, lastIntent: INTENTS.CANCEL_ORDER, lastOrders: orders, ...listFields(orders) };
+        return respond(
+          intent,
+          orders.length ? templates.cancelWhichOrderReply() : templates.cancelNoOrdersReply(),
+          [],
+          orders.length ? ['Show my recent orders'] : ['Show trending products'],
+          newContext,
+          orders.length ? { orders, pendingCancelPick: { kind: 'order' } } : { orders }
+        );
+      }
+
+      // Explicit package reference ("cancel the second package") → skip the
+      // picker, go straight to confirm (or an honest block if not cancellable).
+      if (res.kind === 'package') {
+        const pkg    = res.target;
+        const parent = context.lastPackageOrder || {};
+        if (!CANCELLABLE.includes(pkg.status)) {
+          return respond(intent, templates.cancelBlockedReply(parent, [pkg]), [], ['Show my recent orders'], context, { orders: [packageAsCard(parent, pkg)] });
+        }
+        return respond(
+          intent, templates.cancelConfirmReply(pkg.sellerName, pkg.payable), [], ['Show my recent orders'], context,
+          { orders: [packageAsCard(parent, pkg)], pendingCancel: { shipmentId: pkg._id, orderId: parent._id } }
+        );
+      }
+
+      // A whole order was named — inspect its packages by real per-package status.
+      const order       = res.target;
+      const pkgs        = Array.isArray(order.packages) ? order.packages : [];
+      const cancellable = pkgs.filter((p) => CANCELLABLE.includes(p.status));
+
+      // Nothing cancellable → one honest sentence per package, chosen by state.
+      if (cancellable.length === 0) {
+        return respond(intent, templates.cancelBlockedReply(order, pkgs), [], ['Show my recent orders'], context, { orders: [order] });
+      }
+
+      // Exactly one cancellable package (single-package order OR only one still
+      // eligible) → straight to confirm, no guess.
+      if (cancellable.length === 1) {
+        const pkg = cancellable[0];
+        return respond(
+          intent, templates.cancelConfirmReply(pkg.sellerName, pkg.payable), [], ['Show my recent orders'], context,
+          { orders: [order], pendingCancel: { shipmentId: pkg._id, orderId: order._id } }
+        );
+      }
+
+      // 2+ still cancellable → picker, never auto-pick. lastPackages carries the
+      // FULL package list so a follow-up ordinal lines up with the shown index;
+      // shipmentIds records exactly which packages were offered, in order.
+      const newContext = { ...context, lastIntent: INTENTS.CANCEL_ORDER, lastOrders: [order], ...listFields([order]) };
+      return respond(
+        intent, templates.cancelPickerReply(order, cancellable), [], ['Show my recent orders'], newContext,
+        { orders: [order], pendingCancelPick: { kind: 'package', orderId: order._id, shipmentIds: cancellable.map((p) => String(p._id)) } }
+      );
+    }
+
     // ── Trending — GROUNDED in the real recommendation engine ───────────────
     case INTENTS.TRENDING: {
       const trending = await getTrending({ limit: CHAT_SEARCH_LIMIT, windowDays: 30 });
@@ -615,13 +762,43 @@ const listFields = (rendered) => {
   return { lastList: 'orders', lastPackages: [], lastPackageOrder: null };
 };
 
-const respond = (intent, reply, products, suggestions, context, extra = {}) => ({
-  intent,
-  reply,
-  products,
-  suggestions,
-  context,
-  ...extra,
-});
+// Case-insensitive, whitespace-tolerant shop-name match — mirrors the router's
+// pick detector (intentRouter.shopNameMatch) so a shop reply the router accepts
+// as a pick resolves to the same package here. Substring either direction.
+const normShop = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const shopMatches = (msg, shopName) => {
+  const m = normShop(msg);
+  const n = normShop(shopName);
+  return n.length > 0 && (m.includes(n) || (m.length >= 3 && n.includes(m)));
+};
+
+// Uniform response shape + the SINGLE pendingCancel clearing chokepoint.
+// pendingCancel must survive EXACTLY ONE turn: any value arriving on the inbound
+// context is always stripped here, and it is re-staged on the outgoing context
+// ONLY when THIS turn explicitly passes `pendingCancel` in `extra` (the confirm
+// ask). Because clearing lives here and nowhere else, no downstream handler can
+// leak it — the defect pendingCartAdd has, deliberately not copied.
+const respond = (intent, reply, products, suggestions, context, extra = {}) => {
+  const { pendingCancel, pendingCancelPick, ...rest } = extra;
+  const cleaned = { ...(context || {}) };
+  // BOTH one-turn cancel keys travel through this single mechanism: always
+  // stripped from the inbound context, and re-staged ONLY when THIS turn passes
+  // them in `extra` (the confirm ask stages pendingCancel; the two cancel
+  // ask-steps stage pendingCancelPick). No per-branch clearing, so neither can
+  // leak past its single turn — the defect pendingCartAdd has, not copied.
+  delete cleaned.pendingCancel;
+  delete cleaned.pendingCancelPick;
+  const outContext = cleaned;
+  if (pendingCancel)     outContext.pendingCancel = pendingCancel;
+  if (pendingCancelPick) outContext.pendingCancelPick = pendingCancelPick;
+  return {
+    intent,
+    reply,
+    products,
+    suggestions,
+    context: outContext,
+    ...rest,
+  };
+};
 
 module.exports = { handleMessage };

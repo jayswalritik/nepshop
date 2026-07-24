@@ -32,6 +32,7 @@ const INTENTS = {
   MULTI_QA:       'multi_qa',         // question across the shown product list
   ADD_TO_CART:    'add_to_cart',      // conversational cart add
   ORDER_FOLLOW_UP:'order_follow_up',  // ordinal question about listed orders
+  CANCEL_ORDER:   'cancel_order',     // cancel an order/package (confirm step)
   SHOW_AGAIN:     'show_again',       // re-show what was listed before
   VIEW_CART:      'view_cart',        // "what's in my cart?"
 };
@@ -132,6 +133,22 @@ const shortIdToken = (msg) => {
   return null;
 };
 
+// Ordinal / "that one" selector for a shown ORDER/PACKAGE list. ONE regex,
+// shared by the order follow-up rule (7.75a) and the cancel-pick rule (0.5) so
+// a "pick" is defined identically in both places.
+const ORDER_ORDINAL_RE = /\b((the\s)?(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)(\s(one|order))?|(that|this)\s?one)\b/i;
+
+// Case-insensitive, whitespace-tolerant shop-name match (the shop analogue of
+// matchesShownProductName, which is product-only). Substring EITHER direction so
+// both "cancel tech bazaar" and a bare "tech bazaar" hit "Tech Bazaar"; a very
+// short reply must contain the whole name to count (avoids a stray "a" matching).
+const normShop = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const shopNameMatch = (msg, shopName) => {
+  const m = normShop(msg);
+  const n = normShop(shopName);
+  return n.length > 0 && (m.includes(n) || (m.length >= 3 && n.includes(m)));
+};
+
 // ── Follow-up patterns (feature 7 — conversation memory) ─────────────────────
 // Anchored to the WHOLE message so a fresh search like "cheapest laptop"
 // (superlative + product noun) never matches — only pure follow-up questions
@@ -174,6 +191,44 @@ const detectIntent = (rawMessage, context = {}) => {
   const msgFixed = correctIntentTypos(msg);
 
   if (!msg) return { intent: INTENTS.HELP, query: '' };
+
+  // ── 0. Pending-cancel confirm reply — HIGHEST priority ─────────────────────
+  // A cancel confirmation is awaiting a yes/no, so route straight to
+  // CANCEL_ORDER before greeting/thanks/help can swallow a bare "yes"/"no".
+  // The handler decides yes (do it) vs anything-else (abort + fresh turn), and
+  // pendingCancel lives exactly one turn (cleared at the service respond()
+  // chokepoint), so this can't loop.
+  if (context.pendingCancel) {
+    return { intent: INTENTS.CANCEL_ORDER, query: msgFixed };
+  }
+
+  // ── 0.5 Pending-cancel PICK — a pick answering a cancel ask-step (the
+  // which-order list or the multi-package picker). Routed to CANCEL_ORDER,
+  // ahead of the generic ordinal rule (7.75a) AND the short-id rule (7.75c), so
+  // the pick reaches the cancel flow. A pick is a bare ordinal (SAME regex as
+  // 7.75a); for a package picker, a shop name among those offered this turn; or
+  // — for a which-ORDER step only — a short-id token (reusing shortIdToken, the
+  // same test 7.75c uses) that matches a listed order. shortId derives from the
+  // order _id, so packages have none — a short id is never a package pick. A
+  // token matching NO listed order (or an ambiguous one, left to the handler)
+  // that isn't otherwise a pick falls through to normal routing, and
+  // pendingCancelPick is dropped at the respond() chokepoint (one turn only).
+  if (context.pendingCancelPick) {
+    const pick = context.pendingCancelPick;
+    const offered = pick.kind === 'package'
+      ? (context.lastPackages || []).filter((p) =>
+          (pick.shipmentIds || []).map(String).includes(String(p._id)))
+      : [];
+    const idTok = shortIdToken(msgFixed);
+    const isShortIdPick = pick.kind === 'order' && !!idTok &&
+      (context.lastOrders || []).some((o) => (o.shortId || '').toUpperCase() === idTok.id);
+    const isPick = ORDER_ORDINAL_RE.test(msgFixed) ||
+      offered.some((p) => shopNameMatch(msgFixed, p.sellerName)) ||
+      isShortIdPick;
+    if (isPick) {
+      return { intent: INTENTS.CANCEL_ORDER, query: msgFixed };
+    }
+  }
 
   const wordCount = msg.split(/\s+/).length;
 
@@ -235,6 +290,25 @@ const detectIntent = (rawMessage, context = {}) => {
     return { intent: INTENTS.VIEW_CART, query: '' };
   }
 
+  // ── 4.9 Cancel an order or package — the VERB "cancel", not the status word.
+  // Placed after the cart rules and BEFORE return/refund so "cancel my order
+  // and refund me" is a cancellation, not a refund. \bcancel\b never matches the
+  // adjective "cancelled"/"canceled" (no word boundary inside them, so rule
+  // 7.75(b)'s status filter is untouched). Requires an order/package/ordinal/
+  // short-id/"it" reference so an out-of-context bare "cancel" doesn't hijack a
+  // message (a pending-confirm reply is already handled by rule 0 above).
+  if (
+    /\bcancel\b/i.test(msgFixed) &&
+    (
+      /\b(order|orders|package|packages|parcel|delivery|purchase)\b/i.test(msgFixed) ||
+      /\b(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)\b/i.test(msgFixed) ||
+      /\bit\b/i.test(msgFixed) ||
+      shortIdToken(msgFixed)
+    )
+  ) {
+    return { intent: INTENTS.CANCEL_ORDER, query: msgFixed };
+  }
+
   // ── 5. Return / refund — check BEFORE order tracking ───────────────────────
   if (hasAnyWord(msgFixed, ['return', 'refund', 'exchange']) || /money\s?back/.test(msgFixed)) {
     return { intent: INTENTS.RETURN_REFUND, query: msgFixed };
@@ -248,7 +322,7 @@ const detectIntent = (rawMessage, context = {}) => {
     ['order_tracking', 'order_history', 'order_follow_up', 'return_refund'].includes(context.lastIntent)
   ) {
     // (a) Ordinal / "that one" — "when will the second one arrive?"
-    if (/\b((the\s)?(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)(\s(one|order))?|(that|this)\s?one)\b/i.test(msgFixed)) {
+    if (ORDER_ORDINAL_RE.test(msgFixed)) {
       return { intent: INTENTS.ORDER_FOLLOW_UP, query: msgFixed };
     }
     // (b) Status question — "which is the delivered one?", "any out for delivery?"

@@ -308,6 +308,7 @@ const ChatWidget = ({ onGoToOrders, onGoToCart }) => {
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
   const greetedRef = useRef(false);
+  const cancelInFlightRef = useRef(false);   // guards against a double cancel PUT
   const [mode, setMode] = useState('conversational');   // 'fast' | 'conversational'
 
   // Personalized greeting the FIRST time the widget opens (feature 0)
@@ -355,6 +356,23 @@ const ChatWidget = ({ onGoToOrders, onGoToCart }) => {
         }
         if (failed > 0) {
           replyText = `Added ${data.action.productIds.length - failed} to your cart — ${failed} couldn't be added.`;
+        }
+      } else if (data.action?.type === 'cancel_order') {
+        // Cancel happens ONLY through the existing per-package endpoint (same
+        // one OrdersPage calls). Guard against a double-fire while one cancel is
+        // in flight, mirroring OrdersPage's disabled-button behaviour.
+        if (cancelInFlightRef.current) {
+          replyText = "I'm already cancelling that — one moment.";
+        } else {
+          cancelInFlightRef.current = true;
+          try {
+            const { data: cancelData } = await API.put(`/orders/shipments/${data.action.shipmentId}/cancel`);
+            if (cancelData?.message) replyText = cancelData.message;
+          } catch (cancelErr) {
+            replyText = `Sorry — I couldn't cancel that: ${cancelErr.response?.data?.message || 'something went wrong'}. You can try again from your Orders page.`;
+          } finally {
+            cancelInFlightRef.current = false;
+          }
         }
       }
 

@@ -1304,5 +1304,422 @@ test('C: drilled context with an OLD-shape client (no lastPackages) degrades to 
   assert.strictEqual(r.target, o1);
 });
 
+// ─────────────────────────────────────────────────────────
+// CANCEL_ORDER — routing, confirm step, and the clearing chokepoint
+// ─────────────────────────────────────────────────────────
+// Reproductions of chatbotService.js (Ollama-coupled on import), kept
+// byte-for-byte in sync with the CANCEL_ORDER case + respond() chokepoint:
+const CANCELLABLE = ['pending', 'confirmed'];
+const YES_RE = /^(yes|yeah|yep|yup|confirm|do it|go ahead|sure|please do)\b[\s!.]*$/i;
+const NO_RE  = /^(no|nope|nah|don'?t|do not|stop|leave it|keep it|never\s?mind)\b[\s!.]*$/i;
+
+// Mirrors the confirm-turn branch of the CANCEL_ORDER handler.
+const confirmTurn = (message, context) => {
+  const said = (message || '').trim();
+  if (YES_RE.test(said)) return { action: { type: 'cancel_order', shipmentId: context.pendingCancel.shipmentId } };
+  if (NO_RE.test(said))  return { reply: templates.cancelAbortedReply(), action: null };
+  return { freshTurn: true, action: null };
+};
+
+// Mirrors the fresh-request resolution branch given `res` from resolveListTarget.
+const cancelPlan = (res) => {
+  if (!res || res.outOfRange != null) return { kind: 'which-order' };
+  if (res.kind === 'package') {
+    const pkg = res.target;
+    return CANCELLABLE.includes(pkg.status)
+      ? { kind: 'confirm', pendingCancel: { shipmentId: pkg._id } }
+      : { kind: 'blocked', packages: [pkg] };
+  }
+  const pkgs        = Array.isArray(res.target.packages) ? res.target.packages : [];
+  const cancellable = pkgs.filter((p) => CANCELLABLE.includes(p.status));
+  if (cancellable.length === 0) return { kind: 'blocked', packages: pkgs };
+  if (cancellable.length === 1) return { kind: 'confirm', pendingCancel: { shipmentId: cancellable[0]._id } };
+  return { kind: 'picker', cancellable };
+};
+
+// Mirrors the respond() clearing chokepoint: inbound pendingCancel is always
+// stripped; it survives ONLY when this turn re-stages it via `extra`.
+const respondContext = (context, extra = {}) => {
+  const { pendingCancel } = extra;
+  const cleaned = { ...(context || {}) };
+  delete cleaned.pendingCancel;
+  return pendingCancel ? { ...cleaned, pendingCancel } : cleaned;
+};
+
+// Fixtures with real shipment _ids so the action carries a concrete shipmentId.
+const twoCancellable = toChatOrder(order({
+  status: 'confirmed',
+  shipments: [
+    ship({ _id: 'SHIPA', status: 'confirmed', seller: { shopName: 'Shop A' }, sellerSubtotal: 1000, deliveryCharge: 100 }),
+    ship({ _id: 'SHIPB', status: 'pending',   seller: { shopName: 'Shop B' }, sellerSubtotal: 2000, deliveryCharge: 0 }),
+  ],
+}));
+const oneCancellable = toChatOrder(order({
+  status: 'dispatched',
+  shipments: [
+    ship({ _id: 'S1', status: 'confirmed', seller: { shopName: 'Shop A' }, sellerSubtotal: 500, deliveryCharge: 50 }),
+    ship({ _id: 'S2', status: 'delivered', seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+  ],
+}));
+
+// ── Router ───────────────────────────────────────────────
+test('router: cancel verb OUTRANKS the refund keyword ("cancel my order and refund me")', () => {
+  const d = detectIntent('cancel my order and refund me', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: "cancel the second package" is NOT swallowed by the ordinal rule', () => {
+  const ctx = orderCtx([idCard('1C5159'), idCard('9AB123')]);
+  // The ordinal rule is armed in this ctx (proof: without "cancel" it fires)…
+  assert.strictEqual(detectIntent('the second one', ctx).intent, INTENTS.ORDER_FOLLOW_UP);
+  // …yet the cancel verb wins because rule 4.9 precedes rule 7.75.
+  assert.strictEqual(detectIntent('cancel the second package', ctx).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: the STATUS adjective "cancelled" still routes to ORDER_FOLLOW_UP, not CANCEL_ORDER', () => {
+  const d = detectIntent('which one is cancelled?', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.ORDER_FOLLOW_UP);
+  assert.strictEqual(d.statusFilter, 'cancelled');
+});
+
+test('router: pendingCancel routes ANY message (even "hello") to CANCEL_ORDER', () => {
+  assert.strictEqual(detectIntent('yes', { pendingCancel: { shipmentId: 'X' } }).intent, INTENTS.CANCEL_ORDER);
+  assert.strictEqual(detectIntent('hello', { pendingCancel: { shipmentId: 'X' } }).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: a bare "cancel" with no order reference does NOT hijack (falls through to search)', () => {
+  assert.notStrictEqual(detectIntent('cancel', {}).intent, INTENTS.CANCEL_ORDER);
+});
+
+// ── Handler: picker vs single vs explicit package ────────
+test('handler: 2+ cancellable packages → picker, never auto-picks', () => {
+  const res  = resolveListTarget('cancel the first one', { lastList: 'orders', lastOrders: [twoCancellable] });
+  const plan = cancelPlan(res);
+  assert.strictEqual(plan.kind, 'picker');
+  assert.strictEqual(plan.cancellable.length, 2);
+  assert.strictEqual(plan.pendingCancel, undefined); // no shipment staged — no guess
+  const text = templates.cancelPickerReply(twoCancellable, plan.cancellable);
+  assert.ok(text.includes('Shop A') && text.includes('Shop B'), 'names each shop');
+  assert.ok(text.includes(templates.formatRs(1100)) && text.includes(templates.formatRs(2000)), 'names each payable');
+});
+
+test('handler: exactly one cancellable package skips the picker → confirm with its shipmentId', () => {
+  const res  = resolveListTarget('cancel the first one', { lastList: 'orders', lastOrders: [oneCancellable] });
+  const plan = cancelPlan(res);
+  assert.strictEqual(plan.kind, 'confirm');
+  assert.strictEqual(plan.pendingCancel.shipmentId, 'S1'); // the confirmed one, not the delivered S2
+});
+
+test('handler: explicit "cancel the second package" skips the picker → confirm that package', () => {
+  const ctx = { lastList: 'packages', lastPackages: twoCancellable.packages, lastPackageOrder: twoCancellable, lastOrders: [twoCancellable] };
+  const plan = cancelPlan(resolveListTarget('cancel the second package', ctx));
+  assert.strictEqual(plan.kind, 'confirm');
+  assert.strictEqual(plan.pendingCancel.shipmentId, 'SHIPB');
+});
+
+test('handler: no order identified → which-order prompt (recent-orders list path)', () => {
+  const plan = cancelPlan(resolveListTarget('cancel my order', { lastList: 'orders', lastOrders: [twoCancellable] }));
+  assert.strictEqual(plan.kind, 'which-order'); // "cancel my order" has no ordinal/id → ask which
+});
+
+// ── Confirm turn: yes / no / neither ─────────────────────
+test('confirm: explicit "yes" emits the cancel_order action with the staged shipmentId', () => {
+  const out = confirmTurn('yes', { pendingCancel: { shipmentId: 'SHIPB' } });
+  assert.deepStrictEqual(out.action, { type: 'cancel_order', shipmentId: 'SHIPB' });
+});
+
+test('confirm: an explicit "no" aborts with an acknowledgement and NO action', () => {
+  const out = confirmTurn('no', { pendingCancel: { shipmentId: 'SHIPB' } });
+  assert.strictEqual(out.action, null);
+  assert.strictEqual(out.reply, templates.cancelAbortedReply());
+});
+
+test('confirm: a non-yes/non-no reply produces NO cancel and is handled as a fresh turn', () => {
+  const out = confirmTurn('actually show me laptops', { pendingCancel: { shipmentId: 'SHIPB' } });
+  assert.strictEqual(out.action, null);
+  assert.strictEqual(out.freshTurn, true);
+});
+
+// ── Clearing chokepoint: pendingCancel survives exactly one turn ─────────────
+test('chokepoint: inbound pendingCancel is stripped when this turn does not re-stage it', () => {
+  const out = respondContext({ pendingCancel: { shipmentId: 'X' }, lastList: 'orders' });
+  assert.strictEqual(out.pendingCancel, undefined);
+  assert.strictEqual(out.lastList, 'orders'); // other context untouched
+});
+
+test('chokepoint: pendingCancel is re-staged only when passed in extra (the confirm ask)', () => {
+  const out = respondContext({ lastList: 'orders' }, { pendingCancel: { shipmentId: 'X' } });
+  assert.deepStrictEqual(out.pendingCancel, { shipmentId: 'X' });
+});
+
+test('stale yes: one turn after a cancel, pendingCancel is gone and a bare "yes" does nothing', () => {
+  // Turn N: confirm ask stages pendingCancel.
+  const staged = respondContext({}, { pendingCancel: { shipmentId: 'SHIPB' } });
+  // Turn N+1: "yes" emits the action, and the reply strips pendingCancel.
+  assert.deepStrictEqual(confirmTurn('yes', staged).action, { type: 'cancel_order', shipmentId: 'SHIPB' });
+  const cleared = respondContext(staged); // action turn returns via the chokepoint
+  assert.strictEqual(cleared.pendingCancel, undefined);
+  // Turn N+2: a stale "yes" no longer routes to CANCEL_ORDER at all.
+  assert.notStrictEqual(detectIntent('yes', cleared).intent, INTENTS.CANCEL_ORDER);
+});
+
+// ── Nothing-cancellable: one honest sentence per state ───
+test('blocked: delivered + window OPEN → cannot cancel, offers the return path', () => {
+  const o = toChatOrder(order({
+    status: 'delivered',
+    shipments: [ship({ status: 'delivered', seller: { shopName: 'Shop A' }, deliveredAt: new Date() })], // just delivered → inside 5-min window
+  }));
+  const reply = templates.cancelBlockedReply(o, o.packages);
+  assert.ok(reply.includes("can't be cancelled"), 'says it cannot be cancelled');
+  assert.ok(/return it \(.*left in the return window\)/.test(reply), 'offers the return window');
+});
+
+test('blocked: delivered + window EXPIRED → cannot cancel, return window closed', () => {
+  const o = toChatOrder(order({
+    status: 'delivered',
+    shipments: [ship({ status: 'delivered', seller: { shopName: 'Shop A' }, deliveredAt: new Date('2020-01-01') })],
+  }));
+  const reply = templates.cancelBlockedReply(o, o.packages);
+  assert.ok(reply.includes('return window has closed'), 'states the window has closed');
+  assert.ok(!reply.includes('left in the return window'), 'does not offer a return');
+});
+
+test('blocked: shipped / out for delivery → cannot cancel now, window opens on delivery', () => {
+  const o = toChatOrder(order({
+    status: 'dispatched',
+    shipments: [ship({ status: 'dispatched', seller: { shopName: 'Shop A' } })],
+  }));
+  const reply = templates.cancelBlockedReply(o, o.packages);
+  assert.ok(reply.includes('already on its way'), 'says it is in motion');
+  assert.ok(reply.includes('return window will open once it'), 'notes a return window opens on delivery');
+});
+
+// ─────────────────────────────────────────────────────────
+// pendingCancelPick — a pick after a cancel ask-step routes into CANCEL_ORDER
+// ─────────────────────────────────────────────────────────
+// Reproductions kept byte-for-byte in sync with the CANCEL_ORDER pick branch +
+// the extended respond() chokepoint (chatbotService is Ollama-coupled on import).
+const normShop2 = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+const shopMatches2 = (msg, shopName) => {
+  const m = normShop2(msg);
+  const n = normShop2(shopName);
+  return n.length > 0 && (m.includes(n) || (m.length >= 3 && n.includes(m)));
+};
+
+// Handler kind:'package' pick resolution.
+const resolvePackagePick = (pick, query, context) => {
+  const offered = (pick.shipmentIds || [])
+    .map((id) => (context.lastPackages || []).find((p) => String(p._id) === String(id)))
+    .filter(Boolean);
+  const parent = context.lastPackageOrder || {};
+  const r = resolveListTarget(query, { lastList: 'packages', lastPackages: offered, lastPackageOrder: parent, lastOrders: context.lastOrders });
+  if (r && r.outOfRange != null) return { reply: `That order has ${r.outOfRange} package${r.outOfRange === 1 ? '' : 's'} that can still be cancelled.` };
+  let pkg = r && r.kind === 'package' ? r.target : null;
+  if (!pkg) {
+    const hits = offered.filter((p) => shopMatches2(query, p.sellerName));
+    if (hits.length === 1) pkg = hits[0];
+  }
+  return pkg ? { confirm: { shipmentId: pkg._id } } : { reask: true };
+};
+
+// Handler kind:'order' pick resolution (then re-enters cancelPlan — reused).
+const resolveOrderPick = (query, context) => {
+  const r = resolveListTarget(query, { lastList: 'orders', lastOrders: context.lastOrders || [], lastPackages: [], lastPackageOrder: null });
+  if (r && r.outOfRange != null) return { reply: `You have only ${r.outOfRange} recent orders.` };
+  if (!r || r.kind !== 'order') return { reask: true };
+  return { order: r.target };
+};
+
+// Extended respond() chokepoint: strips BOTH one-turn keys, re-stages from extra.
+const respondCtx = (context, extra = {}) => {
+  const { pendingCancel, pendingCancelPick } = extra;
+  const cleaned = { ...(context || {}) };
+  delete cleaned.pendingCancel;
+  delete cleaned.pendingCancelPick;
+  if (pendingCancel)     cleaned.pendingCancel = pendingCancel;
+  if (pendingCancelPick) cleaned.pendingCancelPick = pendingCancelPick;
+  return cleaned;
+};
+
+// Context as it stands right after the multi-package picker (twoCancellable:
+// SHIPA=Shop A confirmed, SHIPB=Shop B pending — both cancellable).
+const pkgPick   = { kind: 'package', orderId: twoCancellable._id, shipmentIds: ['SHIPA', 'SHIPB'] };
+const pkgPickCtx = { lastPackages: twoCancellable.packages, lastPackageOrder: twoCancellable, lastOrders: [twoCancellable], pendingCancelPick: pkgPick };
+
+// Two packages sharing a shop name → ambiguity fixture.
+const dupShops = toChatOrder(order({
+  status: 'confirmed',
+  shipments: [
+    ship({ _id: 'D1', status: 'confirmed', seller: { shopName: 'Shop A' } }),
+    ship({ _id: 'D2', status: 'pending',   seller: { shopName: 'Shop A' } }),
+  ],
+}));
+const dupPick    = { kind: 'package', orderId: dupShops._id, shipmentIds: ['D1', 'D2'] };
+const dupPickCtx = { lastPackages: dupShops.packages, lastPackageOrder: dupShops, lastOrders: [dupShops], pendingCancelPick: dupPick };
+
+// ── Router (detectIntent) ────────────────────────────────
+test('router: pick=package + bare ordinal → CANCEL_ORDER (not ORDER_FOLLOW_UP)', () => {
+  assert.strictEqual(detectIntent('the first one', pkgPickCtx).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: pick=package + a shop name offered this turn → CANCEL_ORDER', () => {
+  assert.strictEqual(detectIntent('Shop B', pkgPickCtx).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: pick=order + bare ordinal → CANCEL_ORDER', () => {
+  const ctx = { lastOrders: [o1, o2], pendingCancelPick: { kind: 'order' } };
+  assert.strictEqual(detectIntent('the second one', ctx).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: a non-pick reply after an ask-step is NOT diverted to cancel', () => {
+  assert.notStrictEqual(detectIntent('show me laptops', pkgPickCtx).intent, INTENTS.CANCEL_ORDER);
+  assert.notStrictEqual(detectIntent('show me laptops', { lastOrders: [o1, o2], pendingCancelPick: { kind: 'order' } }).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('router: ONE-TURN clear — same ordinal routes to ORDER_FOLLOW_UP once the pick is gone', () => {
+  const base = { lastOrders: [o1, o2], lastIntent: 'order_history' };
+  // With the pick present (this turn) → cancel.
+  assert.strictEqual(detectIntent('the first one', { ...base, pendingCancelPick: { kind: 'order' } }).intent, INTENTS.CANCEL_ORDER);
+  // A turn later, chokepoint has dropped the pick → the ordinal is a normal follow-up.
+  assert.strictEqual(detectIntent('the first one', base).intent, INTENTS.ORDER_FOLLOW_UP);
+});
+
+// ── Handler: package picks reach CONFIRM ─────────────────
+test('pick=package: bare ordinal → CONFIRM with the correct shipmentId', () => {
+  assert.deepStrictEqual(resolvePackagePick(pkgPick, 'the first one', pkgPickCtx).confirm, { shipmentId: 'SHIPA' });
+  assert.deepStrictEqual(resolvePackagePick(pkgPick, 'the second one', pkgPickCtx).confirm, { shipmentId: 'SHIPB' });
+});
+
+test('pick=package: a shop name → CONFIRM with that package\'s shipmentId', () => {
+  assert.deepStrictEqual(resolvePackagePick(pkgPick, 'shop b', pkgPickCtx).confirm, { shipmentId: 'SHIPB' });
+  assert.deepStrictEqual(resolvePackagePick(pkgPick, 'cancel Shop A', pkgPickCtx).confirm, { shipmentId: 'SHIPA' });
+});
+
+test('pick=package: an out-of-range ordinal names the CANCELLABLE count (FIX 1 wording)', () => {
+  assert.strictEqual(resolvePackagePick(pkgPick, 'the third one', pkgPickCtx).reply, 'That order has 2 packages that can still be cancelled.');
+});
+
+test('pick=package: duplicate shop names re-ask and NEVER auto-pick', () => {
+  const out = resolvePackagePick(dupPick, 'shop a', dupPickCtx);
+  assert.strictEqual(out.reask, true);
+  assert.strictEqual(out.confirm, undefined);
+});
+
+test('pick=package: an unmatched name re-asks (never guesses)', () => {
+  assert.strictEqual(resolvePackagePick(pkgPick, 'shop zzz', pkgPickCtx).reask, true);
+});
+
+// ── Handler: order pick re-enters the order-resolved cancel logic ─────────────
+test('pick=order: bare ordinal re-enters order-resolved cancel (picker for a 2-cancellable order)', () => {
+  const ctx = { lastOrders: [twoCancellable, oneCancellable] };
+  const picked = resolveOrderPick('the first one', ctx);
+  assert.strictEqual(picked.order, twoCancellable);
+  assert.strictEqual(cancelPlan({ kind: 'order', target: picked.order }).kind, 'picker'); // reuses existing logic
+});
+
+test('pick=order: bare ordinal resolving a single-cancellable order goes to CONFIRM', () => {
+  const ctx = { lastOrders: [twoCancellable, oneCancellable] };
+  const picked = resolveOrderPick('the second one', ctx);
+  assert.strictEqual(picked.order, oneCancellable);
+  const plan = cancelPlan({ kind: 'order', target: picked.order });
+  assert.strictEqual(plan.kind, 'confirm');
+  assert.strictEqual(plan.pendingCancel.shipmentId, 'S1');
+});
+
+test('pick=order: out-of-range ordinal prints the existing recent-orders copy', () => {
+  assert.strictEqual(resolveOrderPick('the fifth one', { lastOrders: [o1, o2] }).reply, 'You have only 2 recent orders.');
+});
+
+// ── Chokepoint: pendingCancelPick survives exactly one turn ───────────────────
+test('chokepoint: inbound pendingCancelPick is stripped when this turn does not re-stage it', () => {
+  const out = respondCtx({ pendingCancelPick: { kind: 'order' }, lastList: 'orders' });
+  assert.strictEqual(out.pendingCancelPick, undefined);
+  assert.strictEqual(out.lastList, 'orders');
+});
+
+test('chokepoint: pendingCancelPick is re-staged only when passed in extra (the ask-step)', () => {
+  assert.deepStrictEqual(respondCtx({}, { pendingCancelPick: pkgPick }).pendingCancelPick, pkgPick);
+});
+
+test('chokepoint: a pick resolving to CONFIRM stages pendingCancel and drops pendingCancelPick', () => {
+  // The confirm respond passes pendingCancel (not pendingCancelPick) → pick gone.
+  const out = respondCtx(pkgPickCtx, { pendingCancel: { shipmentId: 'SHIPB' } });
+  assert.deepStrictEqual(out.pendingCancel, { shipmentId: 'SHIPB' });
+  assert.strictEqual(out.pendingCancelPick, undefined);
+});
+
+// ─────────────────────────────────────────────────────────
+// FIX 1 — cancel out-of-range copy names the CANCELLABLE count
+// ─────────────────────────────────────────────────────────
+// 3 packages, only 2 cancellable (T3 delivered) → the picker offers T1, T2.
+const threePkgTwoCancellable = toChatOrder(order({
+  status: 'dispatched',
+  shipments: [
+    ship({ _id: 'T1', status: 'confirmed', seller: { shopName: 'Shop A' } }),
+    ship({ _id: 'T2', status: 'pending',   seller: { shopName: 'Shop B' } }),
+    ship({ _id: 'T3', status: 'delivered', seller: { shopName: 'Shop C' }, deliveredAt: new Date('2026-07-05') }),
+  ],
+}));
+const threePick    = { kind: 'package', orderId: threePkgTwoCancellable._id, shipmentIds: ['T1', 'T2'] };
+const threePickCtx = { lastPackages: threePkgTwoCancellable.packages, lastPackageOrder: threePkgTwoCancellable, lastOrders: [threePkgTwoCancellable], pendingCancelPick: threePick };
+
+test('FIX1: 3-pkg/2-cancellable, "the third one" → cancellable-count wording, NOT the old sentence', () => {
+  const out = resolvePackagePick(threePick, 'the third one', threePickCtx);
+  assert.strictEqual(out.reply, 'That order has 2 packages that can still be cancelled.');
+  assert.ok(!out.reply.includes('That order has 2 packages.'), 'the old bare "N packages." sentence is gone');
+  assert.ok(!out.reply.includes('3 packages'), 'does not claim all three are cancellable');
+});
+
+test('FIX1: out-of-range wording reads naturally at N=1 (singular)', () => {
+  // oneCancellable: S1 confirmed, S2 delivered → exactly one offered.
+  const onePick = { kind: 'package', orderId: oneCancellable._id, shipmentIds: ['S1'] };
+  const ctx     = { lastPackages: oneCancellable.packages, lastPackageOrder: oneCancellable, lastOrders: [oneCancellable], pendingCancelPick: onePick };
+  assert.strictEqual(resolvePackagePick(onePick, 'the second one', ctx).reply, 'That order has 1 package that can still be cancelled.');
+});
+
+// ─────────────────────────────────────────────────────────
+// FIX 2 — a short id after the which-order step counts as a pick
+// ─────────────────────────────────────────────────────────
+// o1 shortId 1C5159, o2 shortId 9AB123 (defined earlier). twoCancellable's
+// shortId is derived from its _id (…123456).
+test('FIX2: short id after the which-order step reaches the cancel path (not ORDER_FOLLOW_UP)', () => {
+  const ctx = { lastOrders: [o1, o2], pendingCancelPick: { kind: 'order' }, lastIntent: 'cancel_order' };
+  assert.strictEqual(detectIntent('1c5159', ctx).intent, INTENTS.CANCEL_ORDER);
+  assert.strictEqual(detectIntent('#9ab123', ctx).intent, INTENTS.CANCEL_ORDER);
+});
+
+test('FIX2: a matching short id resolves the order and re-enters order-resolved cancel', () => {
+  const sid    = twoCancellable.shortId.toLowerCase();
+  const picked = resolveOrderPick(sid, { lastOrders: [twoCancellable] });
+  assert.strictEqual(picked.order, twoCancellable);
+  assert.strictEqual(cancelPlan({ kind: 'order', target: picked.order }).kind, 'picker'); // 2 cancellable → picker
+});
+
+test('FIX2: short id after a PACKAGE picker is NOT a pick — hits 7.75(c) as before', () => {
+  // kind 'package' + a listed order whose shortId matches the token → 0.5 must
+  // NOT grab it; with an order-ish lastIntent it lands on ORDER_FOLLOW_UP (today).
+  const ctx = { lastPackages: twoCancellable.packages, lastPackageOrder: twoCancellable, lastOrders: [o1], lastIntent: 'order_history', pendingCancelPick: { kind: 'package', shipmentIds: ['SHIPA', 'SHIPB'] } };
+  assert.strictEqual(detectIntent('1c5159', ctx).intent, INTENTS.ORDER_FOLLOW_UP);
+});
+
+test('FIX2: an ambiguous short id still routes to cancel, then the handler re-asks (never auto-picks)', () => {
+  const ctx = { lastOrders: [idCard('1C5159'), idCard('1C5159')], pendingCancelPick: { kind: 'order' } };
+  assert.strictEqual(detectIntent('1c5159', ctx).intent, INTENTS.CANCEL_ORDER); // matches ≥1 → routes
+  const out = resolveOrderPick('1c5159', { lastOrders: [idCard('1C5159'), idCard('1C5159')] });
+  assert.strictEqual(out.reask, true);       // handler resolves to null → re-ask
+  assert.strictEqual(out.order, undefined);  // never a silent first-pick
+});
+
+test('FIX2: an unmatched short id is NOT a pick → falls through to normal routing', () => {
+  const ctx = { lastOrders: [o1, o2], pendingCancelPick: { kind: 'order' } };
+  assert.notStrictEqual(detectIntent('aaaaaa', ctx).intent, INTENTS.CANCEL_ORDER); // 'aaaaaa' matches nothing
+});
+
+test('FIX2: ONE-TURN clear — a stale short id one turn later routes to ORDER_FOLLOW_UP as before', () => {
+  const base = { lastOrders: [o1, o2], lastIntent: 'order_history' };
+  assert.strictEqual(detectIntent('1c5159', { ...base, pendingCancelPick: { kind: 'order' } }).intent, INTENTS.CANCEL_ORDER);
+  assert.strictEqual(detectIntent('1c5159', base).intent, INTENTS.ORDER_FOLLOW_UP); // pick gone → 7.75(c)
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

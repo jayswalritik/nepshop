@@ -42,6 +42,7 @@ const ROUTER_SYSTEM_PROMPT =
   `- order_tracking: where is my order / delivery status (general).\n` +
   `- order_history: show my orders / what did I buy.\n` +
   `- order_follow_up: question about ONE of the orders just listed (ordinal or status word). Set "statusFilter" if they ask by status (e.g. "which is delivered?").\n` +
+  `- cancel_order: wants to CANCEL an order or a specific package (the verb "cancel" — NOT asking which order is already cancelled).\n` +
   `- return_refund: wants to return something or asks about refunds.\n` +
   `- show_again: asks to re-show the previous product list.\n` +
   `- help: asks what you can do.\n` +
@@ -141,9 +142,23 @@ const llmDetectIntent = async (message, context = {}) => {
       }
     }
 
+    // cancel_order must carry the actual verb "cancel" in the user's words —
+    // never a paraphrase — and the cancel TARGET is re-derived downstream from
+    // the raw message (below), so the LLM can never invent an order/package to
+    // cancel.
+    if (parsed.intent === 'cancel_order' && !/\bcancel\b/i.test(msgLower)) {
+      console.warn('[router:llm] rejected (cancel_order without "cancel" verb):', JSON.stringify(parsed).slice(0, 160));
+      return null;
+    }
+
     return {
       intent:       parsed.intent,
-      query:        (parsed.query || message).toString().toLowerCase().trim(),
+      // For cancel_order the target (ordinal / short id / "package") MUST come
+      // from the user's own words, so the raw message is used verbatim — never
+      // the LLM's rewritten query — matching the "never invent a target" rule.
+      query:        parsed.intent === 'cancel_order'
+        ? message.toString().toLowerCase().trim()
+        : (parsed.query || message).toString().toLowerCase().trim(),
       followUp,
       isSelector,
       statusFilter,
