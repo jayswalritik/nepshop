@@ -111,6 +111,45 @@ const humanizeStatus = (status) => {
 const badgeFor = (status) =>
   statusBadge[status] || { label: humanizeStatus(status), cls: 'bg-gray-100 text-gray-600' };
 
+// Delivery date in the chatbot's own "5 Jul" style. Returns '' when the value
+// is missing or unparseable — the caller then renders the row WITHOUT a date,
+// never "Invalid Date" and never a substituted date.
+const shortDeliveredDate = (d) => {
+  if (!d) return '';
+  const dt = new Date(d);
+  return Number.isNaN(dt.getTime())
+    ? ''
+    : dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+
+// Statuses whose own badge already conveys the return — the count badges below
+// are suppressed for these so we don't say it twice.
+const RETURN_STATUS_SELF_EVIDENT = ['returned', 'return_assigned', 'return_in_transit'];
+
+// Unit-count badges for a package: "N item(s) in return" (in progress) and
+// "N item(s) returned" (completed). Both may show together; each hides when its
+// count is 0. Wording + singular/plural mirror OrdersPage.jsx; the "returned"
+// pill reuses the 'returned' status colour. Nothing renders for a package whose
+// status already spells out the return.
+const ReturnCountBadges = ({ pkg }) => {
+  if (!pkg || RETURN_STATUS_SELF_EVIDENT.includes(pkg.status)) return null;
+  const pill = 'inline-block mt-0.5 mr-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium';
+  return (
+    <>
+      {pkg.itemsInReturn > 0 && (
+        <span className={`${pill} bg-orange-100 text-orange-700`}>
+          {pkg.itemsInReturn} item{pkg.itemsInReturn > 1 ? 's' : ''} in return
+        </span>
+      )}
+      {pkg.itemsReturned > 0 && (
+        <span className={`${pill} bg-gray-200 text-gray-600`}>
+          {pkg.itemsReturned} item{pkg.itemsReturned > 1 ? 's' : ''} returned
+        </span>
+      )}
+    </>
+  );
+};
+
 const ChatOrderCard = ({ order }) => {
   const badge = badgeFor(order.status);
   const packages = Array.isArray(order.packages) ? order.packages : [];
@@ -141,6 +180,13 @@ const ChatOrderCard = ({ order }) => {
           {packages[0]?.returnWindowLabel && (
             <p className="text-[11px] text-indigo-600 font-medium">{packages[0].returnWindowLabel}</p>
           )}
+          {/* Delivery date for a delivered package — hidden when the date is
+              missing/unparseable so the card never prints "Invalid Date". */}
+          {packages[0]?.status === 'delivered' && shortDeliveredDate(packages[0].deliveredAt) && (
+            <p className="text-[11px] text-gray-400">Delivered {shortDeliveredDate(packages[0].deliveredAt)}</p>
+          )}
+          {/* Same in-return / returned unit badges as the multi-package rows. */}
+          <ReturnCountBadges pkg={packages[0]} />
         </div>
       </div>
     );
@@ -172,7 +218,7 @@ const ChatOrderCard = ({ order }) => {
 
       <div className="border-t border-gray-100 pt-2 space-y-1.5">
         <p className="text-[10px] font-semibold text-gray-400 uppercase">
-          {['delivered', 'cancelled', 'returned'].includes(order.status) ? '' : 'Arrives in '}{packages.length} packages
+          {packages.length} packages
         </p>
         {packages.map((p) => {
           // Same statusBadge map the single-package card uses (with the shared
@@ -207,6 +253,15 @@ const ChatOrderCard = ({ order }) => {
                 {p.returnWindowLabel && (
                   <p className="text-[11px] text-indigo-600 font-medium">{p.returnWindowLabel}</p>
                 )}
+                {/* Delivery date for a delivered package — read straight off the
+                    existing deliveredAt; hidden when missing/unparseable so the
+                    row never prints "Invalid Date" or a substituted date. */}
+                {p.status === 'delivered' && shortDeliveredDate(p.deliveredAt) && (
+                  <p className="text-[11px] text-gray-400">Delivered {shortDeliveredDate(p.deliveredAt)}</p>
+                )}
+                {/* Units in return / returned — suppressed when the package's own
+                    status already conveys the return. */}
+                <ReturnCountBadges pkg={p} />
               </div>
               <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${pkgBadge.cls}`}>
                 {pkgBadge.label}

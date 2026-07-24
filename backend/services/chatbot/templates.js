@@ -145,7 +145,16 @@ const shortDate = (d) =>
 // One honest sentence per status — every fact comes from the order document.
 // Deliberately NO invented ETAs: the schema has no ETA, so the bot never
 // promises one.
-const orderStatusLine = (o) => {
+const orderStatusLine = (o, grouped = false) => {
+  // Opt-in (second arg): a MULTI-package order whose package statuses DIFFER gets
+  // a grouped-clause predicate, so a returned package can't hide behind one
+  // derived status. Off by default → every existing caller keeps today's output.
+  // mixedStatusLine returns null when all packages share a status, so we fall
+  // through to the switch and reuse today's wording unchanged.
+  if (grouped && isMultiPackage(o)) {
+    const line = mixedStatusLine(o);
+    if (line) return line;
+  }
   switch (o.status) {
     case 'pending':
       return `is placed and waiting for the seller to confirm`;
@@ -202,6 +211,138 @@ const returnedLine = (o) => {
 // (or zero) package orders take the ORIGINAL, unchanged phrasing everywhere.
 const isMultiPackage = (o) => !!o && Array.isArray(o.packages) && o.packages.length > 1;
 
+// ── Grouped-clause predicate for a MIXED-status multi-package order ────────────
+// Opt-in from orderStatusLine only. Returns null when every package shares one
+// status (caller falls back to today's single-status switch). NO money figure and
+// NO arithmetic — reads p.status and p.sellerName, and counts packages. Designed
+// to read correctly right after the caller's wrapper "Your order #X (…, Rs …) ".
+const STATUS_RANK = {
+  returned: 0,                                    // returned/refund first
+  pending: 1, confirmed: 2, packed: 3, dispatched: 4, // then active
+  delivered: 6, cancelled: 7,                     // delivered then cancelled last
+};
+const rankOf = (s) => (STATUS_RANK[s] == null ? 5 : STATUS_RANK[s]); // unknown → active-ish
+
+// Verb phrase agreeing with a singular/plural subject. Same status words as the
+// switch, third-person so they read after "<shops>'s package(s)" / "N packages".
+const statusVerb = (status, plural) => {
+  switch (status) {
+    case 'returned':   return `${plural ? 'were' : 'was'} returned and your refund is being processed`;
+    case 'pending':    return plural ? 'are waiting for the seller to confirm' : 'is waiting for the seller to confirm';
+    case 'confirmed':  return plural ? 'are being prepared' : 'is being prepared';
+    case 'packed':     return plural ? 'are packed and ready for pickup' : 'is packed and ready for pickup';
+    case 'dispatched': return plural ? 'are on the way' : 'is on the way';
+    case 'delivered':  return plural ? 'were delivered' : 'was delivered';
+    case 'cancelled':  return plural ? 'were cancelled' : 'was cancelled';
+    default:           return plural ? `have status "${status}"` : `has status "${status}"`;
+  }
+};
+
+// Possessive of one name: a trailing "s"/"S" takes a bare apostrophe
+// ("Everyday Finds'"), every other name takes "'s" ("Shop A's").
+const possessive = (name) => (/s$/i.test(name) ? `${name}'` : `${name}'s`);
+
+// "Shop A's" / "Shop A and Shop B's" / "Shop A, Shop B and Shop C's" — the
+// possessive lands on the LAST name, so the "ends in s" rule applies there.
+const possessiveShops = (names) => {
+  if (names.length === 1) return possessive(names[0]);
+  if (names.length === 2) return `${names[0]} and ${possessive(names[1])}`;
+  return `${names.slice(0, -1).join(', ')} and ${possessive(names[names.length - 1])}`;
+};
+
+// A delivered package's usable delivery time, or null when missing/invalid.
+// Guards falsy BEFORE parsing because `new Date(null)` is epoch-0 (a VALID
+// time), so a null deliveredAt must be caught here or it would masquerade as
+// "1 Jan 1970". A dateless package is never given a fabricated date downstream.
+const deliveredTime = (p) => {
+  if (!p || !p.deliveredAt) return null;
+  const t = new Date(p.deliveredAt).getTime();
+  return Number.isNaN(t) ? null : t;
+};
+
+// A DELIVERED package can still carry a partial return the status can't show
+// (a partial return leaves the shipment 'delivered'). itemsInReturn / itemsReturned
+// are UNIT COUNTS already on the package; this reads only ">0" — NO figure, NO
+// arithmetic. Returns the trailing phrase, or '' when nothing partial applies.
+const partialReturnSuffix = (p) => {
+  const inReturn = (p.itemsInReturn || 0) > 0;
+  const returned = (p.itemsReturned || 0) > 0;
+  if (inReturn && returned) return ', and part of it is in return and part was returned';
+  if (inReturn)             return ', and part of it is in return';
+  if (returned)             return ', and part of it was returned';
+  return '';
+};
+
+// Delivered clauses for NAMED-shop grouped output (≤4 distinct shops; count mode
+// is handled by the generic path and stays dateless). PLAIN delivered packages
+// squash by their DISPLAYED date (shortDate) so shops shown on the same day read
+// as one clause; dated clauses come oldest-first, and a single dateless clause
+// (missing/invalid deliveredAt) sorts after them all. A package carrying a
+// partial return does NOT squash — "part of it" is per-package — so each forms
+// its own singular clause (date retained) after the plain ones.
+const deliveredClauses = (group) => {
+  const plain   = group.filter((p) => partialReturnSuffix(p) === '');
+  const partial = group.filter((p) => partialReturnSuffix(p) !== '');
+
+  const dated = new Map(); // shortDate label -> { time, pkgs }
+  const dateless = [];
+  for (const p of plain) {
+    const t = deliveredTime(p);
+    if (t == null) { dateless.push(p); continue; }
+    const label = shortDate(p.deliveredAt);
+    const bucket = dated.get(label) || { time: t, pkgs: [] };
+    bucket.time = Math.min(bucket.time, t); // sort each label by its earliest package
+    bucket.pkgs.push(p);
+    dated.set(label, bucket);
+  }
+  const groups = [...dated.entries()]
+    .sort((a, b) => a[1].time - b[1].time) // oldest displayed date first
+    .map(([label, b]) => ({ label, pkgs: b.pkgs }));
+  if (dateless.length) groups.push({ label: null, pkgs: dateless });
+
+  const plainClauses = groups.map(({ label, pkgs }) => {
+    const plural = pkgs.length > 1;
+    const subject = `${possessiveShops(pkgs.map((p) => p.sellerName))} package${plural ? 's' : ''}`;
+    return `${subject} ${plural ? 'were' : 'was'} delivered${label ? ` on ${label}` : ''}`;
+  });
+
+  const partialClauses = partial.map((p) => {
+    const t = deliveredTime(p);
+    const label = t == null ? null : shortDate(p.deliveredAt);
+    return `${possessiveShops([p.sellerName])} package was delivered${label ? ` on ${label}` : ''}${partialReturnSuffix(p)}`;
+  });
+
+  return [...plainClauses, ...partialClauses];
+};
+
+const mixedStatusLine = (o) => {
+  const pkgs = (o.packages || []).filter((p) => p && p.status);
+  const statuses = [...new Set(pkgs.map((p) => p.status))];
+  if (statuses.length <= 1) return null; // all one status → caller uses today's switch
+
+  // Order-level decision: with 5+ distinct shops, names would be noise → counts.
+  const useCounts = new Set(pkgs.map((p) => p.sellerName)).size >= 5;
+
+  const clauses = statuses
+    .sort((a, b) => rankOf(a) - rankOf(b))
+    .flatMap((status) => {
+      const group  = pkgs.filter((p) => p.status === status);
+      // Delivered packages carry a delivery date. With named shops (≤4) split
+      // them by displayed date — oldest first, undated last — so the date
+      // survives into grouped output. Count mode (5+ shops) keeps the existing
+      // single dateless "N packages were delivered" clause below, unchanged.
+      if (status === 'delivered' && !useCounts) return deliveredClauses(group);
+      const plural = group.length > 1;
+      const subject = useCounts
+        ? `${group.length} package${plural ? 's' : ''}`
+        : `${possessiveShops(group.map((p) => p.sellerName))} package${plural ? 's' : ''}`;
+      return [`${subject} ${statusVerb(status, plural)}`];
+    });
+
+  // One sentence per clause; the caller's wrapper supplies the closing period.
+  return clauses.join('. ');
+};
+
 // One line per package — reuses orderStatusLine so a package's sentence reads
 // exactly like the single-order sentence. `•` + `\n` render fine in the widget
 // (whitespace-pre-line), same as helpReply/cartViewReply already rely on.
@@ -240,7 +381,7 @@ const trackingReply = (facts) => {
     // SINGLE-PACKAGE: today's exact sentence, plus the return-window note when
     // applicable (returnNote is '' for a still-moving single-package order).
     if (isMultiPackage(o)) {
-      return `Your order #${o.shortId} (${formatRs(o.total)}) is arriving in ${o.packages.length} packages:\n${o.packages.map(packageLine).join('\n')}${returnNote(o)}`;
+      return `Your order #${o.shortId} (${formatRs(o.total)}) has ${o.packages.length} packages:\n${o.packages.map(packageLine).join('\n')}${returnNote(o)}`;
     }
     return `Your order #${o.shortId} (${o.itemSummary}, ${formatRs(o.total)}) ${orderStatusLine(o)}.${returnNote(o)}`;
   }
@@ -290,6 +431,13 @@ const historyReply = (orders) => {
     `Sure — ${orders.length === 1 ? 'your most recent order' : `your ${orders.length} most recent orders`}:`,
   ]);
 };
+
+// A short-id reference that matched no order in the shown list (or was ambiguous
+// — shortId is not unique, so two shown orders can share one). Echoes the id the
+// user typed and points them at the list-first flow, instead of silently falling
+// through to product search. `id` is already the bare 6-char id (no '#').
+const orderNotFound = (id) =>
+  `I don't see order #${id} in the orders I just showed you. Try "show my recent orders" first.`;
 
 // ── Returns ───────────────────────────────────────────────────────────────────
 // Honest by construction: eligibility comes from real orders + the real window,
@@ -447,6 +595,7 @@ module.exports = {
   trackingReply,
   statusFilterReply,
   historyReply,
+  orderNotFound,
   returnReply,
   qaReply,
   qaMissReply,

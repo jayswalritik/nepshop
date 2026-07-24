@@ -9,6 +9,7 @@
  */
 
 const Order = require('../../models/Order');
+const Return = require('../../models/Return');
 // Per-package (Shipment) data is attached via the shared fetch helper — the
 // SAME one getMyOrders/getOrderById use — so the chatbot reads shipments
 // through one implementation, never its own Shipment.find/populate.
@@ -24,6 +25,47 @@ const { RETURN_WINDOW_MINUTES } = require('../../config/settlementConfig');
 // anymore (see returnController.js) — an in-progress return is tracked via
 // Return.status per shipment, surfaced separately by returnActions.js.
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'packed', 'dispatched'];
+
+// Return.status buckets, mirrored EXACTLY from OrdersPage.jsx / returnActions.js
+// so the chatbot never invents its own set:
+//   OPEN      → return in progress (units reserved, not yet resolved)
+//   SUCCEEDED → 'refunded': the only terminal success (units left the customer,
+//               refund processed — Return.js "refunded → …, money reversed, complete")
+// 'rejected' is terminal FAILURE (admin declined; units never left / came back)
+// and belongs to NEITHER bucket.
+const OPEN_RETURN_STATUSES      = ['pending', 'approved', 'picked_up'];
+const SUCCEEDED_RETURN_STATUSES = ['refunded'];
+
+// One Return query for a whole batch of orders, grouped in memory onto each
+// shipment as `s.returns` (NOT per package — no N+1). Shipments are converted to
+// plain objects so a non-schema `returns` field actually sticks (Mongoose docs
+// drop unknown paths in strict mode). Pure counting then happens in toChatPackage.
+const attachReturns = async (orders) => {
+  const list = orders || [];
+  const shipmentIds = [];
+  for (const o of list) for (const s of (o.shipments || [])) if (s?._id) shipmentIds.push(s._id);
+  if (!shipmentIds.length) return list;
+
+  const returns = await Return.find({ shipment: { $in: shipmentIds } })
+    .select('shipment status items')
+    .lean();
+
+  const byShipment = new Map();
+  for (const r of returns) {
+    const key = r.shipment.toString();
+    if (!byShipment.has(key)) byShipment.set(key, []);
+    byShipment.get(key).push(r);
+  }
+
+  for (const o of list) {
+    o.shipments = (o.shipments || []).map((s) => {
+      const plain = s && typeof s.toObject === 'function' ? s.toObject() : s;
+      plain.returns = byShipment.get(String(plain._id)) || [];
+      return plain;
+    });
+  }
+  return list;
+};
 
 const ORDER_SELECT =
   'items status total subtotal paymentMethod deliveryAgent settlement ' +
@@ -42,7 +84,7 @@ const getActiveOrders = async (userId) => {
     .sort({ createdAt: -1 })
     .populate('deliveryAgent', 'firstName lastName phone')
     .lean();
-  return attachShipments(orders);
+  return attachReturns(await attachShipments(orders));
 };
 
 const getRecentOrders = async (userId, limit = 5) => {
@@ -52,7 +94,7 @@ const getRecentOrders = async (userId, limit = 5) => {
     .limit(limit)
     .populate('deliveryAgent', 'firstName lastName phone')
     .lean();
-  return attachShipments(orders);
+  return attachReturns(await attachShipments(orders));
 };
 
 // ── Lean PACKAGE (shipment) card — one per seller-package ─────────────────────
@@ -93,8 +135,25 @@ const toChatPackage = (s, i) => {
     // Ready-to-print returnability tag (backend-built, no widget-side time math).
     returnMinutesLeft: returnable ? minutesLeft : 0,
     returnWindowLabel: returnable ? `Returnable — ${formatRemaining(minutesLeft)} left` : null,
+    // Return unit counts, split by lifecycle so an in-progress return can be
+    // told apart from a finished one (Shipment.status can't — a partial return
+    // stays 'delivered' throughout). Both sum `quantity` over this shipment's
+    // Return docs (attached as s.returns); a stored COUNT, never money.
+    //   itemsInReturn — units still IN PROGRESS (OPEN_RETURN_STATUSES)
+    //   itemsReturned — units whose return COMPLETED successfully ('refunded')
+    // Rejected returns match neither set, so they fall out of both.
+    itemsInReturn: returnUnits(s, OPEN_RETURN_STATUSES),
+    itemsReturned: returnUnits(s, SUCCEEDED_RETURN_STATUSES),
   };
 };
+
+// Sum of returned `quantity` across a shipment's Return docs whose status is in
+// `statusSet`. Absent items/quantity count as 0; returns 0 when s.returns is
+// missing. Pure — the query/attach happens in attachReturns.
+const returnUnits = (s, statusSet) =>
+  (Array.isArray(s.returns) ? s.returns : [])
+    .filter((r) => statusSet.includes(r.status))
+    .reduce((n, r) => n + (r.items || []).reduce((m, it) => m + (it.quantity || 0), 0), 0);
 
 // ── Lean order card for the chat UI + conversation memory ────────────────────
 // Keeps every top-level field it always had (nothing reading them breaks) and
@@ -154,6 +213,17 @@ const resolveOrderTarget = (msg, lastOrders) => {
   }
   if (/\blast\b/.test(lower) && lastOrders.length) {
     return lastOrders[lastOrders.length - 1];
+  }
+  // Short-id reference ("#1C5159" / "1c5159"). Ordinals above keep priority.
+  // Matched ONLY against the shortIds already in lastOrders — NO db lookup, since
+  // shortId is a non-unique 6-hex slice of the ObjectId. If two shown orders
+  // share the id we CANNOT disambiguate → return null (caller's not-found path
+  // handles it), never a silent first-match pick.
+  const idMatch = lower.match(/#?\b([0-9a-f]{6})\b/i);
+  if (idMatch) {
+    const id   = idMatch[1].toUpperCase();
+    const hits = lastOrders.filter((o) => (o.shortId || '').toUpperCase() === id);
+    if (hits.length === 1) return hits[0];
   }
   return null;
 };

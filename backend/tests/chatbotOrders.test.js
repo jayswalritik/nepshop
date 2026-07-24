@@ -21,7 +21,8 @@
  */
 
 const assert = require('assert');
-const { toChatOrder } = require('../services/chatbot/orderActions');
+const { toChatOrder, resolveOrderTarget } = require('../services/chatbot/orderActions');
+const { detectIntent, INTENTS } = require('../services/chatbot/intentRouter');
 const templates = require('../services/chatbot/templates');
 
 let passed = 0;
@@ -344,6 +345,788 @@ test('returned noun-phrase reads correctly at 1/2/3/4 returned shops', () => {
   assert.strictEqual(
     line(['Shop A', 'Shop B', 'Shop C', 'Shop D']),
     'had the Shop A, Shop B and 2 other packages returned — a refund is being processed');
+});
+
+// ─────────────────────────────────────────────────────────
+// 15 — single-package switch branches are byte-identical (Step 1.3),
+//      and the grouped opt-in cannot change a single-package output
+// ─────────────────────────────────────────────────────────
+test('orderStatusLine single-package switch branches are byte-identical', () => {
+  const S = (status, extra = {}) => templates.orderStatusLine({ status, ...extra });
+  assert.strictEqual(S('pending'), 'is placed and waiting for the seller to confirm');
+  assert.strictEqual(S('confirmed'), 'is confirmed — the seller is preparing it');
+  assert.strictEqual(S('packed'), 'is packed and ready for pickup');
+  assert.strictEqual(S('dispatched'), 'is out for delivery 🚚');
+  assert.strictEqual(S('dispatched', { agentName: 'Ram' }), 'is out for delivery with Ram 🚚');
+  assert.strictEqual(S('delivered'), 'was delivered ✅');
+  assert.strictEqual(S('delivered', { deliveredAt: new Date('2026-07-05') }), 'was delivered on 5 Jul ✅');
+  assert.strictEqual(S('cancelled'), 'was cancelled');
+  assert.strictEqual(S('weird'), 'has status "weird"');
+
+  // A single-package order (packages.length === 1) is never multi, so grouped=true
+  // is a no-op — identical to grouped=false on every branch.
+  const single = { status: 'delivered', packages: [{ status: 'delivered', sellerName: 'Shop A' }] };
+  assert.strictEqual(templates.orderStatusLine(single, true), templates.orderStatusLine(single, false));
+});
+
+// ─────────────────────────────────────────────────────────
+// 16 — a PACKAGE arg (via packageLine) is unaffected by grouping
+// ─────────────────────────────────────────────────────────
+test('orderStatusLine on a PACKAGE arg is unaffected (no .packages → grouped can never trigger)', () => {
+  const pkg = { status: 'dispatched', sellerName: 'Shop A', index: 1 };
+  assert.strictEqual(templates.orderStatusLine(pkg), 'is out for delivery 🚚');
+  assert.strictEqual(templates.orderStatusLine(pkg, true), 'is out for delivery 🚚');
+});
+
+// ─────────────────────────────────────────────────────────
+// 17 — multi-package, all same status, opt-in set → today's wording
+// ─────────────────────────────────────────────────────────
+test('multi-package all-same-status: opt-in yields the SAME wording as no opt-in', () => {
+  const o = order({
+    status: 'delivered',
+    shipments: [
+      ship({ status: 'delivered', seller: { shopName: 'Shop A' } }),
+      ship({ status: 'delivered', seller: { shopName: 'Shop B' } }),
+    ],
+  });
+  const card = toChatOrder(o);
+  assert.strictEqual(templates.orderStatusLine(card, true), templates.orderStatusLine(card, false));
+});
+
+// ─────────────────────────────────────────────────────────
+// 18 — mixed multi-package WITHOUT opt-in collapses (line 195 path is safe)
+// ─────────────────────────────────────────────────────────
+test('mixed multi-package without opt-in collapses to the derived status (line 195 is safe)', () => {
+  const o = order({
+    status: 'dispatched', // derived least-advanced-active
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+    ],
+  });
+  const card = toChatOrder(o);
+  assert.strictEqual(templates.orderStatusLine(card), 'is out for delivery 🚚');
+  assert.strictEqual(templates.orderStatusLine(card, false), 'is out for delivery 🚚');
+});
+
+// ─────────────────────────────────────────────────────────
+// 19 — opt-in: returned + delivered surfaces BOTH, returned first
+// ─────────────────────────────────────────────────────────
+test('opt-in: returned + delivered names both, returned clause first, no money', () => {
+  const o = order({
+    status: 'delivered',
+    shipments: [
+      ship({ status: 'delivered', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'returned',  seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop A's package was returned and your refund is being processed. Shop B's package was delivered");
+  assert.ok(!line.includes('Rs'), 'no money figure');
+});
+
+// ─────────────────────────────────────────────────────────
+// 20 — opt-in: returned + dispatched reads like the target predicate
+// ─────────────────────────────────────────────────────────
+test('opt-in: returned + dispatched reads like the target predicate', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop A's package was returned and your refund is being processed. Shop B's package is on the way");
+});
+
+// ─────────────────────────────────────────────────────────
+// 21 — opt-in: two shops sharing a status squash into one clause
+// ─────────────────────────────────────────────────────────
+test('opt-in: two shops sharing a status squash ("Shop B and Shop C\'s packages")', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop C' } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop A's package was returned and your refund is being processed. Shop B and Shop C's packages are on the way");
+});
+
+// ─────────────────────────────────────────────────────────
+// 22 — opt-in: 5+ distinct shops drop names for counts
+// ─────────────────────────────────────────────────────────
+test('opt-in: 5+ distinct shops use counts, no shop names', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop C' } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop D' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop E' } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    '1 package was returned and your refund is being processed. 3 packages are on the way. 1 package was delivered');
+  assert.ok(!line.includes('Shop'), 'no shop names in count mode');
+});
+
+// ─────────────────────────────────────────────────────────
+// 23 — opt-in: clause order is returned → active → delivered → cancelled
+// ─────────────────────────────────────────────────────────
+test('opt-in: clause order returned < active < delivered < cancelled', () => {
+  const o = order({
+    status: 'confirmed',
+    shipments: [
+      ship({ status: 'cancelled', seller: { shopName: 'Shop D' } }),
+      ship({ status: 'delivered', seller: { shopName: 'Shop C' } }),
+      ship({ status: 'confirmed', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'returned',  seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  const iRet = line.indexOf('returned and your refund');
+  const iAct = line.indexOf('is being prepared');
+  const iDel = line.indexOf('was delivered');
+  const iCan = line.indexOf('was cancelled');
+  assert.ok(iRet >= 0 && iAct >= 0 && iDel >= 0 && iCan >= 0, 'all four clauses present');
+  assert.ok(iRet < iAct && iAct < iDel && iDel < iCan, 'returned < active < delivered < cancelled');
+});
+
+// ─────────────────────────────────────────────────────────
+// 24 — grouped delivered: two shops on the SAME date squash, date shown
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: two shops delivered on the same date squash into one dated clause', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }), // forces mixed status
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop Z's package is on the way. Shop A and Shop B's packages were delivered on 5 Jul");
+});
+
+// ─────────────────────────────────────────────────────────
+// 25 — grouped delivered: different dates split, oldest first
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: different dates split into two clauses, oldest date first', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-10') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop Z's package is on the way. Shop A's package was delivered on 5 Jul. Shop B's package was delivered on 10 Jul");
+});
+
+// ─────────────────────────────────────────────────────────
+// 26 — grouped delivered: three shops, two sharing a date → two clauses
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: three shops, two sharing a date, group correctly', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop C' }, deliveredAt: new Date('2026-07-10') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.ok(line.includes("Shop A and Shop B's packages were delivered on 5 Jul"), 'same-date pair squashes');
+  assert.ok(line.includes("Shop C's package was delivered on 10 Jul"), 'later date is its own clause');
+  assert.ok(line.indexOf('on 5 Jul') < line.indexOf('on 10 Jul'), 'oldest date first');
+});
+
+// ─────────────────────────────────────────────────────────
+// 27 — grouped delivered: MISSING date → dateless clause, package present
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: a missing date yields a dateless clause, package still named', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: null }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.ok(line.includes("Shop A's package was delivered"), 'delivered package is still present');
+  assert.ok(!line.includes('delivered on'), 'no date is invented for a dateless package');
+});
+
+// ─────────────────────────────────────────────────────────
+// 28 — grouped delivered: INVALID date → dateless clause, package present
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: an invalid date yields a dateless clause (never "Invalid Date")', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: 'not-a-date' }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.ok(line.includes("Shop A's package was delivered"), 'delivered package is still present');
+  assert.ok(!line.includes('Invalid Date'), 'invalid date never leaks into prose');
+  assert.ok(!line.includes('delivered on'), 'no date shown for an unparseable value');
+});
+
+// ─────────────────────────────────────────────────────────
+// 29 — grouped delivered: dated clauses first, dateless last
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: dated clauses come before the dateless clause', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: null }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop Z's package is on the way. Shop A's package was delivered on 5 Jul. Shop B's package was delivered");
+});
+
+// ─────────────────────────────────────────────────────────
+// 30 — grouped delivered: 5+ distinct shops stay dateless counts
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: 5+ distinct shops keep the dateless count form', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop C' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop D' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop E' }, deliveredAt: new Date('2026-07-10') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    '1 package was returned and your refund is being processed. 2 packages are on the way. 2 packages were delivered');
+  assert.ok(!line.includes('on 5 Jul') && !line.includes('Shop'), 'count mode stays dateless and nameless');
+});
+
+// ─────────────────────────────────────────────────────────
+// 31 — grouped delivered with a date does not disturb clause ordering
+// ─────────────────────────────────────────────────────────
+test('grouped delivered: returned clause still leads a returned + dated-delivered order', () => {
+  const o = order({
+    status: 'delivered',
+    shipments: [
+      ship({ status: 'delivered', seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'returned',  seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop A's package was returned and your refund is being processed. Shop B's package was delivered on 5 Jul");
+});
+
+// ─────────────────────────────────────────────────────────
+// ORDER_FOLLOW_UP assembled reply (chatbotService.js:267)
+// ─────────────────────────────────────────────────────────
+// The line-267 reply is an inline template literal, not exported. Per the
+// prompt, we REPRODUCE it EXACTLY here rather than restructure non-writable
+// code to export it. Keep byte-for-byte in sync with chatbotService.js:267:
+//   `Your order #${shortId} (${itemSummary}, ${formatRs(total)}) ${predicate}` + trailing period unless predicate already ends with one.
+const assembleFollowUp = (target) => {
+  const predicate = templates.orderStatusLine(target, true);
+  return `Your order #${target.shortId} (${target.itemSummary}, ${templates.formatRs(target.total)}) ${predicate}${predicate.endsWith('.') ? '' : '.'}`;
+};
+
+// ─────────────────────────────────────────────────────────
+// 32 — single-package assembled reply is byte-identical to pre-change
+// ─────────────────────────────────────────────────────────
+test('ORDER_FOLLOW_UP single-package reply is byte-identical to the pre-change line, one trailing period', () => {
+  const card = toChatOrder(order());
+  // Pre-change form: grouped OFF + an always-appended ".".
+  const before = `Your order #${card.shortId} (${card.itemSummary}, ${templates.formatRs(card.total)}) ${templates.orderStatusLine(card, false)}.`;
+  const after = assembleFollowUp(card);
+  assert.strictEqual(after, before, 'single-package assembled reply unchanged by the grouped opt-in');
+  assert.ok(after.endsWith('.') && !after.endsWith('..'), 'exactly one trailing period');
+});
+
+// ─────────────────────────────────────────────────────────
+// 33 — multi-package, all same status: unchanged wording, one period
+// ─────────────────────────────────────────────────────────
+test('ORDER_FOLLOW_UP multi all-same-status reply keeps today\'s wording and one trailing period', () => {
+  const o = order({
+    status: 'delivered',
+    shipments: [
+      ship({ status: 'delivered', seller: { shopName: 'Shop A' } }),
+      ship({ status: 'delivered', seller: { shopName: 'Shop B' } }),
+    ],
+  });
+  const card = toChatOrder(o);
+  const before = `Your order #${card.shortId} (${card.itemSummary}, ${templates.formatRs(card.total)}) ${templates.orderStatusLine(card, false)}.`;
+  const after = assembleFollowUp(card);
+  assert.strictEqual(after, before, 'all-same-status collapses to today\'s single predicate');
+  assert.ok(after.endsWith('.') && !after.includes('..'), 'exactly one trailing period, no ".."');
+});
+
+// ─────────────────────────────────────────────────────────
+// 34 — mixed multi-package: grouped sentence appears, no ".."
+// ─────────────────────────────────────────────────────────
+test('ORDER_FOLLOW_UP mixed multi-package reply shows grouped clauses and contains no ".."', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+    ],
+  });
+  const reply = assembleFollowUp(toChatOrder(o));
+  assert.ok(reply.includes("Shop A's package was returned and your refund is being processed"), 'grouped returned clause present');
+  assert.ok(reply.includes("Shop B's package is on the way"), 'grouped active clause present');
+  assert.ok(!reply.includes('..'), 'no double period despite the internal clause period');
+  assert.ok(reply.endsWith('.'), 'still ends with exactly one period');
+});
+
+// ─────────────────────────────────────────────────────────
+// 35 — mixed multi-package: wrapper (id + items/total) is retained
+// ─────────────────────────────────────────────────────────
+test('ORDER_FOLLOW_UP mixed reply still opens with "Your order #" and keeps (items, total)', () => {
+  const o = order({
+    status: 'dispatched',
+    total: 3000,
+    items: [{ name: 'A' }, { name: 'B' }],
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  const card = toChatOrder(o);
+  const reply = assembleFollowUp(card);
+  assert.ok(reply.startsWith(`Your order #${card.shortId} `), 'opens with the order id wrapper');
+  assert.ok(reply.includes(`(${card.itemSummary}, ${templates.formatRs(3000)})`), 'retains the (items, total) wrapper');
+});
+
+// A Return doc as attachReturns leaves it on a shipment (s.returns[]): only the
+// fields toChatPackage reads — status + items[].quantity.
+const ret = (status, ...quantities) => ({ status, items: quantities.map((q) => ({ quantity: q })) });
+
+// NOTE (tests 36-41 UPDATED from the step-2 definition): itemsInReturn no longer
+// sums shipmentItem.returnedQuantity; it now counts UNITS over a shipment's OPEN
+// Return docs, and a new itemsReturned counts UNITS over COMPLETED ('refunded')
+// ones. The fixtures inject s.returns instead of item.returnedQuantity.
+
+// ─────────────────────────────────────────────────────────
+// 36 — no returns at all → both counts 0
+// ─────────────────────────────────────────────────────────
+test('return counts: a package with no returns has itemsInReturn 0 and itemsReturned 0', () => {
+  const p = toChatOrder(order({ shipments: [ship({ items: [{ name: 'X', quantity: 3 }] })] })).packages[0];
+  assert.strictEqual(p.itemsInReturn, 0);
+  assert.strictEqual(p.itemsReturned, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// 37 — one OPEN return, 2 units → itemsInReturn 2, itemsReturned 0
+// ─────────────────────────────────────────────────────────
+test('return counts: one open return of 2 units → itemsInReturn 2, itemsReturned 0', () => {
+  const p = toChatOrder(order({ shipments: [ship({ returns: [ret('pending', 2)] })] })).packages[0];
+  assert.strictEqual(p.itemsInReturn, 2);
+  assert.strictEqual(p.itemsReturned, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// 38 — one COMPLETED ('refunded') return, 2 units → itemsInReturn 0, itemsReturned 2
+// ─────────────────────────────────────────────────────────
+test('return counts: one refunded return of 2 units → itemsInReturn 0, itemsReturned 2', () => {
+  const p = toChatOrder(order({ shipments: [ship({ returns: [ret('refunded', 2)] })] })).packages[0];
+  assert.strictEqual(p.itemsInReturn, 0);
+  assert.strictEqual(p.itemsReturned, 2);
+});
+
+// ─────────────────────────────────────────────────────────
+// 39 — a REJECTED return counts toward NEITHER field
+// ─────────────────────────────────────────────────────────
+test('return counts: a rejected return is counted in neither field', () => {
+  const p = toChatOrder(order({ shipments: [ship({ returns: [ret('rejected', 5)] })] })).packages[0];
+  assert.strictEqual(p.itemsInReturn, 0);
+  assert.strictEqual(p.itemsReturned, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// 40 — OPEN and COMPLETED returns on the same package are independent
+// ─────────────────────────────────────────────────────────
+test('return counts: open + refunded on the same package are counted independently', () => {
+  const p = toChatOrder(order({
+    shipments: [ship({ returns: [
+      ret('picked_up', 1),          // open, 1 unit
+      ret('approved', 2),           // open, 2 units
+      ret('refunded', 3),           // completed, 3 units
+      ret('rejected', 9),           // neither
+    ] })],
+  })).packages[0];
+  assert.strictEqual(p.itemsInReturn, 3);   // 1 + 2 open units
+  assert.strictEqual(p.itemsReturned, 3);   // 3 refunded units
+});
+
+// ─────────────────────────────────────────────────────────
+// 41 — returns spanning two packages: each package gets only its own counts
+// ─────────────────────────────────────────────────────────
+test('return counts: two packages each carry only their own return counts', () => {
+  const card = toChatOrder(order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'delivered', seller: { shopName: 'Shop A' }, returns: [ret('pending', 2)] }),
+      ship({ status: 'delivered', seller: { shopName: 'Shop B' }, returns: [ret('refunded', 4)] }),
+    ],
+  }));
+  assert.strictEqual(card.packages[0].itemsInReturn, 2);
+  assert.strictEqual(card.packages[0].itemsReturned, 0);
+  assert.strictEqual(card.packages[1].itemsInReturn, 0);
+  assert.strictEqual(card.packages[1].itemsReturned, 4);
+});
+
+// ─────────────────────────────────────────────────────────
+// 42 — no returns and no items array → both 0, no throw
+// ─────────────────────────────────────────────────────────
+test('return counts: no returns and no items array → both 0, no throw', () => {
+  let card;
+  assert.doesNotThrow(() => {
+    card = toChatOrder(order({ shipments: [ship({ items: undefined })] }));
+  });
+  assert.strictEqual(card.packages[0].itemsInReturn, 0);
+  assert.strictEqual(card.packages[0].itemsReturned, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// 43 — packages[] keeps every prior field/value, adding only itemsReturned
+// ─────────────────────────────────────────────────────────
+test('packages[] keeps every prior field/value and adds only itemsReturned', () => {
+  const o = order({
+    status: 'delivered',
+    shipments: [ship({
+      status: 'delivered', seller: { shopName: 'Shop A' },
+      deliveredAt: new Date('2026-07-05'), sellerSubtotal: 1000, deliveryCharge: 100,
+      couponAllocation: 0, settlement: { refundToCustomer: 0 },
+      returns: [ret('pending', 1)],
+    })],
+  });
+  const p = toChatOrder(o).packages[0];
+
+  // The 13 original keys + itemsInReturn (step 2) + itemsReturned (this step).
+  const expectedKeys = [
+    'index', 'sellerName', 'status', 'itemCount', 'itemSummary', 'deliveredAt',
+    'agentName', 'sellerSubtotal', 'deliveryCharge', 'couponAllocation', 'refund',
+    'returnMinutesLeft', 'returnWindowLabel', 'itemsInReturn', 'itemsReturned',
+  ].sort();
+  assert.deepStrictEqual(Object.keys(p).sort(), expectedKeys);
+
+  // Prior fields keep their exact values (unchanged by the additions).
+  assert.strictEqual(p.index, 1);
+  assert.strictEqual(p.sellerName, 'Shop A');
+  assert.strictEqual(p.status, 'delivered');
+  assert.strictEqual(p.itemCount, 1);      // ship()'s default single item
+  assert.strictEqual(p.sellerSubtotal, 1000);
+  assert.strictEqual(p.deliveryCharge, 100);
+  assert.strictEqual(p.couponAllocation, 0);
+  assert.strictEqual(p.refund, 0);
+  assert.strictEqual(p.itemsInReturn, 1);
+  assert.strictEqual(p.itemsReturned, 0);
+});
+
+// ─────────────────────────────────────────────────────────
+// Short-id addressing (router + resolver + not-found)
+// ─────────────────────────────────────────────────────────
+// Minimal order card — the router and resolver read only `shortId`.
+const idCard = (shortId) => ({ shortId });
+// The 7.75 gate needs orders shown AND an order-related last intent.
+const orderCtx = (orders) => ({ lastOrders: orders, lastIntent: 'order_history' });
+
+// Faithful reproduction of the ORDER_FOLLOW_UP not-found decision at
+// chatbotService.js:263-272 (that module warms Ollama on import, so we mirror
+// the tiny branch instead of booting the service). Kept byte-for-byte in sync.
+const NOT_FOUND_ORDINAL = 'Which order do you mean? Say "the first one" or "the second one".';
+const followUpReplyFor = (query, lastOrders) => {
+  const target = resolveOrderTarget(query, lastOrders);
+  if (!target) {
+    const idTok = query.split(/\s+/).find((t) => /^#?[0-9a-f]{6}[?.!,]*$/i.test(t));
+    if (idTok) return templates.orderNotFound(idTok.replace(/[^0-9a-fA-F]/g, '').toUpperCase());
+    return NOT_FOUND_ORDINAL;
+  }
+  const predicate = templates.orderStatusLine(target, true);
+  return `Your order #${target.shortId} (${target.itemSummary}, ${templates.formatRs(target.total)}) ${predicate}${predicate.endsWith('.') ? '' : '.'}`;
+};
+
+// ── Router (detectIntent) ────────────────────────────────
+test('router: a HASHED id present in lastOrders routes to ORDER_FOLLOW_UP', () => {
+  const d = detectIntent('tell me about #1c5159', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.ORDER_FOLLOW_UP);
+});
+
+test('router: a BARE id present in lastOrders routes to ORDER_FOLLOW_UP', () => {
+  const d = detectIntent('1c5159', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.ORDER_FOLLOW_UP);
+});
+
+test('router: a HASHED id NOT in lastOrders still routes to ORDER_FOLLOW_UP (handler echoes not-found)', () => {
+  const d = detectIntent('where is #9ab123', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.ORDER_FOLLOW_UP);
+});
+
+test('router: a BARE id NOT in lastOrders does NOT hijack — falls through to product search', () => {
+  const d = detectIntent('9ab123', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.PRODUCT_SEARCH);
+});
+
+test('router: non-hex 6-char tokens are never treated as ids', () => {
+  assert.strictEqual(detectIntent('b550m1', orderCtx([idCard('1C5159')])).intent, INTENTS.PRODUCT_SEARCH);
+  assert.strictEqual(detectIntent('27gp85', orderCtx([idCard('1C5159')])).intent, INTENTS.PRODUCT_SEARCH);
+});
+
+test('router: an ordinal alongside a hex token → ordinal branch wins (still ORDER_FOLLOW_UP)', () => {
+  const d = detectIntent('the first one #9ab123', orderCtx([idCard('1C5159')]));
+  assert.strictEqual(d.intent, INTENTS.ORDER_FOLLOW_UP);
+  assert.strictEqual(d.statusFilter, undefined); // took the ordinal branch, not status
+});
+
+test('router: a hex token with NO lastOrders in context does not hijack (behaves as today)', () => {
+  assert.strictEqual(detectIntent('#1c5159', {}).intent, INTENTS.PRODUCT_SEARCH);
+  assert.strictEqual(detectIntent('1c5159', {}).intent, INTENTS.PRODUCT_SEARCH);
+});
+
+// ── Resolver (resolveOrderTarget) ────────────────────────
+test('resolve: "#1c5159" present resolves to that order', () => {
+  const card = idCard('1C5159');
+  assert.strictEqual(resolveOrderTarget('tell me about #1c5159', [card]), card);
+});
+
+test('resolve: bare "1c5159" present resolves to that order', () => {
+  const card = idCard('1C5159');
+  assert.strictEqual(resolveOrderTarget('1c5159', [card]), card);
+});
+
+test('resolve: uppercase "#1C5159" present resolves (case-insensitive)', () => {
+  const card = idCard('1C5159');
+  assert.strictEqual(resolveOrderTarget('#1C5159', [card]), card);
+});
+
+test('resolve: an id not in the list returns null', () => {
+  assert.strictEqual(resolveOrderTarget('9ab123', [idCard('1C5159')]), null);
+});
+
+test('resolve: an ordinal outranks a matching id (ordinal wins)', () => {
+  const a = idCard('1C5159');
+  const b = idCard('9AB123');
+  // "second" → index 1 (b), even though "#1c5159" matches a.
+  assert.strictEqual(resolveOrderTarget('the second one #1c5159', [a, b]), b);
+});
+
+test('resolve: a pure ordinal still resolves exactly as before', () => {
+  const list = [idCard('AAA111'), idCard('BBB222'), idCard('CCC333')];
+  assert.strictEqual(resolveOrderTarget('the second one', list), list[1]);
+});
+
+test('resolve: two listed orders sharing a shortId are ambiguous → null (never the first)', () => {
+  const dup = [idCard('1C5159'), idCard('1C5159')];
+  assert.strictEqual(resolveOrderTarget('1c5159', dup), null);
+});
+
+// ── Not-found wording + byte-identical fallback ──────────
+test('orderNotFound echoes the typed id and points at the list-first flow', () => {
+  const r = templates.orderNotFound('9AB123');
+  assert.ok(r.includes('#9AB123'), 'echoes the id');
+  assert.ok(r.toLowerCase().includes('show my recent orders'), 'tells the user what to do');
+});
+
+test('not-found branch: an unknown HASHED id yields orderNotFound echoing that id', () => {
+  const reply = followUpReplyFor('where is #9ab123', [idCard('1C5159')]);
+  assert.strictEqual(reply, templates.orderNotFound('9AB123'));
+});
+
+test('not-found branch: no id and no ordinal → the original hardcoded reply, byte-identical', () => {
+  const reply = followUpReplyFor('what about it', [idCard('1C5159')]);
+  assert.strictEqual(reply, 'Which order do you mean? Say "the first one" or "the second one".');
+});
+
+// ─────────────────────────────────────────────────────────
+// Partial-return wording in grouped (mixed-status) output
+// ─────────────────────────────────────────────────────────
+// A delivered package with an OPEN return.
+test('grouped: a delivered package with itemsInReturn > 0 gets ", and part of it is in return" (date kept)', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05'), returns: [ret('pending', 2)] }),
+    ],
+  });
+  assert.strictEqual(templates.orderStatusLine(toChatOrder(o), true),
+    "Shop Z's package is on the way. Shop A's package was delivered on 5 Jul, and part of it is in return");
+});
+
+test('grouped: a delivered package with itemsReturned > 0 gets ", and part of it was returned" (date kept)', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05'), returns: [ret('refunded', 2)] }),
+    ],
+  });
+  assert.strictEqual(templates.orderStatusLine(toChatOrder(o), true),
+    "Shop Z's package is on the way. Shop A's package was delivered on 5 Jul, and part of it was returned");
+});
+
+test('grouped: both counts > 0 on one delivered package mentions both', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05'), returns: [ret('pending', 1), ret('refunded', 2)] }),
+    ],
+  });
+  assert.strictEqual(templates.orderStatusLine(toChatOrder(o), true),
+    "Shop Z's package is on the way. Shop A's package was delivered on 5 Jul, and part of it is in return and part was returned");
+});
+
+test('grouped: a partial-return delivered package does NOT squash with a plain one on the same date', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05') }),                       // plain
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05'), returns: [ret('pending', 1)] }), // partial
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop Z's package is on the way. Shop A's package was delivered on 5 Jul. Shop B's package was delivered on 5 Jul, and part of it is in return");
+  assert.ok(!line.includes('Shop A and Shop B'), 'partial package did not squash into the plain clause');
+});
+
+test('grouped: plain delivered packages still squash with each other on the same date', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' }, deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop B' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  assert.strictEqual(templates.orderStatusLine(toChatOrder(o), true),
+    "Shop Z's package is on the way. Shop A and Shop B's packages were delivered on 5 Jul");
+});
+
+test('grouped: a FULL returned package gets no partial phrase (wording unchanged)', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 }, returns: [ret('refunded', 3)] }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    "Shop A's package was returned and your refund is being processed. Shop B's package is on the way");
+  assert.ok(!line.includes('part of it'), 'no partial phrase on a full-return package');
+});
+
+test('grouped: return_assigned / return_in_transit packages get no partial phrase', () => {
+  const mk = (st) => order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+      ship({ status: st,           seller: { shopName: 'Shop A' }, returns: [ret('picked_up', 2)] }),
+    ],
+  });
+  for (const st of ['return_assigned', 'return_in_transit']) {
+    const line = templates.orderStatusLine(toChatOrder(mk(st)), true);
+    assert.ok(line.includes(`has status "${st}"`), `${st} keeps its generic wording`);
+    assert.ok(!line.includes('part of it'), `${st} gets no partial phrase`);
+  }
+});
+
+test('grouped: 5+ distinct shops keep the dateless count form with no partial phrasing', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'returned',   seller: { shopName: 'Shop A' }, settlement: { refundToCustomer: 100 } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop B' } }),
+      ship({ status: 'dispatched', seller: { shopName: 'Shop C' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop D' }, deliveredAt: new Date('2026-07-05'), returns: [ret('pending', 2)] }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop E' }, deliveredAt: new Date('2026-07-10') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.strictEqual(line,
+    '1 package was returned and your refund is being processed. 2 packages are on the way. 2 packages were delivered');
+  assert.ok(!line.includes('part of it') && !line.includes('Shop'), 'count mode stays plain');
+});
+
+// ─────────────────────────────────────────────────────────
+// Possessive fix ("s"-ending shop names take a bare apostrophe)
+// ─────────────────────────────────────────────────────────
+test('possessive: a shop name ending in "s" takes a bare apostrophe', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Everyday Finds' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.ok(line.includes("Everyday Finds' package was delivered on 5 Jul"), 'bare apostrophe on the s-ending name');
+  assert.ok(!line.includes("Finds's"), 'no double possessive');
+});
+
+test('possessive: a shop name NOT ending in "s" keeps "\'s"', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Tech Bazaar' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  assert.ok(templates.orderStatusLine(toChatOrder(o), true).includes("Tech Bazaar's package was delivered on 5 Jul"));
+});
+
+test('possessive: two shops, last name ends in "s" → bare apostrophe on the last', () => {
+  const o = order({
+    status: 'dispatched',
+    shipments: [
+      ship({ status: 'dispatched', seller: { shopName: 'Shop Z' } }),
+      ship({ status: 'delivered',  seller: { shopName: 'Shop A' },        deliveredAt: new Date('2026-07-05') }),
+      ship({ status: 'delivered',  seller: { shopName: 'Everyday Finds' }, deliveredAt: new Date('2026-07-05') }),
+    ],
+  });
+  const line = templates.orderStatusLine(toChatOrder(o), true);
+  assert.ok(line.includes("Shop A and Everyday Finds' packages were delivered on 5 Jul"), 'bare apostrophe on the last name');
+  assert.ok(!line.includes("Finds's"), 'no double possessive on the last name');
+});
+
+test('single-package and package-arg output are unaffected by partial-return counts', () => {
+  // Single-package delivered order with a partial return → switch path, no phrase.
+  const single = {
+    status: 'delivered', deliveredAt: new Date('2026-07-05'),
+    packages: [{ status: 'delivered', sellerName: 'Everyday Finds', itemsInReturn: 2, itemsReturned: 1 }],
+  };
+  assert.strictEqual(templates.orderStatusLine(single, true),  'was delivered on 5 Jul ✅');
+  assert.strictEqual(templates.orderStatusLine(single, false), 'was delivered on 5 Jul ✅');
+
+  // A PACKAGE arg (no .packages) with partial counts → switch path, no phrase.
+  const pkg = { status: 'delivered', deliveredAt: new Date('2026-07-05'), itemsInReturn: 3, sellerName: 'Shop A', index: 1 };
+  assert.strictEqual(templates.orderStatusLine(pkg), 'was delivered on 5 Jul ✅');
+  assert.strictEqual(templates.orderStatusLine(pkg, true), 'was delivered on 5 Jul ✅');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

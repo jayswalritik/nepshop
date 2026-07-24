@@ -261,10 +261,23 @@ const handleMessage = async (user, message, context = {}, mode = 'fast') => {
       const target = resolveOrderTarget(query, orders);
 
       if (!target) {
+        // If the message carried a short-id token (6 hex, optional '#') that
+        // resolved to nothing — unknown OR ambiguous — echo it and point at the
+        // list-first flow. With NO id token, the original reply fires unchanged.
+        const idTok = query.split(/\s+/).find((t) => /^#?[0-9a-f]{6}[?.!,]*$/i.test(t));
+        if (idTok) {
+          const id = idTok.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+          return respond(intent, templates.orderNotFound(id), [], ['Show my recent orders'], context, { orders });
+        }
         return respond(intent, `Which order do you mean? Say "the first one" or "the second one".`, [], [], context, { orders });
       }
 
-      const reply = `Your order #${target.shortId} (${target.itemSummary}, ${templates.formatRs(target.total)}) ${templates.orderStatusLine(target)}.`;
+      // ORDER_FOLLOW_UP opts INTO grouped clauses so a mixed-status order can't
+      // hide a returned package behind one derived status. Grouped predicates
+      // carry internal periods and never end with one; append the closing period
+      // only when the predicate doesn't already end with it, so we never get "..".
+      const predicate = templates.orderStatusLine(target, true);
+      const reply = `Your order #${target.shortId} (${target.itemSummary}, ${templates.formatRs(target.total)}) ${predicate}${predicate.endsWith('.') ? '' : '.'}`;
 
       return respond(intent, reply, [], ['Show my recent orders'], context, { orders: [target] });
     }

@@ -121,6 +121,17 @@ const hasWord = (text, word) =>
 
 const hasAnyWord = (text, words) => words.some((w) => hasWord(text, w));
 
+// A short-id token: exactly 6 HEXADECIMAL chars with an optional leading '#'.
+// Hex-only (not general alphanumeric) so real product queries like "b550m1" or
+// "27gp85" are never mistaken for an order id. Returns { hashed, id } or null.
+const shortIdToken = (msg) => {
+  for (const tok of (msg || '').split(/\s+/)) {
+    const m = tok.match(/^(#?)([0-9a-f]{6})[?.!,]*$/i);
+    if (m) return { hashed: m[1] === '#', id: m[2].toUpperCase() };
+  }
+  return null;
+};
+
 // ── Follow-up patterns (feature 7 — conversation memory) ─────────────────────
 // Anchored to the WHOLE message so a fresh search like "cheapest laptop"
 // (superlative + product noun) never matches — only pure follow-up questions
@@ -244,6 +255,20 @@ const detectIntent = (rawMessage, context = {}) => {
     const STATUS_WORDS = /\b(delivered|cancelled|canceled|confirmed|pending|packed|dispatched|returned|out\s?for\s?delivery|on\s?the\s?way)\b/i;
     if (STATUS_WORDS.test(msgFixed) && /\b(which|what|any|is|are)\b/i.test(msgFixed)) {
       return { intent: INTENTS.ORDER_FOLLOW_UP, query: msgFixed, statusFilter: msgFixed.match(STATUS_WORDS)[0].toLowerCase() };
+    }
+    // (c) Short-id reference — "#1C5159" / "1C5159". Ordinal (a) and status (b)
+    // are checked first, so an ordinal always wins over a stray hex token. A
+    // HASHED id is an explicit order reference → route regardless of match (the
+    // handler echoes a not-found when it isn't in the list). A BARE id is only a
+    // reliable intent when it actually matches a shown order — otherwise a plain
+    // 6-hex string could be a product query, so we let it fall through to search
+    // exactly as today.
+    const idTok = shortIdToken(msgFixed);
+    if (idTok) {
+      const known = context.lastOrders.some((o) => (o.shortId || '').toUpperCase() === idTok.id);
+      if (idTok.hashed || known) {
+        return { intent: INTENTS.ORDER_FOLLOW_UP, query: msgFixed };
+      }
     }
   }
 
