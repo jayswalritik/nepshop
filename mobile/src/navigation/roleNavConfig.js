@@ -23,6 +23,9 @@ export const ROLE_NAV_CONFIG = {
     hiddenRoutes: [
       'products', 'product/[id]', 'search', 'checkout', 'order/[id]',
       'wishlist', 'offers', 'profile', 'notifications',
+      // Full-screen chatbot (app/(customer)/chat.js) — opened from the Home
+      // FAB, never a bottom-bar tab.
+      'chat',
       // Deep-link landing screens for nepshop:// payment gateway returns
       // (backend/controllers/paymentController.js's RETURN_URLS, source:
       // 'mobile' entries) — same nested-route registration as product/[id]

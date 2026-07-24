@@ -11,6 +11,7 @@ import API from '../../src/utils/api';
 import { addToCart } from '../../src/utils/cart';
 import RecommendationRail from '../../src/components/RecommendationRail';
 import NotificationBellIcon from '../../src/components/NotificationBellIcon';
+import ChatFab from '../../src/components/ChatFab';
 import Toast from '../../src/components/Toast';
 import { COLORS, RADII, SHADOWS, SPACING } from '../../src/constants/colors';
 import { CATEGORIES } from '../../src/constants/categories';
@@ -38,6 +39,20 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [toast, setToast] = useState(null);
   const [addingId, setAddingId] = useState(null);
+
+  // Chat FAB visibility: hide the moment the user scrolls (any direction, any
+  // position), then reveal it ~150ms after scrolling stops. No direction
+  // tracking, no scroll-position condition — every scroll event resets the
+  // reveal timer. scrollEventThrottle={16} (on the ScrollView) is what makes
+  // onScroll fire continuously enough for this to feel responsive.
+  const [fabVisible, setFabVisible] = useState(true);
+  const fabDebounce = useRef(null);
+  const handleScroll = useCallback(() => {
+    setFabVisible(false);                       // any scroll → hide
+    if (fabDebounce.current) clearTimeout(fabDebounce.current);
+    fabDebounce.current = setTimeout(() => setFabVisible(true), 150); // stopped → show
+  }, []);
+  useEffect(() => () => { if (fabDebounce.current) clearTimeout(fabDebounce.current); }, []);
 
   const fetchRail = useCallback(async (rail) => {
     setLoading((prev) => ({ ...prev, [rail.key]: true }));
@@ -136,6 +151,8 @@ export default function Home() {
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.content}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={COLORS.primary} />
           }
@@ -206,6 +223,9 @@ export default function Home() {
           )}
         </ScrollView>
       </SafeAreaView>
+
+      {/* Floating chat entry — Home only, above the tab bar, scroll-aware. */}
+      <ChatFab visible={fabVisible} />
 
       <Toast toast={toast} onHide={() => setToast(null)} />
     </View>

@@ -1,0 +1,709 @@
+<meta charset="utf-8">
+<title>NepShop — Chatbot &amp; Semantic Search</title>
+<style>
+  /* ── Print / A4 setup ─────────────────────────────────────────────── */
+  @page { size: A4; margin: 18mm 16mm; }
+
+  :root {
+    --ink:      #1a1a1a;
+    --muted:    #555;
+    --line:     #bbb;
+    --line-lt:  #ddd;
+    --band:     #f2f2f2;
+    --band-2:   #f8f8f8;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    font-family: "Segoe UI", Arial, "Helvetica Neue", sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.5;
+    margin: 0;
+    max-width: 190mm;
+  }
+
+  h1 { font-size: 22pt; margin: 0 0 4pt; line-height: 1.15; }
+  h2 {
+    font-size: 14pt;
+    margin: 20pt 0 6pt;
+    padding-bottom: 3pt;
+    border-bottom: 2px solid var(--ink);
+  }
+  h3 { font-size: 11.5pt; margin: 14pt 0 4pt; }
+  h4 { font-size: 10.5pt; margin: 10pt 0 2pt; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+  p { margin: 5pt 0; }
+  ul, ol { margin: 5pt 0; padding-left: 18pt; }
+  li { margin: 2pt 0; }
+
+  code, .mono {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9.2pt;
+    background: var(--band);
+    padding: 0.5pt 3pt;
+    border-radius: 2px;
+  }
+
+  .muted { color: var(--muted); }
+  .small { font-size: 9.2pt; }
+
+  /* ── Tables ───────────────────────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8pt 0;
+    font-size: 9.4pt;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 4pt 6pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--band); font-weight: 600; }
+  tbody tr:nth-child(even) { background: var(--band-2); }
+
+  /* ── Layout helpers ───────────────────────────────────────────────── */
+  section { page-break-inside: avoid; }
+  table, tr, .demo, .callout { page-break-inside: avoid; }
+  .page-break { page-break-before: always; }
+
+  .callout {
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--ink);
+    background: var(--band-2);
+    padding: 7pt 10pt;
+    margin: 10pt 0;
+  }
+
+  .demo {
+    border: 1px solid var(--line-lt);
+    padding: 6pt 9pt;
+    margin: 6pt 0;
+  }
+  .demo .say {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 9.4pt;
+    font-weight: 700;
+  }
+  .demo .say::before { content: "“"; }
+  .demo .say::after  { content: "”"; }
+  .demo .does { margin: 3pt 0 0; }
+  .demo .mod  { color: var(--muted); font-size: 9pt; }
+  .tag {
+    display: inline-block; border: 1px solid var(--line); border-radius: 3px;
+    padding: 0 4pt; font-size: 8.4pt; font-weight: 600; margin-left: 4pt;
+  }
+
+  /* ── Cover ────────────────────────────────────────────────────────── */
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+  .cover .kicker { text-transform: uppercase; letter-spacing: .18em; font-size: 10pt; color: var(--muted); }
+  .cover .modules { margin-top: 16pt; font-size: 12pt; }
+  .cover .modules span { display: inline-block; border: 1px solid var(--ink); border-radius: 4px; padding: 3pt 9pt; margin: 3pt 6pt 3pt 0; }
+  .cover .meta { margin-top: 30pt; font-size: 10pt; color: var(--muted); }
+  .cover .rule { height: 3px; background: var(--ink); width: 60mm; margin: 14pt 0; }
+
+  .toc ol { padding-left: 20pt; }
+  .toc li { margin: 3pt 0; }
+</style>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 1 · COVER                                                            -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <div class="kicker">NepShop · Final-Year E-Commerce Project</div>
+  <div class="rule"></div>
+  <h1>The Shopping Chatbot &amp;<br>Semantic Product Search</h1>
+  <p class="muted" style="font-size:12pt; margin-top:8pt;">
+    A technical walkthrough of two AI-assisted modules — how they are built,
+    how they behave, and how they run when deployed.
+  </p>
+
+  <div class="modules">
+    <span>Grounded Chatbot Assistant</span>
+    <span>Semantic + Literal Search</span>
+  </div>
+
+  <div class="meta">
+    <div><strong>Author:</strong> &nbsp;__________________________</div>
+    <div style="margin-top:4pt;"><strong>Module:</strong> &nbsp;NepShop (React · React Native/Expo · Node/Express · MongoDB Atlas)</div>
+    <div style="margin-top:4pt;"><strong>Document:</strong> &nbsp;Chatbot &amp; Search — design, behaviour &amp; deployment</div>
+  </div>
+
+  <div class="toc" style="margin-top:34pt;">
+    <h4>Contents</h4>
+    <ol>
+      <li>The chatbot — what it does (intent catalogue)</li>
+      <li>The chatbot — how it works</li>
+      <li>The chatbot — demo script</li>
+      <li>The chatbot — web vs mobile parity</li>
+      <li>Search — what it does &amp; how it works</li>
+      <li>Search — demo script</li>
+      <li>Technology stack</li>
+      <li>Benefits &amp; limitations</li>
+      <li>Deployment behaviour on Render</li>
+    </ol>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 2 · CHATBOT — WHAT IT DOES                                           -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section>
+  <h2>1 · The Chatbot — What It Does</h2>
+  <p>
+    NepShop ships a shopping assistant that a logged-in customer talks to in plain
+    English. It is not a scripted menu bot: every message is classified into one
+    of a fixed set of <em>intents</em>, and each intent is answered from the
+    <strong>real store database</strong> — the same order, cart, product and
+    return records the rest of the app reads. The assistant can find products,
+    answer questions about them, track and cancel orders, explain returns and
+    refunds, show the cart, and surface what is trending.
+  </p>
+
+  <div class="callout">
+    <strong>One rule underpins the whole design:</strong> the assistant never
+    invents a fact. Prices, order statuses, refund amounts and return windows are
+    always read from backend records. A language model, when used at all, only
+    <em>phrases</em> or <em>classifies</em> — it is never the source of a number.
+  </div>
+
+  <h3>Intent catalogue</h3>
+  <p class="small muted">
+    The intent list below is the complete set the router recognises
+    (<code>intentRouter.js</code>), each with a handler in the orchestrator
+    (<code>chatbotService.js</code>).
+  </p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:26%">Intent</th><th style="width:44%">What it does</th><th style="width:30%">Grounded by</th></tr></thead>
+    <tbody>
+      <tr><td><code>greeting</code></td><td>Answers a bare “hi / hello / namaste”.</td><td>Static template</td></tr>
+      <tr><td><code>thanks</code></td><td>Answers “thanks / thank you / dhanyabad”.</td><td>Static template</td></tr>
+      <tr><td><code>goodbye</code></td><td>Answers “bye / see you”.</td><td>Static template</td></tr>
+      <tr><td><code>help</code></td><td>Lists what the assistant can do, with examples.</td><td>Static template</td></tr>
+      <tr><td><code>product_search</code></td><td>Finds products for a natural query (“gaming laptop under 200000”). The default when nothing more specific matches.</td><td>Semantic search engine</td></tr>
+      <tr><td><code>trending</code></td><td>Shows what is popular now.</td><td>Recommendation engine (purchase velocity)</td></tr>
+      <tr><td><code>follow_up</code></td><td>“Which is the cheapest / most expensive / best rated?” about the list just shown.</td><td>Conversation memory (no new DB call)</td></tr>
+      <tr><td><code>product_qa</code></td><td>A question about one shown product (“does it have a warranty?”). Answered from the product’s real description.</td><td>Product description + optional LLM phrasing</td></tr>
+      <tr><td><code>multi_qa</code></td><td>A question across the shown list (“which of these has a graphics card?”).</td><td>Per-product description extraction + optional LLM phrasing</td></tr>
+      <tr><td><code>add_to_cart</code></td><td>Resolves which product to add; the client performs the add and confirms only on success.</td><td>Live product/stock record; client cart flow</td></tr>
+      <tr><td><code>view_cart</code></td><td>“What’s in my cart?” — ticked, not-ticked and stale items.</td><td>Shared cart-summary builder</td></tr>
+      <tr><td><code>order_tracking</code></td><td>“Where is my order?” — active orders with per-package status.</td><td>Real Order + Shipment documents</td></tr>
+      <tr><td><code>order_history</code></td><td>“Show my recent orders.”</td><td>Real Order documents</td></tr>
+      <tr><td><code>order_follow_up</code></td><td>Ordinal or status question about the orders just listed (“when will the second one arrive?”, “which is delivered?”).</td><td>Conversation memory + per-package status</td></tr>
+      <tr><td><code>cancel_order</code></td><td>Cancels an order/package — always behind a mandatory yes/no confirm; the client calls the existing cancel endpoint.</td><td>Real per-package status; existing cancel API</td></tr>
+      <tr><td><code>return_refund</code></td><td>Explains return eligibility, window and both possible refund outcomes.</td><td>Real returns math + return-window rules</td></tr>
+      <tr><td><code>show_again</code></td><td>Re-shows the previous product list from memory.</td><td>Conversation memory</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 3 · CHATBOT — HOW IT WORKS                                           -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>2 · The Chatbot — How It Works</h2>
+
+  <h3>Request / response flow</h3>
+  <p>
+    Every message (except the opening greeting, which the client generates
+    locally from the signed-in user) is a single authenticated request:
+  </p>
+  <ol>
+    <li>The client sends <code>POST /api/chatbot/message</code> with
+      <code>{ message, context, mode }</code>. The route is protected (login
+      required) and per-user rate-limited (20 messages / 60&nbsp;s, in memory).</li>
+    <li>The controller trims the message to 500 characters and calls the
+      orchestrator <code>handleMessage(user, message, context, mode)</code>.</li>
+    <li>The orchestrator <strong>routes</strong> the message to an intent, calls
+      the matching <strong>grounding</strong> function (a real DB read), and
+      passes the resulting facts to a <strong>template</strong> that produces the
+      sentence.</li>
+    <li>It returns <code>{ intent, reply, products, suggestions, context,
+      … }</code>. The client renders the reply, any product/order cards, tappable
+      suggestion chips, and stores the returned <code>context</code> to echo back
+      next time.</li>
+  </ol>
+
+  <h3>Template-first hybrid routing</h3>
+  <p>
+    Classification has two interchangeable front ends that feed the
+    <em>identical</em> downstream grounding, templates and memory:
+  </p>
+  <ul>
+    <li><strong>Fast (rule) routing</strong> — an ordered set of regular-expression
+      rules (<code>detectIntent</code>). It is instant, needs no model, and
+      recognises every intent. It also does light typo-correction on the bot’s own
+      command words (“reent orders” → “recent orders”) and strips conversational
+      filler before searching.</li>
+    <li><strong>Conversational (LLM) routing</strong> — an optional mode where a
+      language model proposes the intent and reference fields
+      (<code>llmRouter.js</code>). Its output is validated against the known intent
+      set, and every parameter it proposes must be confirmed by the user’s own
+      words (an ordinal, a status word, the literal verb “cancel”). Anything
+      malformed, unknown, or timed out falls straight back to the rule router — so
+      conversational mode can be slower but never broken.</li>
+  </ul>
+  <p>
+    Both clients default to conversational mode with a one-tap toggle to Fast.
+    The name “template-first” reflects that the deterministic path is the source
+    of truth: the LLM is an <em>alternative classifier</em>, not a new brain.
+  </p>
+
+  <h3>Why facts are never LLM-sourced</h3>
+  <p>
+    The system is layered so that a model structurally cannot fabricate a fact:
+  </p>
+  <ul>
+    <li><strong>Layer 1 — routing</strong> decides <em>what</em> the user wants.
+      It names an intent and extracts a reference; it produces no facts.</li>
+    <li><strong>Layer 2 — grounding</strong> fetches the truth from MongoDB
+      (orders, shipments, returns, cart, products, trending). All money logic
+      lives in shared backend utilities; the chatbot only reads fields.</li>
+    <li><strong>Layer 3 — phrasing</strong> turns those facts into a sentence.
+      The default phraser is a deterministic template that can only re-state what
+      it is handed. When a language model is used instead — for product Q&amp;A,
+      multi-product Q&amp;A, the search query-understanding rescue, and the search
+      relevance judge — it is given the already-grounded data and told to answer
+      only from it. For multi-product Q&amp;A the model is shown <em>only</em> the
+      description sentences that already matched, so it cannot claim a feature a
+      listing does not support.</li>
+  </ul>
+  <p class="small muted">
+    Net effect: with or without a model, product descriptions, order statuses,
+    refund figures and return windows all originate in the database.
+  </p>
+
+  <h3>The context round-trip (conversation memory)</h3>
+  <p>
+    The server is <strong>stateless</strong>. It keeps no session; instead each
+    reply returns an opaque <code>context</code> object (the last products or
+    orders shown, the focused product, pending questions, a one-turn cancel
+    confirmation, and so on). The client stores it and sends it back with the next
+    message. This is what lets follow-ups work — “which is the cheapest?”, “the
+    second one”, “add it to my cart”, “yes” — while surviving server restarts and
+    Render cold starts, because the conversation lives on the client, not in
+    server memory. Sensitive one-turn flags (the cancel confirmation) are stripped
+    at a single chokepoint so they can never leak past the turn they belong to.
+  </p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 4 · CHATBOT — DEMO SCRIPT                                            -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>3 · The Chatbot — Demo Script</h2>
+  <p class="small muted">
+    Messages an examiner can type in order. Every one exercises a confirmed
+    intent. All money figures shown by the bot come from the API and the
+    examiner’s own real orders/cart — none are scripted here.
+  </p>
+
+  <div class="demo">
+    <p class="say">Show trending products</p>
+    <p class="does">Lists what is currently popular, with product cards.</p>
+    <p class="mod">Intent <code>trending</code> → recommendation engine (<code>nepShopAdapter.getTrending</code>).</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">gaming laptop under 200000</p>
+    <p class="does">Runs a semantic search, acknowledges the budget, and shows the top matches (or an honest “nothing matched” with popular alternatives).</p>
+    <p class="mod">Intent <code>product_search</code> → search engine (<code>nepShopSearchAdapter.searchProducts</code>).</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">which is the cheapest?</p>
+    <p class="does">Names the lowest-priced item from the list just shown, answered purely from memory.</p>
+    <p class="mod">Intent <code>follow_up</code> → conversation memory, no new DB call.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">does the first one have a warranty?</p>
+    <p class="does">Quotes the matching sentence(s) from that product’s real description, or honestly says the listing does not mention it.</p>
+    <p class="mod">Intent <code>product_qa</code> → <code>productQA</code> extraction (+ optional LLM phrasing).</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">which of these has a graphics card?</p>
+    <p class="does">Checks every shown product’s listing and names only the ones whose description actually supports it.</p>
+    <p class="mod">Intent <code>multi_qa</code> → per-product extraction (+ optional LLM phrasing over matched excerpts only).</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">add the cheapest to my cart</p>
+    <p class="does">Resolves the item, checks live stock, and the client adds it through the normal cart flow — confirming only if the add succeeds.</p>
+    <p class="mod">Intent <code>add_to_cart</code> → live product record + client cart action.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">what's in my cart?</p>
+    <p class="does">Shows ticked (ready-to-checkout, with totals), not-ticked, and stale items, plus a “Go to cart” handoff.</p>
+    <p class="mod">Intent <code>view_cart</code> → shared cart-summary builder (<code>cartActions.getCartContents</code>).</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">where is my order?</p>
+    <p class="does">Shows active orders with per-package status; nudges the return window if a delivered package is still returnable.</p>
+    <p class="mod">Intent <code>order_tracking</code> → real Order + Shipment records (<code>orderActions</code>).</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">show my recent orders</p>
+    <p class="does">Lists the last few orders as cards; offers the full Orders page when there are more.</p>
+    <p class="mod">Intent <code>order_history</code> → real Order records.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">when will the second one arrive?</p>
+    <p class="does">Answers about the second order in the list just shown, reading its real per-package status (no invented ETA).</p>
+    <p class="mod">Intent <code>order_follow_up</code> → conversation memory + order status.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">cancel my first order</p>
+    <p class="does">Identifies the order/package and asks to confirm, naming the shop and the amount owed. It cancels <em>only</em> after a “yes”.</p>
+    <p class="mod">Intent <code>cancel_order</code> → confirm gate; client calls the existing cancel endpoint.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">can I return my airpods?</p>
+    <p class="does">Checks the delivered package and its window, then explains both possible refund outcomes (seller-fault vs change-of-mind, minus the pickup fee) — never a single promised figure.</p>
+    <p class="mod">Intent <code>return_refund</code> → real returns math (<code>returnActions</code>).</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 5 · CHATBOT — WEB vs MOBILE                                          -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>4 · The Chatbot — Web vs Mobile Parity</h2>
+  <p>
+    Both clients talk to the same endpoint with the same message/context
+    contract, so their behaviour is deliberately identical. They differ only in
+    presentation and platform lifecycle.
+  </p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:30%">Aspect</th><th style="width:35%">Web (<code>ChatWidget.jsx</code>)</th><th style="width:35%">Mobile (<code>app/(customer)/chat.js</code>)</th></tr></thead>
+    <tbody>
+      <tr><td>Surface</td><td>Floating widget (bubble, bottom-right) overlaid on the page; opens/closes in place.</td><td>Full-screen dedicated route, opened from a Home floating action button (<code>ChatFab</code>).</td></tr>
+      <tr><td>API contract</td><td colspan="2" style="text-align:center;"><em>Identical</em> — <code>POST /chatbot/message</code> with <code>{ message, context, mode }</code>.</td></tr>
+      <tr><td>Conversation memory</td><td colspan="2" style="text-align:center;"><em>Identical</em> — opaque <code>context</code> stored client-side and echoed back each turn.</td></tr>
+      <tr><td>Default mode / toggle</td><td>Conversational; toggle “⚡ Fast / 💬 Conversational”.</td><td>Conversational; toggle “⚡ Fast / 💬 Conv”.</td></tr>
+      <tr><td>Opening greeting</td><td colspan="2" style="text-align:center;"><em>Identical</em> — generated client-side from the signed-in user (name + time of day), no server call.</td></tr>
+      <tr><td>Product &amp; order cards</td><td colspan="2" style="text-align:center;"><em>Identical</em> — single- and multi-package order cards, per-package money, returnable tag, return-count badges.</td></tr>
+      <tr><td>Client actions</td><td colspan="2" style="text-align:center;"><em>Identical</em> — <code>add_to_cart</code>, <code>add_to_cart_all</code>, <code>cancel_order</code> (with a double-fire guard); mandatory cancel confirm.</td></tr>
+      <tr><td>Handoffs</td><td colspan="2" style="text-align:center;"><em>Identical</em> — “Open My Orders” and “Go to cart” buttons.</td></tr>
+      <tr><td>Cart-add plumbing</td><td>Via the web <code>CartContext</code> (<code>useCart</code>) hook.</td><td>Via the mobile cart utility (<code>src/utils/cart</code>). Same outcome and confirmation logic.</td></tr>
+      <tr><td>Platform lifecycle</td><td>Standard React component; messages reset on page refresh.</td><td>Hidden Expo route: greeting seeded via <code>useFocusEffect</code>, Android hardware-back handling, keyboard-avoiding layout and safe-area insets.</td></tr>
+      <tr><td>Message persistence</td><td colspan="2" style="text-align:center;">In-memory only on both — no chat history is stored server-side.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 6 · SEARCH — WHAT & HOW                                              -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>5 · Search — What It Does &amp; How It Works</h2>
+  <p>
+    NepShop’s product search is a <strong>hybrid</strong> engine: it combines
+    old-fashioned literal word matching with modern <em>semantic</em> (meaning-based)
+    matching, then, only when it is genuinely stuck, asks a language model for
+    help. The same engine powers both the web search page and the chatbot’s
+    <code>product_search</code> intent. Crucially, it is <strong>catalogue-driven</strong>:
+    its vocabulary is built live from whatever products currently exist, so a
+    product added moments before a demo is immediately searchable and
+    typo-correctable — no config file to update.
+  </p>
+
+  <h3>Retrieval flow, end to end</h3>
+  <ol>
+    <li><strong>Fetch candidates.</strong> All active, in-stock products are read
+      from MongoDB (cached for 60&nbsp;s to avoid re-hitting the DB on every keystroke).</li>
+    <li><strong>Parse the query.</strong> The engine builds a spell-correction and
+      relevance vocabulary from those live products, expands abbreviations
+      (“tv” → television, “ac” → air conditioner) and applies brand spell-fixes.</li>
+    <li><strong>Score semantically.</strong> The query is turned into a 384-number
+      meaning-vector and compared against each product’s stored embedding. This is
+      what lets a product whose text never contains the search word still surface
+      by meaning.</li>
+    <li><strong>Rank.</strong> A weighted blend of literal text match (name &gt;
+      category &gt; description), semantic similarity, and budget/colour/purpose
+      intent produces the ordered results. Rating/popularity act only as a
+      tie-breaker, never enough to push a less-relevant item above a more-relevant one.</li>
+    <li><strong>Adaptive semantic cutoff.</strong> Rather than one fixed threshold
+      (which unfairly drops weaker-scoring categories like clothing), the engine
+      keeps a meaning-only match only if it clears a low absolute <em>floor</em>
+      <strong>and</strong> sits within a <em>margin</em> of this query’s own top
+      score — so noise is dropped wherever the real gap sits, per query.</li>
+    <li><strong>Relevance judge (LLM, conditional).</strong> When a result pool has
+      no strong literal anchor to trust, a language model is asked which candidates
+      a shopper would genuinely expect. It may only <em>veto</em> items already
+      found — never add or reorder — and top semantic scorers are protected from
+      the veto. Any failure keeps every result (“fails open”).</li>
+    <li><strong>Query-understanding rescue (LLM, conditional).</strong> If the
+      engine extracted no product terms at all, or found nothing, a language model
+      translates the query into a few generic product nouns and the search is
+      re-run with them. The re-run is adopted only if it actually finds something.</li>
+    <li><strong>Zero-result rescue.</strong> If it still finds nothing, the reply is
+      an honest “no match” alongside trending products (category-specific when a
+      category was detected) — never random items pretending to match.</li>
+  </ol>
+
+  <h3>The embedding pipeline &amp; vector index</h3>
+  <ul>
+    <li><strong>Model:</strong> <code>Xenova/bge-small-en-v1.5</code> (BGE-small),
+      producing <strong>384-dimensional</strong> vectors. Search queries get the
+      BGE query prefix; product text does not (the model’s intended asymmetry).</li>
+    <li><strong>When products are embedded:</strong> on product create and update
+      the backend embeds <code>name · category · description</code> and stores the
+      vector on the product (a hidden <code>embedding</code> field, loaded only when
+      search opts in). Embedding failure is non-fatal — the product still saves and
+      literal search still finds it.</li>
+    <li><strong>How queries are matched:</strong> the primary path is
+      <strong>MongoDB Atlas Vector Search</strong> — a <code>$vectorSearch</code>
+      aggregation against an ANN index (default name
+      <code>product_embedding_index</code>, path <code>embedding</code>, 384 dims,
+      cosine). If that index is not built or the aggregation errors, the engine
+      falls back to an in-Node brute-force cosine over the stored vectors. Both
+      paths use the same thresholds, so results behave identically.</li>
+  </ul>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 7 · SEARCH — DEMO SCRIPT                                             -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>6 · Search — Demo Script</h2>
+  <p class="small muted">
+    Queries chosen to show the three behaviours in turn: exact literal matching,
+    meaning-based matching, and the honest fallbacks. Exact results depend on the
+    live catalogue.
+  </p>
+
+  <div class="demo">
+    <p class="say">iphone</p>
+    <p class="does"><strong>Exact match.</strong> A direct name/brand hit ranks first; this is the plain literal path with no LLM involvement.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">samsng</p>
+    <p class="does"><strong>Exact match after spell-fix.</strong> The brand typo is corrected to “samsung” from the spell-correction table before matching.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">laptop</p>
+    <p class="does"><strong>Semantic.</strong> Products in the right category surface even when their text does not literally say “laptop”, because the meaning-vector matches; the adaptive cutoff keeps the real matches and drops near-noise.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">tv</p>
+    <p class="does"><strong>Abbreviation + semantic.</strong> “tv” expands to “television”, then matches by meaning; the relevance judge can veto an unrelated item (e.g. a stray laptop) that only scored semantically.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">something to read</p>
+    <p class="does"><strong>Query-understanding rescue.</strong> No product term is present, so a language model reinterprets it into generic nouns (e.g. “book”) and the search re-runs with those.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">cheap wireless earbuds</p>
+    <p class="does"><strong>Intent-aware.</strong> The budget word (“cheap”) biases ranking toward lower-priced matches while “wireless earbuds” drives the literal + semantic match.</p>
+  </div>
+
+  <div class="demo">
+    <p class="say">asdfghjkl</p>
+    <p class="does"><strong>Fallback.</strong> Gibberish yields no genuine match; the reply is an honest “nothing matched” with trending products offered instead — never a fake match.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 8 · TECH STACK                                                       -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>7 · Technology Stack</h2>
+  <p class="small muted">Used across both the chatbot and the search module.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:22%">Technology</th><th style="width:40%">Used for</th><th style="width:38%">Why this, over alternatives</th></tr></thead>
+    <tbody>
+      <tr><td>Node.js + Express (CommonJS)</td><td>Backend API, chatbot orchestration, search pipeline.</td><td>Single language across a JS stack; already the app’s backend, so the chatbot is “just a new reader” of existing models.</td></tr>
+      <tr><td>MongoDB + Mongoose</td><td>Products, orders, shipments, returns, cart — the grounding data.</td><td>Document model fits nested orders/shipments; already the system of record, so the bot reads the same truth as every other page.</td></tr>
+      <tr><td>MongoDB Atlas Vector Search</td><td>Primary semantic retrieval (<code>$vectorSearch</code> ANN index).</td><td>Keeps vectors <em>in the database</em> next to the products — no separate vector store to run; scales to large catalogues via ANN. Brute-force cosine is the built-in fallback.</td></tr>
+      <tr><td>BGE-small-en-v1.5 (via <code>@huggingface/transformers</code>)</td><td>Turning text into 384-dim meaning-vectors (products and queries, and chatbot Q&amp;A sentence matching).</td><td>Small, fast, strong retrieval quality; runs in-process locally and can be offloaded to a hosted Space. Larger models cost more memory than the free tier allows.</td></tr>
+      <tr><td>Hugging Face Space (optional)</td><td>Hosting the embedding model off the API process.</td><td>Keeps the ~heavy model out of a memory-constrained server; toggled purely by an env var, no code change.</td></tr>
+      <tr><td>Groq API — Llama-3.3-70B (OpenAI-compatible)</td><td>Primary LLM for conversational routing, product Q&amp;A phrasing, search relevance judging &amp; query-understanding rescue.</td><td>Free tier, no card, ~1&nbsp;s responses from a 70B-class model — far more natural and faster than a local 3B on CPU.</td></tr>
+      <tr><td>Ollama — Llama-3.2-3B (local, optional)</td><td>Local fallback LLM for the same phrasing/classification tasks.</td><td>Runs fully offline for development; keeps the LLM features working without any API key. Too large for the free hosting tier, so it is local-only.</td></tr>
+      <tr><td>Rule-based router + templates</td><td>Deterministic intent detection and reply phrasing.</td><td>Instant, free, and always available — the guaranteed floor beneath every LLM feature, so the assistant degrades gracefully rather than failing.</td></tr>
+      <tr><td>React (Vite) &amp; React Native (Expo)</td><td>Web chat widget and mobile chat screen.</td><td>Shared component model and one API contract keep web/mobile behaviour in parity.</td></tr>
+      <tr><td>axios / fetch</td><td>HTTP to Groq, the HF Space, and the app’s own API.</td><td>Already a project dependency; simple timeouts and fallbacks per call.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 9 · BENEFITS & LIMITATIONS                                           -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>8 · Benefits &amp; Limitations</h2>
+
+  <h3>Chatbot</h3>
+  <h4>Benefits</h4>
+  <ul>
+    <li><strong>Grounded and honest by construction</strong> — every fact comes
+      from real records; when it doesn’t know, it says so rather than guessing.</li>
+    <li><strong>Works with or without an LLM</strong> — the rule router and
+      templates guarantee a usable assistant even when no model is reachable.</li>
+    <li><strong>Real conversational memory</strong> — follow-ups, ordinals and
+      confirmations work naturally, yet the server stays stateless and
+      restart-proof.</li>
+    <li><strong>Safe actions</strong> — cancellation is always confirm-gated and
+      executed only through the existing endpoint; the bot never mutates data
+      directly.</li>
+  </ul>
+  <h4>Limitations</h4>
+  <ul>
+    <li><strong>Fixed intent set</strong> — anything outside the catalogue defaults
+      to product search; it is a shopping assistant, not open-ended chat.</li>
+    <li><strong>LLM phrasing needs a key in production</strong> — without Groq
+      configured (and Ollama being local-only), Q&amp;A and conversational mode fall
+      back to the more literal template/extraction wording.</li>
+    <li><strong>Chat history is ephemeral</strong> — messages reset on refresh /
+      screen exit; only the compact <code>context</code> travels between turns.</li>
+    <li><strong>Rate limit is per-instance in memory</strong> — it assumes a single
+      server process and resets on restart.</li>
+  </ul>
+
+  <h3>Search</h3>
+  <h4>Benefits</h4>
+  <ul>
+    <li><strong>Understands meaning, not just keywords</strong> — semantic matching
+      surfaces relevant products that literal search would miss.</li>
+    <li><strong>Catalogue-driven</strong> — vocabulary and typo-correction rebuild
+      from live inventory, so new products are instantly searchable.</li>
+    <li><strong>Honest about failure</strong> — a genuine no-match returns trending
+      alternatives instead of pretending, and every LLM step fails open.</li>
+    <li><strong>Scales</strong> — Atlas Vector Search uses a real ANN index rather
+      than looping over every vector in Node.</li>
+  </ul>
+  <h4>Limitations</h4>
+  <ul>
+    <li><strong>Embedding quality caps relevance</strong> — a small model
+      occasionally scores a weak category near the noise band, which is exactly why
+      the adaptive cutoff and LLM judge exist.</li>
+    <li><strong>LLM steps add latency &amp; non-determinism</strong> — the rescue and
+      relevance judge can vary between identical runs; short-lived caching and
+      top-scorer protection mitigate but don’t eliminate this.</li>
+    <li><strong>Vector path depends on setup</strong> — full Atlas Vector Search
+      needs the index built on the cluster; otherwise it silently uses the slower
+      brute-force fallback.</li>
+    <li><strong>Ranking is tuned to the current catalogue</strong> — thresholds were
+      measured against real data and may need re-checking as the catalogue grows.</li>
+  </ul>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<!-- 10 · DEPLOYMENT ON RENDER                                            -->
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<section class="page-break">
+  <h2>9 · Deployment Behaviour on Render</h2>
+  <p>
+    Both modules are designed to <strong>degrade gracefully</strong> rather than
+    break when deployed. What actually runs depends on which environment variables
+    are set on the host. The repository contains no <code>render.yaml</code>, so the
+    table below is derived from how the code reads its environment and what it
+    falls back to.
+  </p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th style="width:24%">Capability</th><th style="width:20%">Deployed on Render</th><th style="width:20%">Local dev</th><th style="width:36%">Why / how</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Core chatbot (routing, grounding, templates)</td>
+        <td>✅ Works</td>
+        <td>✅ Works</td>
+        <td>Pure Node + MongoDB; no external model needed. The guaranteed floor.</td>
+      </tr>
+      <tr>
+        <td>LLM phrasing &amp; conversational mode (Groq)</td>
+        <td>✅ Only if <code>GROQ_API_KEY</code> is set</td>
+        <td>✅ If key set</td>
+        <td>Groq is a hosted API, so it works from Render <em>when the key is configured there</em>. Without it, replies use the deterministic template/extraction path.</td>
+      </tr>
+      <tr>
+        <td>Local LLM (Ollama, Llama-3.2-3B)</td>
+        <td>❌ Local-only</td>
+        <td>✅ If Ollama running</td>
+        <td>Ollama is reached at <code>localhost:11434</code>; there is no such server on Render, and the ~2&nbsp;GB model exceeds the 512&nbsp;MB free tier. The availability check fails fast and the code moves on — a no-op, not an error.</td>
+      </tr>
+      <tr>
+        <td>Query embeddings — in-Node BGE</td>
+        <td>⚠️ Fallback, memory-heavy</td>
+        <td>✅ Default</td>
+        <td>Loading the model inside the API process is fine locally but strains the 512&nbsp;MB free tier — which is exactly why the hosted-Space path exists.</td>
+      </tr>
+      <tr>
+        <td>Query embeddings — Hugging Face Space</td>
+        <td>✅ If <code>HF_SPACE_URL</code> is set</td>
+        <td>Optional</td>
+        <td>Offloads the model to a hosted Space, keeping it out of the API’s memory. Enabled purely by the env var; Node embedding remains the safety fallback.</td>
+      </tr>
+      <tr>
+        <td>Semantic retrieval — Atlas Vector Search</td>
+        <td>✅ If the vector index is built</td>
+        <td>✅ If built</td>
+        <td>Runs in Atlas itself, so it is unaffected by the web tier’s memory. Needs the <code>product_embedding_index</code> created on the cluster.</td>
+      </tr>
+      <tr>
+        <td>Semantic retrieval — brute-force fallback</td>
+        <td>✅ Works</td>
+        <td>✅ Works</td>
+        <td>Used automatically when the Atlas index is absent or errors; fine for a small/medium catalogue.</td>
+      </tr>
+      <tr>
+        <td>Search relevance judge &amp; query-understanding rescue</td>
+        <td>✅ Only if <code>GROQ_API_KEY</code> is set</td>
+        <td>✅ If key/Ollama available</td>
+        <td>These reuse the same LLM chain. With no model reachable they “fail open”: the search still returns its literal/semantic results.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Free-tier cold start &amp; in-memory state</h3>
+  <ul>
+    <li><strong>Cold start.</strong> A Render free web service spins down after
+      inactivity; the first request after idle pays a start-up delay before any of
+      the above runs. Because conversation state lives on the client
+      (<code>context</code> round-trip), a cold start or restart never loses a
+      conversation.</li>
+    <li><strong>In-memory caches reset on restart.</strong> The 60-second search
+      candidate cache, the rescue caches, and the per-user chat rate-limit counter
+      are all in-process — they are rebuilt after any restart and assume a single
+      instance.</li>
+    <li><strong>Model warm-up is a no-op on Render.</strong> The Ollama warm-up
+      fired at start-up simply detects no local model and returns immediately, so it
+      adds no cost to the deployed process.</li>
+  </ul>
+
+  <div class="callout small">
+    <strong>Deployment summary.</strong> On Render the app always has a working
+    chatbot and a working search. The <em>richer</em> behaviours — natural LLM
+    phrasing, conversational routing, the relevance judge and rescue — switch on
+    when <code>GROQ_API_KEY</code> is present; the <em>lightest</em> embedding
+    setup uses a hosted Space via <code>HF_SPACE_URL</code>; and semantic search is
+    fastest once the Atlas vector index is built. Everything else falls back
+    automatically.
+  </div>
+</section>
